@@ -106,20 +106,20 @@
 
 ### Acceptance Criteria
 
-- [ ] `system.getInfo` returns valid system information
-- [ ] `system.getMetrics` returns CPU, memory, disk, and network data
-- [ ] `/api/metrics/stream` emits SSE events every ~2 seconds
-- [ ] `apps.create` writes a compose file and metadata to disk, returns the app object
-- [ ] `apps.list` returns all apps, `apps.get` returns a single app
-- [ ] `apps.updateCompose` validates YAML and rewrites the file
-- [ ] `apps.delete` removes the app directory
-- [ ] `docker.start` runs `docker compose up -d` for the app's compose file
-- [ ] `docker.stop` runs `docker compose down` for the app's compose file
-- [ ] `docker.getContainers` returns container info for a running stack
-- [ ] `/api/docker/events` streams container lifecycle events
-- [ ] `/api/logs/:containerId` streams container logs
-- [ ] Invalid compose YAML is rejected with a descriptive error
-- [ ] All procedures have Zod input validation
+- [x] `system.getInfo` returns valid system information
+- [x] `system.getMetrics` returns CPU, memory, disk, and network data
+- [x] `/api/metrics/stream` emits SSE events every ~2 seconds
+- [x] `apps.create` writes a compose file and metadata to disk, returns the app object
+- [x] `apps.list` returns all apps, `apps.get` returns a single app
+- [x] `apps.updateCompose` validates YAML and rewrites the file
+- [x] `apps.delete` removes the app directory
+- [x] `docker.start` runs `docker compose up -d` for the app's compose file
+- [x] `docker.stop` runs `docker compose down` for the app's compose file
+- [x] `docker.getContainers` returns container info for a running stack
+- [x] `/api/docker/events` streams container lifecycle events
+- [x] `/api/logs/:containerId` streams container logs
+- [x] Invalid compose YAML is rejected with a descriptive error
+- [x] All procedures have Zod input validation
 
 ---
 

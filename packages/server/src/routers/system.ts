@@ -1,4 +1,6 @@
 import { router, publicProcedure } from "../trpc/trpc.js";
+import si from "systeminformation";
+import * as metricsService from "../services/metrics.js";
 
 export const systemRouter = router({
   ping: publicProcedure.query(() => {
@@ -9,14 +11,33 @@ export const systemRouter = router({
     };
   }),
 
-  getInfo: publicProcedure.query(() => {
+  getInfo: publicProcedure.query(async () => {
+    const [osInfo, time] = await Promise.all([
+      si.osInfo(),
+      si.time(),
+    ]);
+
+    let dockerVersion: string | null = null;
+    try {
+      const dockerInfo = await si.dockerInfo() as { version?: string };
+      dockerVersion = dockerInfo.version || null;
+    } catch {
+      dockerVersion = null;
+    }
+
     return {
-      hostname: "deckos-dev",
-      os: process.platform,
+      hostname: osInfo.hostname,
+      os: osInfo.platform,
+      osDistro: osInfo.distro,
+      osRelease: osInfo.release,
+      osArch: osInfo.arch,
       nodeVersion: process.version,
-      uptime: process.uptime(),
-      // Docker version will be added in Phase 1
-      dockerVersion: null,
+      uptime: time.uptime,
+      dockerVersion,
     };
+  }),
+
+  getMetrics: publicProcedure.query(async () => {
+    return await metricsService.getOneShotMetrics();
   }),
 });
