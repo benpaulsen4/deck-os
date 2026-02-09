@@ -1,0 +1,68 @@
+/* ============================================
+   DECKOS DESIGN TOKENS
+   Retro-Future Brutalist Console
+   ============================================ */
+
+:root {
+  /* ---- Base Backgrounds ---- */
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #141414;
+  --bg-tertiary: #1e1e1e;
+  --bg-input: #0f0f0f;
+
+  /* ---- Borders ---- */
+  --border-primary: #2a2a2a;
+  --border-active: #4a4a4a;
+  --border-accent: #00ff88;
+
+  /* ---- Text ---- */
+  --text-primary: #e0e0e0;
+  --text-secondary: #888888;
+  --text-muted: #555555;
+  --text-inverse: #0a0a0a;
+
+  /* ---- Status ---- */
+  --status-running: #00ff88;
+  --status-stopped: #ff4444;
+  --status-warning: #ffaa00;
+  --status-info: #00aaff;
+  --status-neutral: #666666;
+
+  /* ---- Accent ---- */
+  --accent-primary: #00ff88;
+  --accent-hover: #00cc6a;
+  --accent-muted: rgba(0, 255, 136, 0.1);
+
+  /* ---- Metric Colors ---- */
+  --meter-cpu: #00aaff;
+  --meter-memory: #ff6b00;
+  --meter-disk: #aa44ff;
+  --meter-network: #00ff88;
+
+  /* ---- Typography ---- */
+  --font-mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  --font-display: "Space Mono", "JetBrains Mono", monospace;
+
+  /* ---- Type Scale ---- */
+  --text-xs: 0.6875rem;
+  --text-sm: 0.75rem;
+  --text-base: 0.8125rem;
+  --text-md: 0.875rem;
+  --text-lg: 1rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.5rem;
+
+  /* ---- Spacing (8px grid) ---- */
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+  --space-4: 32px;
+  --space-6: 48px;
+  --space-8: 64px;
+
+  /* ---- Transitions ---- */
+  --transition-fast: 80ms linear;
+  --transition-base: 120ms linear;
+  --transition-meter: 500ms linear;
+}

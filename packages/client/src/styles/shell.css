@@ -1,0 +1,101 @@
+/* ============================================
+   DECKOS APP SHELL
+   Top bar + layout structure
+   ============================================ */
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-content {
+  flex: 1;
+  padding-top: 48px; /* topbar height */
+}
+
+/* ---- Top Bar ---- */
+
+.topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-primary);
+  z-index: 100;
+}
+
+.topbar-inner {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  height: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 var(--space-3);
+}
+
+.topbar-logo {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--accent-primary);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.topbar-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+.topbar-link {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  padding: 14px 0;
+  border-bottom: 2px solid transparent;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.topbar-link:hover {
+  color: var(--text-primary);
+}
+
+.topbar-link--active {
+  color: var(--accent-primary);
+  border-bottom-color: var(--accent-primary);
+}
+
+.topbar-host {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+/* ---- Responsive ---- */
+
+@media (max-width: 768px) {
+  .topbar-inner {
+    padding: 0 var(--space-2);
+  }
+
+  .topbar-nav {
+    gap: var(--space-2);
+  }
+
+  .topbar-link {
+    font-size: var(--text-xs);
+  }
+
+  .topbar-host {
+    display: none;
+  }
+}

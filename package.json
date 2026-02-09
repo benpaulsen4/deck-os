@@ -1,0 +1,21 @@
+{
+  "name": "deckos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted homelab management platform",
+  "scripts": {
+    "dev": "concurrently -n client,server -c cyan,green \"pnpm --filter @deckos/client dev\" \"pnpm --filter @deckos/server dev\"",
+    "build": "pnpm --filter @deckos/server build && pnpm --filter @deckos/client build",
+    "typecheck": "pnpm -r typecheck",
+    "clean": "pnpm -r clean"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.4"
+}

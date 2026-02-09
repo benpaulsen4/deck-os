@@ -1,0 +1,103 @@
+@import "./tokens.css";
+@import "./reset.css";
+
+/* ============================================
+   DECKOS GLOBAL STYLES
+   ============================================ */
+
+/* ---- Utility: Labels ---- */
+.label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+/* ---- Utility: Status Colors ---- */
+.status-running {
+  color: var(--status-running);
+}
+.status-stopped {
+  color: var(--status-stopped);
+}
+.status-warning {
+  color: var(--status-warning);
+}
+.status-info {
+  color: var(--status-info);
+}
+.status-neutral {
+  color: var(--status-neutral);
+}
+
+/* ---- Scanning Line Loader ---- */
+@keyframes scan {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.loading-scan {
+  position: relative;
+  overflow: hidden;
+}
+
+.loading-scan::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--accent-primary);
+  animation: scan 1.5s linear infinite;
+}
+
+/* ---- Status Pulse ---- */
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.status-pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* ---- Page Container ---- */
+.page-container {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: var(--space-3);
+  width: 100%;
+}
+
+/* ---- Panel ---- */
+.panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+}
+
+/* ---- Page Header ---- */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
