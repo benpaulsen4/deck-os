@@ -175,18 +175,18 @@
 
 ### Acceptance Criteria
 
-- [ ] App loads with the DeckOS shell (top bar, correct fonts, dark theme)
-- [ ] Navigation between routes works (Dashboard, Apps, Settings stubs)
-- [ ] Dashboard shows system info bar with live data
-- [ ] Four metric cards display CPU, memory, disk, network with real-time updates
-- [ ] Sparklines render and animate with incoming data
-- [ ] Usage bars animate on value changes
-- [ ] App launcher grid shows installed apps with correct status
-- [ ] Clicking an app tile opens its URL in a new tab
-- [ ] Empty state displays correctly when no apps exist
-- [ ] Layout is responsive across breakpoints (1440+, 1024, 768, mobile)
-- [ ] All text uses JetBrains Mono / Space Mono fonts
-- [ ] Design matches the brutalist console aesthetic described in `design.md`
+- [x] App loads with the DeckOS shell (top bar, correct fonts, dark theme)
+- [x] Navigation between routes works (Dashboard, Apps, Settings stubs)
+- [x] Dashboard shows system info bar with live data
+- [x] Four metric cards display CPU, memory, disk, network with real-time updates
+- [x] Sparklines render and animate with incoming data
+- [x] Usage bars animate on value changes
+- [x] App launcher grid shows installed apps with correct status
+- [x] Clicking an app tile opens its URL in a new tab
+- [x] Empty state displays correctly when no apps exist
+- [x] Layout is responsive across breakpoints (1440+, 1024, 768, mobile)
+- [x] All text uses JetBrains Mono / Space Mono fonts
+- [x] Design matches the brutalist console aesthetic described in `design.md`
 
 ---
 
@@ -232,16 +232,16 @@
 
 ### Acceptance Criteria
 
-- [ ] User can navigate to `/apps/new` and see the creation form
-- [ ] CodeMirror editor renders with YAML syntax highlighting and DeckOS dark theme
-- [ ] Pasting valid compose YAML and clicking "Create & Deploy" creates the app and starts the stack
-- [ ] Invalid YAML shows an error message
-- [ ] App detail page shows correct app information and container status
-- [ ] Start/Stop/Restart buttons trigger compose operations and UI updates
-- [ ] Container table shows all containers with accurate status
-- [ ] Compose editor allows editing and saving the compose file
-- [ ] Delete button removes the app (with confirmation)
-- [ ] Pull operation shows progress feedback
+- [x] User can navigate to `/apps/new` and see the creation form
+- [x] CodeMirror editor renders with YAML syntax highlighting and DeckOS dark theme
+- [x] Pasting valid compose YAML and clicking "Create & Deploy" creates the app and starts the stack
+- [x] Invalid YAML shows an error message
+- [x] App detail page shows correct app information and container status
+- [x] Start/Stop/Restart buttons trigger compose operations and UI updates
+- [x] Container table shows all containers with accurate status
+- [x] Compose editor allows editing and saving the compose file
+- [x] Delete button removes the app (with confirmation)
+- [x] Pull operation shows progress feedback
 
 ---
 

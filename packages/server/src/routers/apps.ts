@@ -17,6 +17,22 @@ export const appsRouter = router({
       return app;
     }),
 
+  validateCompose: publicProcedure
+    .input(z.object({ composeYaml: z.string() }))
+    .mutation(async ({ input }) => {
+      try {
+        const { parse } = await import("yaml");
+        const { ComposeFileSchema } = await import("../lib/schema.js");
+        
+        const parsed = parse(input.composeYaml);
+        ComposeFileSchema.parse(parsed);
+        
+        return { valid: true, message: "Compose YAML is valid" };
+      } catch (error: any) {
+        return { valid: false, message: error.message || "Invalid compose YAML" };
+      }
+    }),
+
   create: publicProcedure
     .input(
       z.object({

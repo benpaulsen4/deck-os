@@ -1,6 +1,7 @@
 import { createRootRoute, Link, Outlet } from "@tanstack/react-router";
 import { useTRPC } from "../trpc";
 import { useQuery } from "@tanstack/react-query";
+import { ToastContainer } from "../components/layout/ToastContainer";
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -13,6 +14,7 @@ function RootLayout() {
       <main className="app-content">
         <Outlet />
       </main>
+      <ToastContainer />
     </div>
   );
 }
