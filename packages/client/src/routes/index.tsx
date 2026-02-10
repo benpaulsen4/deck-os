@@ -1,10 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useTRPC } from "../trpc";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useMetricsStream } from "../hooks/useMetricsStream";
+import { useAppStatus } from "../hooks/useAppStatus";
 import { MetricsCard } from "../components/layout/MetricsCard";
 import { SystemInfoBar } from "../components/layout/SystemInfoBar";
-import { AppTile } from "../components/layout/AppTile";
+import { AppLauncherGrid } from "../components/layout/AppLauncherGrid";
+import { useToastStore } from "../stores/toast";
+import { trpcClient } from "../trpc";
 import type { SystemMetrics } from "../../../server/src/lib/schema.js";
 
 export const Route = createFileRoute("/")({
@@ -13,8 +16,18 @@ export const Route = createFileRoute("/")({
 
 function DashboardPage() {
   const trpc = useTRPC();
+  const { addToast } = useToastStore();
   const metrics = useMetricsStream();
   const { data: apps } = useQuery(trpc.apps.list.queryOptions());
+  
+  useAppStatus();
+
+  const reorderMutation = useMutation({
+    mutationFn: async (orderedIds: string[]) => await trpcClient.apps.reorder.mutate({ orderedIds }),
+    onError: (err: any) => {
+      addToast(`Failed to reorder: ${err.message}`, "error");
+    },
+  });
 
   const formatBytes = (bytes: number): string => {
     if (bytes === 0) return "0 B";
@@ -110,11 +123,12 @@ function DashboardPage() {
           APPS
         </div>
         {apps && apps.length > 0 ? (
-          <div className="app-launcher-grid">
-            {apps.map((app) => (
-              <AppTile key={app.id} app={app} />
-            ))}
-          </div>
+          <AppLauncherGrid
+            apps={apps}
+            onReorder={(orderedIds) => {
+              reorderMutation.mutate(orderedIds);
+            }}
+          />
         ) : (
           <div className="panel" style={{ padding: "var(--space-6)" }}>
             <div className="app-launcher-empty">

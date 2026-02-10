@@ -198,3 +198,27 @@ export async function getStackStatus(appId: string): Promise<StackStatus> {
 export function getDocker(): Docker {
   return docker;
 }
+
+export async function getContainerStats(containerId: string): Promise<{ cpu: number; memory: number; memoryBytes: number } | null> {
+  try {
+    const container = docker.getContainer(containerId);
+    const stats = await container.stats({ stream: false }) as any;
+    
+    const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
+    const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
+    const cpuPercent = (cpuDelta / systemDelta) * stats.cpu_stats.online_cpus * 100;
+    
+    const memoryUsage = stats.memory_stats.usage || 0;
+    const memoryLimit = stats.memory_stats.limit || 1;
+    const memoryPercent = (memoryUsage / memoryLimit) * 100;
+    
+    return {
+      cpu: Math.round(cpuPercent),
+      memory: Math.round(memoryPercent),
+      memoryBytes: memoryUsage,
+    };
+  } catch (error) {
+    console.error(`Failed to get stats for container ${containerId}:`, error);
+    return null;
+  }
+}

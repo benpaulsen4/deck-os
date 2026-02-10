@@ -281,6 +281,10 @@
   background: var(--status-warning);
 }
 
+.app-tile-status-dot[data-status="restarting"] {
+  background: var(--status-warning);
+}
+
 .app-tile-gear {
   position: absolute;
   top: var(--space-2);
@@ -301,4 +305,20 @@
 .app-launcher-empty a {
   color: var(--accent-primary);
   text-decoration: underline;
+}
+
+/* ---- App Tile Flash Animation ---- */
+.app-tile-flash {
+  animation: flash 200ms linear;
+}
+
+@keyframes flash {
+  0% {
+    background: var(--accent-muted);
+    border-color: var(--accent-primary);
+  }
+  100% {
+    background: var(--bg-secondary);
+    border-color: var(--border-primary);
+  }
 }

@@ -1,25 +1,64 @@
 import { type App } from "../../../../server/src/lib/schema.js";
 import { Link } from "@tanstack/react-router";
+import { useAppStatusStore } from "../../stores/appStatus";
+import { useQuery } from "@tanstack/react-query";
+import { trpcClient } from "../../trpc";
+import type { AppStatus } from "../../stores/appStatus";
 
 interface AppTileProps {
   app: App;
 }
 
 export function AppTile({ app }: AppTileProps) {
+  const appStatus = useAppStatusStore((state) => state.appStatuses);
+  const flashStates = useAppStatusStore((state) => state.flashStates);
   
-  const getStatusLabel = (): string => {
-    return "RUN";
+  const { data: stackStatus } = useQuery({
+    queryKey: ["stackStatus", app.id],
+    queryFn: async () => await trpcClient.docker.getStatus.query({ appId: app.id }),
+    refetchInterval: 5000,
+  });
+
+  const liveStatus: AppStatus = appStatus[app.id] || "unknown";
+  const isFlashing = flashStates[app.id];
+
+  const getActualStatus = (): AppStatus => {
+    if (liveStatus && liveStatus !== "unknown") {
+      return liveStatus;
+    }
+    if (!stackStatus) {
+      return "unknown";
+    }
+    if (stackStatus.running > 0) {
+      return "running";
+    }
+    if (stackStatus.stopped > 0) {
+      return "stopped";
+    }
+    if (stackStatus.restarting > 0) {
+      return "restarting";
+    }
+    return "unknown";
   };
 
-  const getStatusValue = (): "running" | "stopped" | "warning" | "pulling" => {
-    return "running";
+  const status = getActualStatus();
+
+  const getStatusLabel = (): string => {
+    switch (status) {
+      case "running": return "RUN";
+      case "stopped": return "STOP";
+      case "restarting": return "RESTARTING";
+      case "warning": return "WARN";
+      case "pulling": return "PULLING";
+      default: return "UNKNOWN";
+    }
   };
 
   const iconUrl = app.metadata.icon || "";
   const firstLetter = app.metadata.name.charAt(0).toUpperCase();
 
   return (
-    <div className="app-tile">
+    <div className={`app-tile ${isFlashing ? "app-tile-flash" : ""}`}>
       <a
         href={app.metadata.url || "#"}
         target={app.metadata.url ? "_blank" : undefined}
@@ -36,10 +75,7 @@ export function AppTile({ app }: AppTileProps) {
         </div>
         <span className="app-tile-name">{app.metadata.name}</span>
         <span className="app-tile-status">
-          <span
-            className="app-tile-status-dot"
-            data-status={getStatusValue()}
-          />
+          <span className="app-tile-status-dot" data-status={status} />
           {getStatusLabel()}
         </span>
       </a>
@@ -48,7 +84,6 @@ export function AppTile({ app }: AppTileProps) {
         params={{ appId: app.id }}
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
         className="app-tile-gear"
-        style={{ position: "absolute", top: "var(--space-2)", right: "var(--space-2)", color: "var(--text-muted)", textDecoration: "none", opacity: 0, transition: "opacity var(--transition-fast), color var(--transition-fast)" }}
       >
         ⚙
       </Link>

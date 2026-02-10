@@ -1,3 +1,6 @@
+import { useEffect, useState } from "react";
+import { trpcClient } from "../../trpc";
+
 interface ContainerInfo {
   id: string;
   names: string[];
@@ -25,6 +28,11 @@ interface ContainerInfo {
     ip?: string;
   }>;
   labels?: Record<string, string>;
+  stats?: {
+    cpu: number;
+    memory: number;
+    memoryBytes: number;
+  };
 }
 
 interface ContainerTableProps {
@@ -32,6 +40,35 @@ interface ContainerTableProps {
 }
 
 export function ContainerTable({ containers }: ContainerTableProps) {
+  const [containerStats, setContainerStats] = useState<Record<string, { cpu: number; memory: number; memoryBytes: number }>>({});
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      const stats: Record<string, { cpu: number; memory: number; memoryBytes: number }> = {};
+      
+      for (const container of containers) {
+        if (container.state.running) {
+          try {
+            const result = await trpcClient.docker.getContainerStats.query({ containerId: container.id });
+            if (result) {
+              stats[container.id] = result;
+            }
+          } catch (error) {
+            console.error(`Failed to fetch stats for container ${container.id}:`, error);
+          }
+        }
+      }
+      
+      setContainerStats(stats);
+    };
+
+    fetchStats();
+    
+    const interval = setInterval(fetchStats, 5000);
+    
+    return () => clearInterval(interval);
+  }, [containers]);
+
   const getStatusColor = (running: boolean) => {
     return running ? "var(--status-running)" : "var(--status-stopped)";
   };
@@ -47,6 +84,14 @@ export function ContainerTable({ containers }: ContainerTableProps) {
     return ports?.map((port: { public?: number; private: number; type?: string }) =>
       port.public ? `${port.public}:${port.private}/${port.type}` : `${port.private}/${port.type}`
     ).join(", ") || "—";
+  };
+
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
   };
 
   const tableStyle: React.CSSProperties = {
@@ -93,6 +138,19 @@ export function ContainerTable({ containers }: ContainerTableProps) {
     letterSpacing: "0.06em",
   };
 
+  const resourceBarContainer: React.CSSProperties = {
+    width: "80px",
+    height: "4px",
+    background: "var(--bg-tertiary)",
+    borderRadius: 0,
+    overflow: "hidden",
+  };
+
+  const resourceBarFill: React.CSSProperties = {
+    height: "100%",
+    transition: "width var(--transition-meter) linear",
+  };
+
   const emptyStyle: React.CSSProperties = {
     padding: "16px",
     textAlign: "center",
@@ -119,39 +177,76 @@ export function ContainerTable({ containers }: ContainerTableProps) {
         </tr>
       </thead>
       <tbody>
-        {containers.map((container) => (
-          <tr
-            key={container.id}
-            style={{ borderBottom: "1px solid var(--border-primary)", transition: "background-color 80ms linear" }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = "var(--bg-tertiary)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = "";
-            }}
-          >
-            <td style={nameStyle}>
-              {container.names[0]?.replace(/^\//, "") || "—"}
-            </td>
-            <td style={imageStyle} title={container.image}>
-              {container.image}
-            </td>
-            <td style={statusStyle}>
-              <span style={{ color: getStatusColor(container.state.running) }}>
-                {getStatusText(container.state.status)}
-              </span>
-            </td>
-            <td style={cellStyle}>
-              <span style={{ color: "var(--text-secondary)" }}>—</span>
-            </td>
-            <td style={cellStyle}>
-              <span style={{ color: "var(--text-secondary)" }}>—</span>
-            </td>
-            <td style={{ ...cellStyle, fontSize: "var(--text-xs)" }}>
-              {portsFromList(container.ports)}
-            </td>
-          </tr>
-        ))}
+        {containers.map((container) => {
+          const stats = containerStats[container.id];
+          const cpu = stats?.cpu || 0;
+          const memory = stats?.memory || 0;
+          const memoryBytes = stats?.memoryBytes || 0;
+          
+          return (
+            <tr
+              key={container.id}
+              style={{ borderBottom: "1px solid var(--border-primary)", transition: "background-color 80ms linear" }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "var(--bg-tertiary)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "";
+              }}
+            >
+              <td style={nameStyle}>
+                {container.names[0]?.replace(/^\//, "") || "—"}
+              </td>
+              <td style={imageStyle} title={container.image}>
+                {container.image}
+              </td>
+              <td style={statusStyle}>
+                <span style={{ color: getStatusColor(container.state.running) }}>
+                  {getStatusText(container.state.status)}
+                </span>
+              </td>
+              <td style={cellStyle}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", minWidth: "32px" }}>
+                    {container.state.running ? `${cpu}%` : "—"}
+                  </span>
+                  {container.state.running && (
+                    <div style={resourceBarContainer}>
+                      <div
+                        style={{
+                          ...resourceBarFill,
+                          width: `${Math.min(100, cpu)}%`,
+                          backgroundColor: "var(--meter-cpu)",
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </td>
+              <td style={cellStyle}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", minWidth: "32px" }}>
+                    {container.state.running ? `${formatBytes(memoryBytes)}` : "—"}
+                  </span>
+                  {container.state.running && (
+                    <div style={resourceBarContainer}>
+                      <div
+                        style={{
+                          ...resourceBarFill,
+                          width: `${Math.min(100, memory)}%`,
+                          backgroundColor: "var(--meter-memory)",
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </td>
+              <td style={{ ...cellStyle, fontSize: "var(--text-xs)" }}>
+                {portsFromList(container.ports)}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

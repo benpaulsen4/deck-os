@@ -278,13 +278,13 @@
 
 ### Acceptance Criteria
 
-- [ ] Apps list page shows all apps in a tabular format
-- [ ] Row actions (Start, Stop, Restart, Delete) work correctly
-- [ ] Dashboard app tiles update status in real-time via Docker events
-- [ ] App tile reordering works via drag-and-drop and persists
-- [ ] Container table on detail page shows CPU/memory bars
-- [ ] Settings page displays system information
-- [ ] Status change animations fire correctly
+- [x] Apps list page shows all apps in a tabular format
+- [x] Row actions (Start, Stop, Restart, Delete) work correctly
+- [x] Dashboard app tiles update status in real-time via Docker events
+- [x] App tile reordering works via drag-and-drop and persists
+- [x] Container table on detail page shows CPU/memory bars
+- [x] Settings page displays system information
+- [x] Status change animations fire correctly
 
 ---
 

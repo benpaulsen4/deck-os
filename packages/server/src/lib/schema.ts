@@ -96,6 +96,12 @@ const ContainerStateSchema = z.object({
   finishedAt: z.string().optional(),
 });
 
+const ContainerStatsSchema = z.object({
+  cpu: z.number(),
+  memory: z.number(),
+  memoryBytes: z.number(),
+}).optional();
+
 const ContainerInfoSchema = z.object({
   id: z.string(),
   names: z.array(z.string()),
@@ -107,6 +113,7 @@ const ContainerInfoSchema = z.object({
   status: z.string(),
   ports: z.array(ContainerPortSchema).optional(),
   labels: z.record(z.string()).optional(),
+  stats: ContainerStatsSchema,
 });
 
 const StackStatusSchema = z.object({

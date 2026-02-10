@@ -1,8 +1,15 @@
 import { router, publicProcedure } from "../trpc/trpc.js";
 import si from "systeminformation";
 import * as metricsService from "../services/metrics.js";
+import * as path from "path";
+
+const DATA_DIR = process.env.DECKOS_DATA_DIR || path.join(process.cwd(), "data", "apps");
 
 export const systemRouter = router({
+  getDataDir: publicProcedure.query(async () => {
+    return { dataDir: DATA_DIR };
+  }),
+
   ping: publicProcedure.query(() => {
     return {
       status: "ok" as const,

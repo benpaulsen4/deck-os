@@ -4,6 +4,12 @@ import * as dockerService from "../services/docker.js";
 import * as appsService from "../services/apps.js";
 
 export const dockerRouter = router({
+  getContainerStats: publicProcedure
+    .input(z.object({ containerId: z.string() }))
+    .query(async ({ input }) => {
+      return await dockerService.getContainerStats(input.containerId);
+    }),
+
   start: publicProcedure
     .input(z.object({ appId: z.string() }))
     .mutation(async ({ input }) => {

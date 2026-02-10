@@ -9,6 +9,7 @@ export const Route = createFileRoute("/settings")({
 function SettingsPage() {
   const trpc = useTRPC();
   const { data: systemInfo, isLoading } = useQuery(trpc.system.getInfo.queryOptions());
+  const { data: dataDirInfo, isLoading: dataDirLoading } = useQuery(trpc.system.getDataDir.queryOptions());
 
   const formatUptime = (seconds: number): string => {
     const days = Math.floor(seconds / 86400);
@@ -65,6 +66,21 @@ function SettingsPage() {
               <span className="system-info-label" style={{ width: "120px" }}>DOCKER VERSION</span>
               <span className="system-info-value">{systemInfo.dockerVersion || "NOT INSTALLED"}</span>
             </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="panel" style={{ padding: "var(--space-3)", marginTop: "var(--space-2)" }}>
+        <div className="label" style={{ marginBottom: "var(--space-2)" }}>
+          DATA DIRECTORY
+        </div>
+        {dataDirLoading ? (
+          <div className="loading-scan" style={{ padding: "var(--space-2)" }}>
+            <span className="label">LOADING...</span>
+          </div>
+        ) : dataDirInfo ? (
+          <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+            <span style={{ fontFamily: "var(--font-mono)" }}>{dataDirInfo.dataDir}</span>
           </div>
         ) : null}
       </div>
