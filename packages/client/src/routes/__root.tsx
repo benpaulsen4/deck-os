@@ -1,4 +1,6 @@
 import { createRootRoute, Link, Outlet } from "@tanstack/react-router";
+import { useTRPC } from "../trpc";
+import { useQuery } from "@tanstack/react-query";
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -16,6 +18,11 @@ function RootLayout() {
 }
 
 function TopBar() {
+  const trpc = useTRPC();
+  const { data: systemInfo } = useQuery(trpc.system.getInfo.queryOptions());
+
+  const hostname = systemInfo?.hostname || "DECKOS";
+
   return (
     <header className="topbar">
       <div className="topbar-inner">
@@ -31,7 +38,7 @@ function TopBar() {
             Settings
           </Link>
         </nav>
-        <div className="topbar-host">deckos-dev</div>
+        <div className="topbar-host">{hostname}</div>
       </div>
     </header>
   );

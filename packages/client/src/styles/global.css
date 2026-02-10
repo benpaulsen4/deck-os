@@ -69,7 +69,7 @@
 }
 
 .status-pulse {
-  animation: pulse 2s ease-in-out infinite;
+  animation: pulse 2s linear infinite;
 }
 
 /* ---- Page Container ---- */
