@@ -1,0 +1,17 @@
+node_modules
+.git
+.gitignore
+.pnpm-store
+*.log
+.env
+.env.*
+.DS_Store
+packages/*/dist
+coverage
+.vscode
+.idea
+*.tsbuildinfo
+Dockerfile
+docker-compose.yml
+.dockerignore
+*.md

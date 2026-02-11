@@ -3,22 +3,35 @@ import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { trpcServer } from "@hono/trpc-server";
 import { streamSSE } from "hono/streaming";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { appRouter } from "./trpc/router.js";
 import { createContext } from "./trpc/context.js";
 import * as metricsService from "./services/metrics.js";
 import * as dockerService from "./services/docker.js";
+import { readFileSync, existsSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 
 const app = new Hono();
 
-// CORS for development (client on :5173, server on :3001)
-app.use(
-  "/api/*",
-  cors({
-    origin: "http://localhost:5173",
-    allowMethods: ["GET", "POST", "OPTIONS"],
-    allowHeaders: ["Content-Type"],
-  })
-);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const isProduction = process.env.NODE_ENV === "production";
+const clientDistPath = isProduction 
+  ? join(__dirname, "../../client/dist") 
+  : join(__dirname, "../../../client/dist");
+
+// CORS for development only
+if (!isProduction) {
+  app.use(
+    "/api/*",
+    cors({
+      origin: "http://localhost:5173",
+      allowMethods: ["GET", "POST", "OPTIONS"],
+      allowHeaders: ["Content-Type"],
+    })
+  );
+}
 
 // tRPC handler
 app.use(
@@ -162,7 +175,43 @@ app.get("/api/logs/:containerId", async (c) => {
   });
 });
 
-const port = 3001;
+if (isProduction) {
+  app.use("*", serveStatic({ root: clientDistPath }));
+
+  app.notFound((c) => {
+    const path = c.req.path;
+    
+    if (path.startsWith("/api/")) {
+      return c.json({ error: "Not found" }, 404);
+    }
+    
+    const indexPath = join(clientDistPath, "index.html");
+    try {
+      const html = readFileSync(indexPath, "utf-8");
+      return c.html(html);
+    } catch (err) {
+      console.error("Failed to serve index.html:", err);
+      return c.json({ error: "Server configuration error" }, 500);
+    }
+  });
+}
+
+const port = isProduction ? 3000 : 3001;
+
+if (isProduction) {
+  const indexPath = join(clientDistPath, "index.html");
+  try {
+    if (!existsSync(indexPath)) {
+      throw new Error("File not found");
+    }
+    console.log(`[deckos] serving client from: ${clientDistPath}`);
+  } catch (err) {
+    console.error(`[ERROR] Client build not found at: ${clientDistPath}`);
+    console.error('Run "npm run build" before starting in production mode.');
+    process.exit(1);
+  }
+}
+
 console.log(`[deckos] server running on http://localhost:${port}`);
 
 serve({

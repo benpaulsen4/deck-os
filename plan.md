@@ -379,12 +379,12 @@
 
 ### Acceptance Criteria
 
-- [ ] `docker compose up` starts DeckOS on port 3000
-- [ ] Dashboard loads and displays system metrics
-- [ ] Can create, deploy, and manage a compose app through the UI
-- [ ] Container logs stream correctly
-- [ ] Data persists across container restarts (volume mount)
-- [ ] Image size is reasonable (< 500MB)
-- [ ] README provides clear setup instructions
+- [x] `docker compose up` starts DeckOS on port 3000
+- [x] Dashboard loads and displays system metrics
+- [x] Can create, deploy, and manage a compose app through the UI
+- [x] Container logs stream correctly
+- [x] Data persists across container restarts (volume mount)
+- [x] Image size is reasonable (< 500MB)
+- [x] README provides clear setup instructions
 
 ---
