@@ -22,6 +22,8 @@ export function Input({ label, className, ...props }: InputProps) {
     fontSize: "var(--text-base)",
     fontFamily: "'JetBrains Mono', monospace",
     outline: "none",
+    minHeight: "40px",
+    cursor: "text",
   };
 
   return (
@@ -30,6 +32,16 @@ export function Input({ label, className, ...props }: InputProps) {
       <input
         className={className}
         style={inputStyle}
+        onMouseEnter={(e) => {
+          if (document.activeElement !== e.currentTarget) {
+            e.currentTarget.style.borderColor = "var(--border-active)";
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (document.activeElement !== e.currentTarget) {
+            e.currentTarget.style.borderColor = "var(--border-primary)";
+          }
+        }}
         onFocus={(e) => {
           e.currentTarget.style.borderColor = "var(--accent-primary)";
         }}

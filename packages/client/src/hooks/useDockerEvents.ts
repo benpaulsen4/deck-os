@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useConnectionStore } from "../stores/connection";
 
 export interface DockerEvent {
   Type: string;
@@ -16,6 +17,7 @@ export interface DockerEvent {
 export function useDockerEvents(callback: (event: DockerEvent) => void) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const callbackRef = useRef(callback);
+  const { setConnected } = useConnectionStore();
 
   useEffect(() => {
     callbackRef.current = callback;
@@ -27,8 +29,12 @@ export function useDockerEvents(callback: (event: DockerEvent) => void) {
         eventSourceRef.current.close();
       }
 
-      const eventSource = new EventSource("http://localhost:3001/api/docker/events");
+      const eventSource = new EventSource("/api/docker/events");
       eventSourceRef.current = eventSource;
+
+      eventSource.onopen = () => {
+        setConnected("events", true);
+      };
 
       eventSource.onmessage = (event) => {
         try {
@@ -41,6 +47,7 @@ export function useDockerEvents(callback: (event: DockerEvent) => void) {
 
       eventSource.onerror = (error) => {
         console.error("Docker events SSE error:", error);
+        setConnected("events", false);
         eventSource.close();
         setTimeout(connect, 5000);
       };
@@ -52,9 +59,10 @@ export function useDockerEvents(callback: (event: DockerEvent) => void) {
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
+        setConnected("events", false);
       }
     };
-  }, []);
+  }, [setConnected]);
 
   return;
 }

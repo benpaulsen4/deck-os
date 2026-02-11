@@ -9,6 +9,7 @@ import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { PullProgress } from "../../components/ui/PullProgress";
 import { useToastStore } from "../../stores/toast";
 import { CodeEditor } from "../../components/ui/CodeEditor";
+import { LogViewer } from "../../components/ui/LogViewer";
 
 export const Route = createFileRoute("/apps/$appId")({
   component: AppDetailPage,
@@ -50,8 +51,10 @@ const buttonGroupStyle: React.CSSProperties = {
 };
 
 const sectionStyle: React.CSSProperties = {
-  marginTop: "var(--space-3)",
-};
+    marginTop: "var(--space-3)",
+  };
+
+  const [showLogs, setShowLogs] = useState(false);
 
 function AppDetailPage() {
   const { appId } = Route.useParams();
@@ -349,6 +352,31 @@ function AppDetailPage() {
             <pre style={preStyle}>{app.composeYaml}</pre>
           </div>
         )}
+      </div>
+
+      {showLogs && (
+        <div style={sectionStyle}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
+            <div style={labelStyle}>LOGS</div>
+          </div>
+          <div className="panel p-0">
+            <LogViewer 
+              containers={stackStatus?.containers.map(c => ({
+                id: c.id,
+                name: c.names[0]?.replace(/^\//, "") || c.id.slice(0, 12),
+              })) || []}
+            />
+          </div>
+        </div>
+      )}
+
+      <div style={{ marginTop: "var(--space-3)", display: "flex", justifyContent: "center" }}>
+        <Button
+          variant="secondary"
+          onClick={() => setShowLogs(!showLogs)}
+        >
+          {showLogs ? "HIDE LOGS" : "SHOW LOGS"}
+        </Button>
       </div>
 
       <ConfirmDialog

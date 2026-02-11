@@ -327,17 +327,17 @@
 
 ### Acceptance Criteria
 
-- [ ] Log viewer displays container logs in real-time
-- [ ] Logs auto-scroll and "follow" toggle works
-- [ ] Tab switching between containers works
-- [ ] SSE connections auto-reconnect on drop
-- [ ] Loading states use the scanning line animation
-- [ ] Running status indicators pulse subtly
-- [ ] DECKOS logotype has scanline effect on load
-- [ ] Errors are displayed in styled error panels
-- [ ] Toast notifications appear for user actions
-- [ ] UI is fully responsive and usable at all breakpoints
-- [ ] Full visual audit against `design.md` passes
+- [x] Log viewer displays container logs in real-time
+- [x] Logs auto-scroll and "follow" toggle works
+- [x] Tab switching between containers works
+- [x] SSE connections auto-reconnect on drop
+- [x] Loading states use the scanning line animation
+- [x] Running status indicators pulse subtly
+- [x] DECKOS logotype has scanline effect on load
+- [x] Errors are displayed in styled error panels
+- [x] Toast notifications appear for user actions
+- [x] UI is fully responsive and usable at all breakpoints
+- [x] Full visual audit against `design.md` passes
 
 ---
 

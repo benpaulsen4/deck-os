@@ -75,7 +75,7 @@ export function AppTile({ app }: AppTileProps) {
         </div>
         <span className="app-tile-name">{app.metadata.name}</span>
         <span className="app-tile-status">
-          <span className="app-tile-status-dot" data-status={status} />
+          <span className={`app-tile-status-dot ${status === "running" ? "status-pulse" : ""}`} data-status={status} />
           {getStatusLabel()}
         </span>
       </a>

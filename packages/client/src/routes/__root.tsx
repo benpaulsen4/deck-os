@@ -2,6 +2,9 @@ import { createRootRoute, Link, Outlet } from "@tanstack/react-router";
 import { useTRPC } from "../trpc";
 import { useQuery } from "@tanstack/react-query";
 import { ToastContainer } from "../components/layout/ToastContainer";
+import { useConnectionStore } from "../stores/connection";
+import { useLayoutEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -22,26 +25,114 @@ function RootLayout() {
 function TopBar() {
   const trpc = useTRPC();
   const { data: systemInfo } = useQuery(trpc.system.getInfo.queryOptions());
+  const { getAnyConnected, getAllConnected } = useConnectionStore();
+  const scanlineApplied = useRef(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const hostname = systemInfo?.hostname || "DECKOS";
 
+  useLayoutEffect(() => {
+    if (!scanlineApplied.current) {
+      scanlineApplied.current = true;
+    }
+  }, []);
+
+  const isAnyConnected = getAnyConnected();
+  const isAllConnected = getAllConnected();
+  const currentPath = window.location.pathname;
+
+  const connectionStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
+    fontSize: "var(--text-xs)",
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+  };
+
+  const dotStyle: React.CSSProperties = {
+    width: "6px",
+    height: "6px",
+    borderRadius: "50%",
+  };
+
   return (
-    <header className="topbar">
-      <div className="topbar-inner">
-        <div className="topbar-logo">DECKOS</div>
-        <nav className="topbar-nav">
-          <Link to="/" className="topbar-link" activeProps={{ className: "topbar-link topbar-link--active" }}>
+    <>
+      <header className="topbar">
+        <div className="topbar-inner">
+          <div className={`topbar-logo ${!scanlineApplied.current ? "scanline-once" : ""}`}>DECKOS</div>
+          <nav className="topbar-nav">
+            <Link to="/" className="topbar-link" activeProps={{ className: "topbar-link topbar-link--active" }}>
+              Dashboard
+            </Link>
+            <Link to="/apps" className="topbar-link" activeProps={{ className: "topbar-link topbar-link--active" }}>
+              Apps
+            </Link>
+            <Link to="/settings" className="topbar-link" activeProps={{ className: "topbar-link topbar-link--active" }}>
+              Settings
+            </Link>
+          </nav>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+            {isAnyConnected && (
+              <div style={connectionStyle}>
+                <div style={{ ...dotStyle, background: isAllConnected ? "var(--status-running)" : "var(--status-warning)" }} />
+              </div>
+            )}
+            <button
+              className="topbar-hamburger"
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Menu"
+            >
+              ☰
+            </button>
+            <div className="topbar-host">{hostname}</div>
+          </div>
+        </div>
+      </header>
+
+      {mobileMenuOpen && (
+        <div className="topbar-menu-overlay">
+          <button
+            style={{
+              position: "absolute",
+              top: "8px",
+              right: "8px",
+              background: "transparent",
+              border: "1px solid var(--border-primary)",
+              color: "var(--text-secondary)",
+              padding: "8px",
+              cursor: "pointer",
+            }}
+            onClick={() => setMobileMenuOpen(false)}
+          >
+            <X size={20} />
+          </button>
+          <Link
+            to="/"
+            className="topbar-menu-link"
+            style={{ ...(currentPath === "/" ? { color: "var(--accent-primary)", borderLeft: "2px solid var(--accent-primary)" } : {}) }}
+            onClick={() => setMobileMenuOpen(false)}
+          >
             Dashboard
           </Link>
-          <Link to="/apps" className="topbar-link" activeProps={{ className: "topbar-link topbar-link--active" }}>
+          <Link
+            to="/apps"
+            className="topbar-menu-link"
+            style={{ ...(currentPath === "/apps" ? { color: "var(--accent-primary)", borderLeft: "2px solid var(--accent-primary)" } : {}) }}
+            onClick={() => setMobileMenuOpen(false)}
+          >
             Apps
           </Link>
-          <Link to="/settings" className="topbar-link" activeProps={{ className: "topbar-link topbar-link--active" }}>
+          <Link
+            to="/settings"
+            className="topbar-menu-link"
+            style={{ ...(currentPath === "/settings" ? { color: "var(--accent-primary)", borderLeft: "2px solid var(--accent-primary)" } : {}) }}
+            onClick={() => setMobileMenuOpen(false)}
+          >
             Settings
           </Link>
-        </nav>
-        <div className="topbar-host">{hostname}</div>
-      </div>
-    </header>
+        </div>
+      )}
+    </>
   );
 }

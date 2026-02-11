@@ -72,6 +72,32 @@
   animation: pulse 2s linear infinite;
 }
 
+/* ---- Scanline effect on load (for DECKOS logo) ---- */
+@keyframes scanline-once {
+  0% {
+    top: -100%;
+  }
+  100% {
+    top: 200%;
+  }
+}
+
+.scanline-once {
+  position: relative;
+  overflow: hidden;
+}
+
+.scanline-once::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent-primary);
+  animation: scanline-once 1s linear forwards;
+  pointer-events: none;
+}
+
 /* ---- Page Container ---- */
 .page-container {
   max-width: 1440px;
@@ -100,4 +126,29 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+/* ---- Button Hover States ---- */
+.deckos-button:hover {
+  transition: background 80ms linear, color 80ms linear, border-color 80ms linear;
+}
+
+.deckos-button[variant="primary"]:hover {
+  background: var(--accent-hover);
+}
+
+.deckos-button[variant="secondary"]:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.deckos-button[variant="danger"]:hover {
+  background: var(--status-stopped);
+  color: var(--text-inverse);
+}
+
+.deckos-button[variant="icon"]:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
 }

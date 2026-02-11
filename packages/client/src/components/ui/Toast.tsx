@@ -22,13 +22,6 @@ export function Toast({ message, type = "info", duration = 3000, onClose }: Toas
     info: <AlertCircle size={16} style={{ color: "var(--status-info)" }} />,
   };
 
-  const containerStyle: React.CSSProperties = {
-    position: "fixed",
-    bottom: "24px",
-    right: "24px",
-    zIndex: 50,
-  };
-
   const toastStyle: React.CSSProperties = {
     background: "var(--bg-secondary)",
     borderLeft: "4px solid",
@@ -51,11 +44,9 @@ export function Toast({ message, type = "info", duration = 3000, onClose }: Toas
   };
 
   return (
-    <div style={containerStyle}>
-      <div style={{ ...toastStyle, borderLeftColor: borderColor[type] }}>
-        {icons[type]}
-        <span style={messageStyle}>{message}</span>
-      </div>
+    <div style={{ ...toastStyle, borderLeftColor: borderColor[type] }}>
+      {icons[type]}
+      <span style={messageStyle}>{message}</span>
     </div>
   );
 }

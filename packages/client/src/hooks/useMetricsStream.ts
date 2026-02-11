@@ -1,8 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useMetricsStore } from "../stores/metrics";
+import { useConnectionStore } from "../stores/connection";
 
 export function useMetricsStream() {
   const { setMetrics, setConnected } = useMetricsStore();
+  const { setConnected: setConnection } = useConnectionStore();
   const eventSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
@@ -12,6 +14,7 @@ export function useMetricsStream() {
 
     eventSource.onopen = () => {
       setConnected(true);
+      setConnection("metrics", true);
     };
 
     eventSource.onmessage = (event) => {
@@ -25,13 +28,15 @@ export function useMetricsStream() {
 
     eventSource.onerror = () => {
       setConnected(false);
+      setConnection("metrics", false);
     };
 
     return () => {
       eventSource.close();
       setConnected(false);
+      setConnection("metrics", false);
     };
-  }, [setMetrics, setConnected]);
+  }, [setMetrics, setConnected, setConnection]);
 
   return useMetricsStore();
 }
