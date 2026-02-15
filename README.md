@@ -6,32 +6,50 @@ A self-hosted homelab management platform. DeckOS provides a unified dashboard a
 
 ### Prerequisites
 
+- Linux host (systemd-based recommended)
+- Node.js 20 or higher
 - Docker 20.10 or higher
-- Docker Compose v2
-- Linux host with Docker installed
+- Docker Compose v2 (the `docker compose` CLI)
 
 ### Installation
 
-1. Build and start DeckOS:
+DeckOS is intended to be installed as a host-native service (not a container). The production release mechanism is designed around prebuilt tarball releases plus a `systemd` unit.
 
-```bash
-docker compose up -d
-```
+**Planned host install layout:**
 
-2. Access the dashboard at `http://localhost:3000`
+- `/opt/deckos/releases/<version>/` (immutable release directories)
+- `/opt/deckos/current` (symlink to active release)
+- `/etc/deckos/deckos.env` (configuration)
+- `/var/lib/deckos/` (persistent data)
+
+**Planned install flow (manual outline):**
+
+1. Create a dedicated user (e.g. `deckos`) and grant Docker socket access (typically by adding to the `docker` group).
+2. Download and extract the latest release tarball into `/opt/deckos/releases/<version>/`.
+3. Create `/opt/deckos/current` symlink to that version.
+4. Create `/etc/deckos/deckos.env` and set the data directory (default: `/var/lib/deckos`) and listen port (default: `3000`).
+5. Install and enable the `systemd` service, then start it.
+
+Access the dashboard at `http://<host>:3000`.
 
 ## Configuration
 
 ### Environment Variables
 
-| Variable   | Default      | Description      |
-| ---------- | ------------ | ---------------- |
-| `NODE_ENV` | `production` | Environment mode |
+| Variable          | Default           | Description                                 |
+| ----------------- | ----------------- | ------------------------------------------- |
+| `NODE_ENV`        | `production`      | Environment mode                            |
+| `DECKOS_DATA_DIR` | `/var/lib/deckos` | Persistent data directory for apps/metadata |
+| `PORT`            | `3000`            | HTTP listen port                            |
 
-### Volume Mounts
+## Updating DeckOS
 
-- `/var/run/docker.sock` - Docker socket for container management
-- `deckos-data:/data` - Persistent storage for app configs and compose files
+Updates are planned to be atomic and to preserve the data directory across upgrades. The intended approach is:
+
+1. Download and extract the new release into `/opt/deckos/releases/<new-version>/`
+2. Switch `/opt/deckos/current` symlink to the new version
+3. Restart the `deckos` service
+4. Keep the previous release directory for rollback (flip symlink back and restart)
 
 ## Security Considerations
 
@@ -92,6 +110,8 @@ This builds both the client and server, outputting to:
 - `packages/client/dist/` - Built React SPA
 - `packages/server/dist/` - Compiled TypeScript
 
+Production releases are planned to be packaged by CI into a tarball that includes the build outputs plus production dependencies, so end users don’t need to run `pnpm build` on the server.
+
 ## Usage
 
 ### Creating an App
@@ -126,7 +146,7 @@ From the dashboard or Apps page, you can:
 Apps are stored as:
 
 ```
-/data/apps/<app-id>/
+<dataDir>/apps/<app-id>/
 ├── docker-compose.yml
 └── metadata.json
 ```
@@ -135,26 +155,25 @@ No database is used - all data is file-based for simplicity and transparency.
 
 ## Troubleshooting
 
-### Container won't start
+### DeckOS service won't start
 
-Check the container logs:
+Check service logs:
 
 ```bash
-docker logs deckos
+journalctl -u deckos -f
 ```
 
 ### Accessing the Docker socket
 
-DeckOS requires access to the host Docker socket via `/var/run/docker.sock`. The container runs in privileged mode and as root to ensure Docker socket access and host system visibility.
-
-**Note:** Privileged mode is required for Docker socket access. The container runs as root for simplicity since it already requires elevated privileges.
+DeckOS requires access to the host Docker socket via `/var/run/docker.sock`. In the planned host-native deployment, the DeckOS service runs as a dedicated user that is granted Docker access (commonly via the `docker` group).
 
 ### Resetting DeckOS
 
-To remove all DeckOS data (including deployed apps):
+To remove all DeckOS data (including managed app metadata/compose files), stop the service and remove the data directory:
 
 ```bash
-docker compose down -v
+systemctl stop deckos
+rm -rf /var/lib/deckos
 ```
 
 ## License

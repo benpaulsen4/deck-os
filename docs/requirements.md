@@ -30,7 +30,7 @@ Homelab enthusiasts running headless Linux servers (Raspberry Pi, NUC, old lapto
 ### R3: Docker Compose Manager
 
 - **R3.1** Users can create a new "app" by pasting or uploading a raw `docker-compose.yml` file
-- **R3.2** The platform stores compose files on disk in a structured directory (`/data/apps/<app-id>/docker-compose.yml`)
+- **R3.2** The platform stores compose files on disk in a structured directory (`<dataDir>/apps/<app-id>/docker-compose.yml`)
 - **R3.3** Users can start, stop, restart, and remove a compose stack from the UI
 - **R3.4** Display per-app container status (running, stopped, restarting, error) in real-time
 - **R3.5** Users can view and edit the raw compose YAML for any app
@@ -47,11 +47,12 @@ Homelab enthusiasts running headless Linux servers (Raspberry Pi, NUC, old lapto
 
 ### R5: System
 
-- **R5.1** The platform itself runs as a Docker container (or compose stack) for easy deployment
-- **R5.2** Persistent data (app configs, compose files, metadata) stored in a mounted volume
+- **R5.1** The platform runs directly on the host OS (no containerization) as a long-running service
+- **R5.2** Persistent data (app configs, compose files, metadata) stored on disk in a configurable data directory (default: `/var/lib/deckos`)
 - **R5.3** No authentication required at this stage (single-user, LAN-only assumption)
 - **R5.4** The backend communicates with the host Docker daemon via the Docker socket (`/var/run/docker.sock`)
 - **R5.5** All API communication between frontend and backend uses tRPC for end-to-end type safety
+- **R5.6** Production installs support an idempotent host-native install flow and an update flow that preserves the data directory across upgrades
 
 ## Non-Requirements (Explicitly Out of Scope)
 

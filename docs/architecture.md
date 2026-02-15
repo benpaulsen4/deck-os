@@ -82,58 +82,58 @@ deckos/
 │       │   └── data/               # Default data dir (overridable)
 │       ├── tsconfig.json
 │       └── package.json
-│
-├── docker-compose.yml        # DeckOS self-hosting compose
-└── Dockerfile                # Multi-stage build
 ```
 
 ## Technology Stack
 
-| Layer          | Technology              | Rationale                                                           |
-|----------------|-------------------------|---------------------------------------------------------------------|
-| Frontend       | React 19 + Vite 6       | Required by spec. Fast HMR, ESM-native bundling                     |
-| Routing        | TanStack Router          | Type-safe file routing, best-in-class for React SPAs                |
-| State          | Zustand                  | Minimal, fast, no boilerplate state management                      |
-| API Client     | tRPC + TanStack Query    | Required by spec. End-to-end type safety, automatic cache/refetch   |
-| Backend        | Hono                     | Required by spec. Lightweight, fast, middleware ecosystem            |
-| API Layer      | tRPC via @hono/trpc-server | Official Hono adapter for tRPC                                   |
-| Docker         | dockerode                | Mature Node.js Docker API client, supports all Docker operations    |
+| Layer          | Technology                         | Rationale                                                                                      |
+| -------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Frontend       | React 19 + Vite 6                  | Required by spec. Fast HMR, ESM-native bundling                                                |
+| Routing        | TanStack Router                    | Type-safe file routing, best-in-class for React SPAs                                           |
+| State          | Zustand                            | Minimal, fast, no boilerplate state management                                                 |
+| API Client     | tRPC + TanStack Query              | Required by spec. End-to-end type safety, automatic cache/refetch                              |
+| Backend        | Hono                               | Required by spec. Lightweight, fast, middleware ecosystem                                      |
+| API Layer      | tRPC via @hono/trpc-server         | Official Hono adapter for tRPC                                                                 |
+| Docker         | dockerode                          | Mature Node.js Docker API client, supports all Docker operations                               |
 | Compose Ops    | child_process (docker compose CLI) | Direct CLI invocation for compose up/down/pull -- more reliable than programmatic alternatives |
-| System Metrics | systeminformation        | Cross-platform system info library (CPU, mem, disk, network)        |
-| Validation     | Zod                      | Runtime type validation, integrates natively with tRPC              |
-| Styling        | Vanilla CSS + CSS Modules | No framework overhead, full control for the brutalist aesthetic     |
-| Code Editor    | CodeMirror 6             | YAML editing with syntax highlighting for compose files             |
-| Runtime        | Node.js 20 LTS          | Stable, wide compatibility                                          |
-| Package Mgr    | pnpm                     | Fast, disk-efficient, excellent workspace support                   |
+| System Metrics | systeminformation                  | Cross-platform system info library (CPU, mem, disk, network)                                   |
+| Validation     | Zod                                | Runtime type validation, integrates natively with tRPC                                         |
+| Styling        | Vanilla CSS + CSS Modules          | No framework overhead, full control for the brutalist aesthetic                                |
+| Code Editor    | CodeMirror 6                       | YAML editing with syntax highlighting for compose files                                        |
+| Runtime        | Node.js 20 LTS                     | Stable, wide compatibility                                                                     |
+| Package Mgr    | pnpm                               | Fast, disk-efficient, excellent workspace support                                              |
 
 ## Key Architecture Decisions
 
 ### AD1: Monorepo with pnpm Workspaces
 
 The client and server live in a single repository under `packages/`. This enables:
+
 - Shared TypeScript types (tRPC router type is imported directly by the client)
 - Single `pnpm install` and coordinated dev scripts
-- Unified Docker build
+- Unified production build + packaging
 
 ### AD2: Docker Compose via CLI, not programmatic API
 
 Rather than using `dockerode-compose` (which has incomplete spec coverage), DeckOS invokes `docker compose` CLI commands via Node.js `child_process.execFile`. This guarantees:
+
 - Full compose spec compatibility
 - Identical behavior to manual CLI usage
 - Reliable error output parsing
 
-The compose CLI is available inside the DeckOS container because we mount the Docker socket and install the Docker CLI (not the full daemon).
+In production, the host must have Docker Engine and Docker Compose v2 installed so `docker compose` is available to the DeckOS service.
 
 ### AD3: File-based App Storage
 
 Each managed app is stored as:
+
 ```
-/data/apps/<app-id>/
+<dataDir>/apps/<app-id>/
 ├── docker-compose.yml    # The raw compose file
 └── metadata.json         # Name, icon URL, web URL, description, order
 ```
 
-This is deliberately simple -- no database. The `/data` directory is a Docker volume mount. The `metadata.json` includes:
+This is deliberately simple -- no database. In production the default `<dataDir>` is `/var/lib/deckos` and is configurable (e.g. `DECKOS_DATA_DIR`). The `metadata.json` includes:
 
 ```json
 {
@@ -151,6 +151,7 @@ This is deliberately simple -- no database. The `/data` directory is a Docker vo
 ### AD4: Real-time Metrics via SSE
 
 System metrics (CPU, memory, disk, network) are pushed to the client via Server-Sent Events (SSE) rather than WebSocket. Rationale:
+
 - Simpler protocol (unidirectional, HTTP-native)
 - Hono has built-in SSE support via `hono/streaming`
 - Automatic reconnection built into the browser EventSource API
@@ -161,6 +162,7 @@ The SSE endpoint sits outside tRPC (as a direct Hono route) since tRPC subscript
 ### AD5: tRPC for All Mutations and Queries
 
 All CRUD operations (create app, list apps, update metadata, delete app) and Docker operations (start, stop, restart, pull, logs) go through tRPC procedures. This gives:
+
 - Full type inference from backend to frontend
 - Input validation via Zod at the procedure level
 - Automatic error serialization
@@ -212,7 +214,7 @@ User pastes YAML ──> Client validates syntax
                        ▼
                tRPC apps.create ──> Server validates YAML
                                       │
-                                      ├── Write compose file to /data/apps/<id>/
+                                      ├── Write compose file to <dataDir>/apps/<id>/
                                       ├── Write metadata.json
                                       └── Return App object
                                             │
@@ -247,32 +249,51 @@ systeminformation polls (2s interval)
 
 ## Deployment Architecture
 
-DeckOS itself runs as a Docker container:
+DeckOS runs directly on the host OS as a long-running service (no containerization). In production, the Hono server serves the built SPA static files and the API from the same port (default: 3000).
 
-```yaml
-# docker-compose.yml (for DeckOS itself)
-services:
-  deckos:
-    build: .
-    ports:
-      - "3000:3000"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - deckos-data:/data
-    restart: unless-stopped
+## Production Build & Release (Host-native)
 
-volumes:
-  deckos-data:
-```
+### Release Artifact
 
-The Dockerfile is a multi-stage build:
-1. **Stage 1**: Install dependencies, build client (Vite), build server (TypeScript)
-2. **Stage 2**: Minimal Node.js runtime + Docker CLI, copy built assets, serve
+DeckOS is released as a prebuilt, OS/arch-specific tarball produced by CI (users should not need a compiler toolchain on their server).
 
-In production, the Hono server serves the built SPA static files and the API from the same port (3000).
+**Artifact contents (conceptual):**
+
+- `server/` - compiled backend JS (`dist/`) plus production-only dependencies
+- `client/` - built SPA static assets (`dist/`)
+- `VERSION` / `manifest.json` - version + checksums/metadata for troubleshooting
+
+### Host Install Layout
+
+The production install separates immutable binaries from mutable data:
+
+- `/opt/deckos/releases/<version>/` - immutable versioned release directories
+- `/opt/deckos/current` - symlink to the active release
+- `/etc/deckos/deckos.env` - environment/config file (owned by root)
+- `/var/lib/deckos/` - persistent data directory (apps/, metadata/, etc.)
+
+### Service Management
+
+DeckOS is managed by `systemd` on Linux. The service runs as a dedicated user and is granted access to Docker via the `docker` group (or equivalent), so it can talk to `/var/run/docker.sock`.
+
+**Planned service characteristics:**
+
+- `User=deckos` with `SupplementaryGroups=docker`
+- `EnvironmentFile=/etc/deckos/deckos.env`
+- `WorkingDirectory=/opt/deckos/current`
+- `Restart=on-failure`
+
+### Updates and Rollback
+
+Updates are designed to be atomic and data-safe:
+
+1. Download the new release tarball and verify checksum/signature (when provided).
+2. Extract to `/opt/deckos/releases/<new-version>/` without touching `/var/lib/deckos/`.
+3. Stop the service, switch `/opt/deckos/current` symlink to the new version, start the service.
+4. Keep at least one previous release directory for instant rollback (flip symlink back and restart).
 
 ## Security Considerations
 
-- The Docker socket mount gives DeckOS root-equivalent access to the host. This is inherent to the product's purpose and matches CasaOS behavior.
+- Access to the Docker socket (`/var/run/docker.sock`) gives root-equivalent access to the host. This is inherent to the product's purpose and matches CasaOS behavior.
 - No authentication at this stage -- the assumption is LAN-only access behind a firewall.
 - Compose YAML is validated but user-supplied; malicious YAML could mount host paths. This is acceptable for the single-user homelab context.
