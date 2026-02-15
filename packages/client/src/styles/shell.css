@@ -37,7 +37,9 @@
   right: 0;
   height: 2px;
   background: var(--accent-primary);
-  animation: scanline 1s linear, scanline-fade 1s linear;
+  animation:
+    scanline 1s linear,
+    scanline-fade 1s linear;
   pointer-events: none;
 }
 
@@ -99,7 +101,9 @@
   color: var(--text-secondary);
   padding: 14px 0;
   border-bottom: 2px solid transparent;
-  transition: color var(--transition-fast), border-color var(--transition-fast);
+  transition:
+    color var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .topbar-link:hover {
@@ -148,8 +152,8 @@
   display: block;
   padding: var(--space-3);
   font-size: var(--text-lg);
-  textTransform: uppercase;
-  letterSpacing: 0.08em;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   color: var(--text-secondary);
   text-decoration: none;
   border-bottom: 1px solid var(--border-primary);
@@ -185,11 +189,11 @@
   .topbar-host {
     display: none;
   }
-  
+
   .metrics-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-  
+
   .app-launcher-grid {
     gap: var(--space-1);
   }
@@ -310,7 +314,9 @@
   flex-direction: column;
   align-items: center;
   position: relative;
-  transition: border-color var(--transition-fast), background var(--transition-fast);
+  transition:
+    border-color var(--transition-fast),
+    background var(--transition-fast);
 }
 
 .app-tile:hover {

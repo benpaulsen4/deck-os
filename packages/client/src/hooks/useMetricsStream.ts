@@ -17,19 +17,20 @@ export function useMetricsStream() {
       setConnection("metrics", true);
     };
 
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        setMetrics(data);
-      } catch (e) {
-        console.error("Failed to parse metrics:", e);
-      }
-    };
-
-    eventSource.onerror = () => {
+    eventSource.onerror = (_error) => {
       setConnected(false);
       setConnection("metrics", false);
     };
+
+    eventSource.addEventListener("metrics", (event) => {
+      try {
+        const data = JSON.parse((event as MessageEvent).data);
+        setMetrics(data);
+      } catch (e) {
+        console.error("[dashboard] Failed to parse metrics:", e);
+      }
+    });
+    eventSource.addEventListener("keepalive", () => {});
 
     return () => {
       eventSource.close();

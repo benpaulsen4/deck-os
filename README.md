@@ -13,6 +13,7 @@ A self-hosted homelab management platform. DeckOS provides a unified dashboard a
 ### Installation
 
 1. Build and start DeckOS:
+
 ```bash
 docker compose up -d
 ```
@@ -23,8 +24,8 @@ docker compose up -d
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
+| Variable   | Default      | Description      |
+| ---------- | ------------ | ---------------- |
 | `NODE_ENV` | `production` | Environment mode |
 
 ### Volume Mounts
@@ -42,24 +43,40 @@ docker compose up -d
 
 - Node.js 20 or higher
 - pnpm 9 or higher
+- Docker (optional - for Docker features)
+
+### Windows Docker Desktop Setup
+
+For Docker features to work in dev mode with Docker Desktop on Windows:
+
+1. Install Docker Desktop
+2. Ensure Docker Desktop is running
+
+If you run the server in an environment that can’t access the Windows Docker named pipe (e.g. inside WSL), configure Docker connectivity via `DOCKER_HOST`.
 
 ### Setup
 
 1. Install dependencies:
+
 ```bash
 pnpm install
 ```
 
 2. Start development servers:
+
 ```bash
 pnpm dev
 ```
 
 This starts:
+
 - Frontend Vite dev server on `http://localhost:5173`
 - Backend Hono server on `http://localhost:3001`
 
+Docker features will be disabled if Docker Desktop is not accessible, but the app will still function for other features.
+
 3. Type checking:
+
 ```bash
 pnpm typecheck
 ```
@@ -71,6 +88,7 @@ pnpm build
 ```
 
 This builds both the client and server, outputting to:
+
 - `packages/client/dist/` - Built React SPA
 - `packages/server/dist/` - Compiled TypeScript
 
@@ -87,6 +105,7 @@ This builds both the client and server, outputting to:
 ### Managing Apps
 
 From the dashboard or Apps page, you can:
+
 - Start/stop/restart compose stacks
 - Pull latest images
 - View container logs in real-time
@@ -105,6 +124,7 @@ From the dashboard or Apps page, you can:
 ### Data Storage
 
 Apps are stored as:
+
 ```
 /data/apps/<app-id>/
 ├── docker-compose.yml
@@ -118,17 +138,21 @@ No database is used - all data is file-based for simplicity and transparency.
 ### Container won't start
 
 Check the container logs:
+
 ```bash
 docker logs deckos
 ```
 
 ### Accessing the Docker socket
 
-DeckOS requires access to the host Docker socket via `/var/run/docker.sock`. Verify the volume mount in `docker-compose.yml`.
+DeckOS requires access to the host Docker socket via `/var/run/docker.sock`. The container runs in privileged mode and as root to ensure Docker socket access and host system visibility.
+
+**Note:** Privileged mode is required for Docker socket access. The container runs as root for simplicity since it already requires elevated privileges.
 
 ### Resetting DeckOS
 
 To remove all DeckOS data (including deployed apps):
+
 ```bash
 docker compose down -v
 ```

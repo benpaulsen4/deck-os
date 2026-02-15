@@ -10,6 +10,39 @@ export const dockerRouter = router({
       return await dockerService.getContainerStats(input.containerId);
     }),
 
+  getStatuses: publicProcedure
+    .input(z.object({ appIds: z.array(z.string()).max(500) }))
+    .query(async ({ input }) => {
+      const uniqueAppIds = Array.from(new Set(input.appIds));
+      const docker = dockerService.getDocker();
+      if (!docker) {
+        return {
+          available: false as const,
+          statuses: Object.fromEntries(
+            uniqueAppIds.map((appId) => [appId, null]),
+          ),
+        };
+      }
+
+      const entries = await Promise.all(
+        uniqueAppIds.map(async (appId) => {
+          try {
+            const status = await dockerService.getStackStatus(appId);
+            return [appId, status] as const;
+          } catch {
+            return [appId, null] as const;
+          }
+        }),
+      );
+
+      const statuses: Record<
+        string,
+        Awaited<ReturnType<typeof dockerService.getStackStatus>> | null
+      > = Object.fromEntries(entries);
+
+      return { available: true as const, statuses };
+    }),
+
   start: publicProcedure
     .input(z.object({ appId: z.string() }))
     .mutation(async ({ input }) => {

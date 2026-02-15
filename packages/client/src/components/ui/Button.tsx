@@ -5,12 +5,21 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   children?: React.ReactNode;
 }
 
-export function Button({ variant = "primary", className, children, ...props }: ButtonProps) {
+export function Button({
+  variant = "primary",
+  className,
+  children,
+  ...props
+}: ButtonProps) {
   const baseStyles = {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
     textTransform: "uppercase",
     fontWeight: "500",
     cursor: "pointer",
-    transition: "background 80ms linear, color 80ms linear, border-color 80ms linear",
+    transition:
+      "background 80ms linear, color 80ms linear, border-color 80ms linear",
     fontSize: "var(--text-sm)",
     letterSpacing: "0.06em",
     borderRadius: 0,
@@ -19,7 +28,7 @@ export function Button({ variant = "primary", className, children, ...props }: B
     minHeight: "40px",
     minWidth: "44px",
   };
-  
+
   const variantStyles: Record<string, React.CSSProperties> = {
     primary: {
       background: "var(--accent-primary)",
@@ -53,9 +62,6 @@ export function Button({ variant = "primary", className, children, ...props }: B
       padding: 0,
       width: "44px",
       height: "44px",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
     },
     iconHover: {
       borderColor: "var(--accent-primary)",
@@ -71,6 +77,8 @@ export function Button({ variant = "primary", className, children, ...props }: B
         ...variantStyles[variant],
       }}
       {...props}
-    />
+    >
+      {children}
+    </button>
   );
 }

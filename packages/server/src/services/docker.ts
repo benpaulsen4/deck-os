@@ -6,11 +6,56 @@ import type { ContainerInfo, StackStatus } from "../lib/schema.js";
 
 const execFileAsync = promisify(execFile);
 
-const docker = new Docker({
-  socketPath: process.env.DOCKER_SOCKET_PATH || "/var/run/docker.sock",
-});
+let docker: Docker | null = null;
 
-const DATA_DIR = process.env.DECKOS_DATA_DIR || path.join(process.cwd(), "data", "apps");
+export function getDocker(): Docker | null {
+  if (!docker) {
+    try {
+      const isWindows = process.platform === "win32";
+
+      if (process.env.DOCKER_HOST) {
+        docker = new Docker();
+      } else if (isWindows) {
+        docker = new Docker({ socketPath: "\\\\.\\pipe\\docker_engine" });
+      } else if (process.env.DOCKER_SOCKET_PATH) {
+        docker = new Docker({ socketPath: process.env.DOCKER_SOCKET_PATH });
+      } else {
+        docker = new Docker({ socketPath: "/var/run/docker.sock" });
+      }
+
+      docker.ping().catch((err) => {
+        console.warn(
+          "[deckos] Docker not accessible - Docker features will be disabled:",
+          err.message,
+        );
+        console.warn(
+          `[deckos] Platform: ${isWindows ? "Windows" : "Unix/Linux"}`,
+        );
+        if (isWindows) {
+          console.warn("[deckos] Ensure Docker Desktop is running");
+        }
+        docker = null;
+      });
+    } catch (error) {
+      console.warn("[deckos] Failed to initialize Docker:", error);
+      docker = null;
+    }
+  }
+  return docker;
+}
+
+function ensureDockerAvailable(): Docker {
+  const client = getDocker();
+  if (!client) {
+    throw new Error(
+      "Docker is not available. Please ensure Docker is running and the socket is accessible.",
+    );
+  }
+  return client;
+}
+
+const DATA_DIR =
+  process.env.DECKOS_DATA_DIR || path.join(process.cwd(), "data", "apps");
 
 async function getComposeProjectName(appId: string): Promise<string> {
   return `deckos-${appId}`;
@@ -24,15 +69,7 @@ export async function startStack(appId: string): Promise<void> {
   const projectName = await getComposeProjectName(appId);
   const composePath = await getComposeFilePath(appId);
 
-  const args = [
-    "compose",
-    "-f",
-    composePath,
-    "-p",
-    projectName,
-    "up",
-    "-d",
-  ];
+  const args = ["compose", "-f", composePath, "-p", projectName, "up", "-d"];
 
   await execFileAsync("docker", args);
 }
@@ -41,14 +78,7 @@ export async function stopStack(appId: string): Promise<void> {
   const projectName = await getComposeProjectName(appId);
   const composePath = await getComposeFilePath(appId);
 
-  const args = [
-    "compose",
-    "-f",
-    composePath,
-    "-p",
-    projectName,
-    "down",
-  ];
+  const args = ["compose", "-f", composePath, "-p", projectName, "down"];
 
   await execFileAsync("docker", args);
 }
@@ -57,64 +87,68 @@ export async function restartStack(appId: string): Promise<void> {
   const projectName = await getComposeProjectName(appId);
   const composePath = await getComposeFilePath(appId);
 
-  const args = [
-    "compose",
-    "-f",
-    composePath,
-    "-p",
-    projectName,
-    "restart",
-  ];
+  const args = ["compose", "-f", composePath, "-p", projectName, "restart"];
 
   await execFileAsync("docker", args);
 }
 
-export async function pullStack(appId: string, onOutput?: (line: string) => void): Promise<void> {
+export async function pullStack(
+  appId: string,
+  onOutput?: (line: string) => void,
+): Promise<void> {
   if (!onOutput) {
     onOutput = () => {};
   }
 
   return new Promise((resolve, reject) => {
-    const projectName = Promise.resolve().then(() => getComposeProjectName(appId));
+    const projectName = Promise.resolve().then(() =>
+      getComposeProjectName(appId),
+    );
     const composePath = Promise.resolve().then(() => getComposeFilePath(appId));
 
-    Promise.all([projectName, composePath]).then(async ([project, p]) => {
-      const args = [
-        "compose",
-        "-f",
-        p,
-        "-p",
-        project,
-        "pull",
-      ];
+    Promise.all([projectName, composePath])
+      .then(async ([project, p]) => {
+        const args = ["compose", "-f", p, "-p", project, "pull"];
 
-      const child = spawn("docker", args);
+        const child = spawn("docker", args);
 
-      const outputCallback = onOutput!;
+        const outputCallback = onOutput!;
 
-      child.stdout?.on("data", (data) => {
-        outputCallback(data.toString());
-      });
+        child.stdout?.on("data", (data) => {
+          outputCallback(data.toString());
+        });
 
-      child.stderr?.on("data", (data) => {
-        outputCallback(data.toString());
-      });
+        child.stderr?.on("data", (data) => {
+          outputCallback(data.toString());
+        });
 
-      child.on("close", () => {
-        resolve();
-      });
+        child.on("close", (code, signal) => {
+          if (code === 0) {
+            resolve();
+            return;
+          }
+          reject(
+            new Error(
+              `docker compose pull failed (code=${code ?? "null"}, signal=${signal ?? "null"})`,
+            ),
+          );
+        });
 
-      child.on("error", (err) => {
-        reject(err);
-      });
-    }).catch(reject);
+        child.on("error", (err) => {
+          reject(err);
+        });
+      })
+      .catch(reject);
   });
 }
 
-export async function getStackContainers(appId: string): Promise<ContainerInfo[]> {
+export async function getStackContainers(
+  appId: string,
+): Promise<ContainerInfo[]> {
+  const dockerClient = ensureDockerAvailable();
   const projectName = await getComposeProjectName(appId);
 
-  const containers = await docker.listContainers({
+  const containers = await dockerClient.listContainers({
     all: true,
     filters: {
       label: [`com.docker.compose.project=${projectName}`],
@@ -124,24 +158,26 @@ export async function getStackContainers(appId: string): Promise<ContainerInfo[]
   const result: ContainerInfo[] = [];
 
   for (const container of containers) {
-    const containerObj = docker.getContainer(container.Id);
+    const containerObj = dockerClient.getContainer(container.Id);
     const inspect = await containerObj.inspect();
 
     const state = inspect.State;
     const portBindings = inspect.NetworkSettings.Ports || {};
 
     const ports: Array<{
-    private: number;
-    public?: number;
-    type?: string;
-    ip?: string;
-  }> = [];
+      private: number;
+      public?: number;
+      type?: string;
+      ip?: string;
+    }> = [];
     for (const [port, bindings] of Object.entries(portBindings)) {
       if (bindings) {
         const binding = Array.isArray(bindings) ? bindings[0] : bindings;
         if (binding) {
-          const hostPort = typeof binding.HostPort === "string" ? binding.HostPort : undefined;
-          const hostIp = typeof binding.HostIp === "string" ? binding.HostIp : "0.0.0.0";
+          const hostPort =
+            typeof binding.HostPort === "string" ? binding.HostPort : undefined;
+          const hostIp =
+            typeof binding.HostIp === "string" ? binding.HostIp : "0.0.0.0";
           ports.push({
             private: parseInt(port.split("/")[0], 10),
             public: hostPort ? parseInt(hostPort, 10) : undefined,
@@ -184,7 +220,9 @@ export async function getStackStatus(appId: string): Promise<StackStatus> {
   const containers = await getStackContainers(appId);
 
   const running = containers.filter((c) => c.state.running).length;
-  const stopped = containers.filter((c) => c.state.dead || !c.state.running).length;
+  const stopped = containers.filter(
+    (c) => c.state.dead || !c.state.running,
+  ).length;
   const restarting = containers.filter((c) => c.state.restarting).length;
 
   return {
@@ -195,23 +233,26 @@ export async function getStackStatus(appId: string): Promise<StackStatus> {
   };
 }
 
-export function getDocker(): Docker {
-  return docker;
-}
-
-export async function getContainerStats(containerId: string): Promise<{ cpu: number; memory: number; memoryBytes: number } | null> {
+export async function getContainerStats(
+  containerId: string,
+): Promise<{ cpu: number; memory: number; memoryBytes: number } | null> {
   try {
-    const container = docker.getContainer(containerId);
-    const stats = await container.stats({ stream: false }) as any;
-    
-    const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
-    const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
-    const cpuPercent = (cpuDelta / systemDelta) * stats.cpu_stats.online_cpus * 100;
-    
+    const dockerClient = ensureDockerAvailable();
+    const container = dockerClient.getContainer(containerId);
+    const stats = (await container.stats({ stream: false })) as any;
+
+    const cpuDelta =
+      stats.cpu_stats.cpu_usage.total_usage -
+      stats.precpu_stats.cpu_usage.total_usage;
+    const systemDelta =
+      stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
+    const cpuPercent =
+      (cpuDelta / systemDelta) * stats.cpu_stats.online_cpus * 100;
+
     const memoryUsage = stats.memory_stats.usage || 0;
     const memoryLimit = stats.memory_stats.limit || 1;
     const memoryPercent = (memoryUsage / memoryLimit) * 100;
-    
+
     return {
       cpu: Math.round(cpuPercent),
       memory: Math.round(memoryPercent),

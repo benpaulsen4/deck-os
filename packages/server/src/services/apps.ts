@@ -1,13 +1,12 @@
-import * as fs from "fs-extra";
+import fs from "fs-extra";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { parse } from "yaml";
 import type { App, AppMetadata } from "../lib/schema.js";
 import { AppMetadataSchema, ComposeFileSchema } from "../lib/schema.js";
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
 
-const DATA_DIR = process.env.DECKOS_DATA_DIR || require('path').join(process.cwd(), "data", "apps");
+const DATA_DIR =
+  process.env.DECKOS_DATA_DIR || path.join(process.cwd(), "data", "apps");
 const METADATA_FILE = "metadata.json";
 const COMPOSE_FILE = "docker-compose.yml";
 
@@ -22,7 +21,7 @@ export async function listApps(): Promise<App[]> {
 
   for (const dir of appDirs) {
     if (!dir.isDirectory()) continue;
-    
+
     const appDirPath = path.join(DATA_DIR, dir.name);
     const metadataPath = path.join(appDirPath, METADATA_FILE);
     const composePath = path.join(appDirPath, COMPOSE_FILE);
@@ -83,7 +82,7 @@ export async function createApp(
   description: string,
   icon: string,
   url: string,
-  composeYaml: string
+  composeYaml: string,
 ): Promise<App> {
   await ensureDataDir();
 
@@ -127,7 +126,7 @@ export async function updateApp(
     description: string;
     icon: string;
     url: string;
-  }>
+  }>,
 ): Promise<App | null> {
   const existing = await getApp(id);
   if (!existing) return null;
@@ -151,7 +150,10 @@ export async function updateApp(
   };
 }
 
-export async function updateCompose(id: string, composeYaml: string): Promise<App | null> {
+export async function updateCompose(
+  id: string,
+  composeYaml: string,
+): Promise<App | null> {
   const existing = await getApp(id);
   if (!existing) return null;
 

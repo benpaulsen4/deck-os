@@ -54,9 +54,8 @@ const sectionStyle: React.CSSProperties = {
     marginTop: "var(--space-3)",
   };
 
-  const [showLogs, setShowLogs] = useState(false);
-
 function AppDetailPage() {
+  const [showLogs, setShowLogs] = useState(false);
   const { appId } = Route.useParams();
   const { addToast } = useToastStore();
   

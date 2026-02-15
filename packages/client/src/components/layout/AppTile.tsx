@@ -7,15 +7,26 @@ import type { AppStatus } from "../../stores/appStatus";
 
 interface AppTileProps {
   app: App;
+  style?: React.CSSProperties;
+  className?: string;
+  rootRef?: React.Ref<HTMLDivElement>;
+  rootProps?: React.HTMLAttributes<HTMLDivElement>;
 }
 
-export function AppTile({ app }: AppTileProps) {
+export function AppTile({
+  app,
+  style,
+  className,
+  rootRef,
+  rootProps,
+}: AppTileProps) {
   const appStatus = useAppStatusStore((state) => state.appStatuses);
   const flashStates = useAppStatusStore((state) => state.flashStates);
-  
+
   const { data: stackStatus } = useQuery({
     queryKey: ["stackStatus", app.id],
-    queryFn: async () => await trpcClient.docker.getStatus.query({ appId: app.id }),
+    queryFn: async () =>
+      await trpcClient.docker.getStatus.query({ appId: app.id }),
     refetchInterval: 5000,
   });
 
@@ -32,11 +43,14 @@ export function AppTile({ app }: AppTileProps) {
     if (stackStatus.running > 0) {
       return "running";
     }
-    if (stackStatus.stopped > 0) {
-      return "stopped";
-    }
     if (stackStatus.restarting > 0) {
       return "restarting";
+    }
+    if (
+      stackStatus.stopped > 0 ||
+      (stackStatus.containers?.length ?? 0) === 0
+    ) {
+      return "stopped";
     }
     return "unknown";
   };
@@ -45,26 +59,50 @@ export function AppTile({ app }: AppTileProps) {
 
   const getStatusLabel = (): string => {
     switch (status) {
-      case "running": return "RUN";
-      case "stopped": return "STOP";
-      case "restarting": return "RESTARTING";
-      case "warning": return "WARN";
-      case "pulling": return "PULLING";
-      default: return "UNKNOWN";
+      case "running":
+        return "RUN";
+      case "stopped":
+        return "STOP";
+      case "restarting":
+        return "RESTARTING";
+      case "warning":
+        return "WARN";
+      case "pulling":
+        return "PULLING";
+      default:
+        return "UNKNOWN";
     }
   };
 
   const iconUrl = app.metadata.icon || "";
   const firstLetter = app.metadata.name.charAt(0).toUpperCase();
+  const {
+    className: rootClassName,
+    style: rootStyle,
+    ...restRootProps
+  } = rootProps ?? {};
 
   return (
-    <div className={`app-tile ${isFlashing ? "app-tile-flash" : ""}`}>
+    <div
+      ref={rootRef}
+      className={`app-tile ${isFlashing ? "app-tile-flash" : ""} ${rootClassName || ""} ${className || ""}`}
+      style={{ ...(rootStyle ?? {}), ...(style ?? {}) }}
+      {...restRootProps}
+    >
       <a
         href={app.metadata.url || "#"}
         target={app.metadata.url ? "_blank" : undefined}
         rel={app.metadata.url ? "noopener noreferrer" : undefined}
         className="app-tile-inner"
-        style={{ textDecoration: "none", color: "inherit", display: "flex", flexDirection: "column", gap: "var(--space-2)", width: "100%", alignItems: "center" }}
+        style={{
+          textDecoration: "none",
+          color: "inherit",
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--space-2)",
+          width: "100%",
+          alignItems: "center",
+        }}
       >
         <div className="app-tile-icon">
           {iconUrl ? (
@@ -75,7 +113,10 @@ export function AppTile({ app }: AppTileProps) {
         </div>
         <span className="app-tile-name">{app.metadata.name}</span>
         <span className="app-tile-status">
-          <span className={`app-tile-status-dot ${status === "running" ? "status-pulse" : ""}`} data-status={status} />
+          <span
+            className={`app-tile-status-dot ${status === "running" ? "status-pulse" : ""}`}
+            data-status={status}
+          />
           {getStatusLabel()}
         </span>
       </a>

@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { trpcServer } from "@hono/trpc-server";
 import { streamSSE } from "hono/streaming";
@@ -12,26 +11,25 @@ import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
+dockerService.getDocker();
+
+// Global error handler
+process.on("uncaughtException", (error) => {
+  console.error("[deckos] Uncaught exception:", error);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("[deckos] Unhandled rejection at:", promise, "reason:", reason);
+});
+
 const app = new Hono();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const isProduction = process.env.NODE_ENV === "production";
-const clientDistPath = isProduction 
-  ? join(__dirname, "../../client/dist") 
+const clientDistPath = isProduction
+  ? join(__dirname, "../../client/dist")
   : join(__dirname, "../../../client/dist");
-
-// CORS for development only
-if (!isProduction) {
-  app.use(
-    "/api/*",
-    cors({
-      origin: "http://localhost:5173",
-      allowMethods: ["GET", "POST", "OPTIONS"],
-      allowHeaders: ["Content-Type"],
-    })
-  );
-}
 
 // tRPC handler
 app.use(
@@ -40,7 +38,7 @@ app.use(
     endpoint: "/api/trpc",
     router: appRouter,
     createContext: (_opts, _c) => createContext(),
-  })
+  }),
 );
 
 // Health check
@@ -48,55 +46,120 @@ app.get("/api/health", (c) => {
   return c.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
+// Docker connectivity check
+app.get("/api/docker/status", (c) => {
+  const docker = dockerService.getDocker();
+  const isWindows = process.platform === "win32";
+
+  let dockerStatus = {
+    available: !!docker,
+    platform: process.platform,
+    message: docker ? "Docker is accessible" : "Docker is not accessible",
+  };
+
+  if (!docker && isWindows) {
+    dockerStatus.message += ". Ensure Docker Desktop is running";
+  }
+
+  return c.json(dockerStatus);
+});
+
 // SSE endpoint for streaming metrics
 app.get("/api/metrics/stream", async (c) => {
   metricsService.startMetricsPolling();
-  
+
   return streamSSE(c, async (stream) => {
     let metrics = metricsService.getCachedMetrics();
     if (!metrics) {
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await metricsService.getOneShotMetrics();
       metrics = metricsService.getCachedMetrics();
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    
+
     if (metrics) {
-      stream.writeSSE({
-        data: JSON.stringify(metrics),
-        event: "metrics",
-        id: Date.now().toString(),
-      });
+      try {
+        stream.writeSSE({
+          data: JSON.stringify(metrics),
+          event: "metrics",
+          id: Date.now().toString(),
+        });
+      } catch (error) {
+        console.error("[deckos] Error sending initial metrics:", error);
+        return;
+      }
     }
-    
+
     const unsubscribe = metricsService.subscribeToMetrics((newMetrics) => {
-      stream.writeSSE({
-        data: JSON.stringify(newMetrics),
-        event: "metrics",
-        id: Date.now().toString(),
-      });
+      try {
+        stream.writeSSE({
+          data: JSON.stringify(newMetrics),
+          event: "metrics",
+          id: Date.now().toString(),
+        });
+      } catch (error) {
+        console.error("[deckos] Error sending metrics:", error);
+        unsubscribe();
+      }
     });
 
+    // Send keepalive every 30 seconds
+    const keepaliveInterval = setInterval(() => {
+      try {
+        stream.writeSSE({
+          data: "keepalive",
+          event: "keepalive",
+          id: Date.now().toString(),
+        });
+      } catch (error) {
+        console.error("[deckos] Error sending keepalive:", error);
+      }
+    }, 30000);
+
     stream.onAbort(() => {
+      clearInterval(keepaliveInterval);
       unsubscribe();
     });
 
-    await stream.sleep(1000000);
+    try {
+      await stream.sleep(1000000);
+    } catch (error) {
+      console.error("[deckos] Stream sleep error:", error);
+    }
   });
 });
 
 // SSE endpoint for Docker events
 app.get("/api/docker/events", async (c) => {
   const docker = dockerService.getDocker();
-  
+  if (!docker) {
+    return c.json({ error: "Docker is not available" }, 503);
+  }
+
   return streamSSE(c, async (stream) => {
-    const eventStream = await docker.getEvents({}) as NodeJS.ReadableStream;
-    
+    const eventStream = (await docker.getEvents({})) as NodeJS.ReadableStream;
+
+    let buffer = "";
     eventStream.on("data", (chunk: Buffer) => {
-      const event = JSON.parse(chunk.toString());
-      stream.writeSSE({
-        data: JSON.stringify(event),
-        event: "docker-event",
-        id: Date.now().toString(),
-      });
+      buffer += chunk.toString("utf-8");
+
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        try {
+          const event = JSON.parse(trimmed);
+          stream.writeSSE({
+            data: JSON.stringify(event),
+            event: "docker-event",
+            id: Date.now().toString(),
+          });
+        } catch (err) {
+          console.error("[deckos] Docker event parse error:", err);
+        }
+      }
     });
 
     eventStream.on("error", (err) => {
@@ -116,49 +179,90 @@ app.get("/api/docker/events", async (c) => {
 app.get("/api/logs/:containerId", async (c) => {
   const { containerId } = c.req.param();
   const tail = c.req.query("tail") || "200";
-  
+
   const docker = dockerService.getDocker();
+  if (!docker) {
+    return c.json({ error: "Docker is not available" }, 503);
+  }
   const container = docker.getContainer(containerId);
-  
+
   return streamSSE(c, async (stream) => {
-    const logStream = await container.logs({
+    let isTty = false;
+    try {
+      const inspect = await container.inspect();
+      isTty = !!inspect?.Config?.Tty;
+    } catch (err) {
+      console.warn("[deckos] Failed to inspect container for logs:", err);
+    }
+
+    const logStream = (await container.logs({
       follow: true,
       tail: parseInt(tail, 10),
       stdout: true,
       stderr: true,
       timestamps: false,
-    }) as NodeJS.ReadableStream;
+    })) as NodeJS.ReadableStream;
 
-    let buffer = "";
-    
+    let lineBuffer = "";
+    let binaryBuffer = Buffer.alloc(0);
+
     logStream.on("data", (chunk: Buffer) => {
-      let offset = 0;
-      while (offset < chunk.length) {
-        if (chunk.length - offset < 8) break;
-        chunk.readUInt8(offset);
-        offset++;
-        offset += 3;
-        const size = chunk.readUInt32BE(offset);
-        offset += 4;
-        
-        if (offset + size > chunk.length) break;
-        
-        const payload = chunk.slice(offset, offset + size).toString('utf-8');
-        offset += size;
-        
-        buffer += payload;
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        
+      if (isTty) {
+        lineBuffer += chunk.toString("utf-8");
+        const lines = lineBuffer.split("\n");
+        lineBuffer = lines.pop() ?? "";
+
         for (const line of lines) {
-          if (line) {
+          const cleanLine = line.endsWith("\r") ? line.slice(0, -1) : line;
+          if (!cleanLine) continue;
+          try {
             stream.writeSSE({
-              data: JSON.stringify({ line }),
+              data: JSON.stringify({ line: cleanLine }),
               event: "log",
               id: Date.now().toString(),
             });
+          } catch (err) {
+            console.error("[deckos] Error streaming logs:", err);
+            return;
           }
         }
+        return;
+      }
+
+      binaryBuffer = Buffer.concat([binaryBuffer, chunk]);
+
+      while (binaryBuffer.length >= 8) {
+        const header = binaryBuffer.subarray(0, 8);
+        // const type = header.readUInt8(0); // 1 = stdout, 2 = stderr
+        const size = header.readUInt32BE(4);
+
+        if (binaryBuffer.length < 8 + size) {
+          break;
+        }
+
+        const payload = binaryBuffer.subarray(8, 8 + size);
+        const text = payload.toString("utf-8");
+
+        lineBuffer += text;
+        const lines = lineBuffer.split("\n");
+        lineBuffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          const cleanLine = line.endsWith("\r") ? line.slice(0, -1) : line;
+          if (!cleanLine) continue;
+          try {
+            stream.writeSSE({
+              data: JSON.stringify({ line: cleanLine }),
+              event: "log",
+              id: Date.now().toString(),
+            });
+          } catch (err) {
+            console.error("[deckos] Error streaming logs:", err);
+            return;
+          }
+        }
+
+        binaryBuffer = binaryBuffer.subarray(8 + size);
       }
     });
 
@@ -180,11 +284,11 @@ if (isProduction) {
 
   app.notFound((c) => {
     const path = c.req.path;
-    
+
     if (path.startsWith("/api/")) {
       return c.json({ error: "Not found" }, 404);
     }
-    
+
     const indexPath = join(clientDistPath, "index.html");
     try {
       const html = readFileSync(indexPath, "utf-8");
@@ -204,7 +308,6 @@ if (isProduction) {
     if (!existsSync(indexPath)) {
       throw new Error("File not found");
     }
-    console.log(`[deckos] serving client from: ${clientDistPath}`);
   } catch (err) {
     console.error(`[ERROR] Client build not found at: ${clientDistPath}`);
     console.error('Run "npm run build" before starting in production mode.');
@@ -212,9 +315,21 @@ if (isProduction) {
   }
 }
 
-console.log(`[deckos] server running on http://localhost:${port}`);
+try {
+  const server = serve({
+    fetch: app.fetch,
+    port,
+  });
 
-serve({
-  fetch: app.fetch,
-  port,
-});
+  server.on("listening", () => {
+    console.log(`[deckos] server running on http://localhost:${port}`);
+  });
+
+  server.on("error", (error) => {
+    console.error("[deckos] Server error:", error);
+    process.exit(1);
+  });
+} catch (error) {
+  console.error("[deckos] Failed to start server:", error);
+  process.exit(1);
+}

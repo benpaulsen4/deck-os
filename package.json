@@ -4,14 +4,17 @@
   "private": true,
   "description": "Self-hosted homelab management platform",
   "scripts": {
-    "dev": "concurrently -n client,server -c cyan,green \"pnpm --filter @deckos/client dev\" \"pnpm --filter @deckos/server dev\"",
+    "dev": "concurrently --kill-others -n server,client -c green,cyan \"pnpm --filter @deckos/server dev\" \"wait-on --verbose --timeout 120000 tcp:3001 && pnpm --filter @deckos/client dev\"",
+    "dev:simple": "pnpm --filter @deckos/server dev",
+    "dev:nodelay": "concurrently -n client,server -c cyan,green \"pnpm --filter @deckos/client dev\" \"pnpm --filter @deckos/server dev\"",
     "build": "pnpm --filter @deckos/server build && pnpm --filter @deckos/client build",
     "typecheck": "pnpm -r typecheck",
     "clean": "pnpm -r clean"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "wait-on": "^9.0.4"
   },
   "engines": {
     "node": ">=20.0.0",
