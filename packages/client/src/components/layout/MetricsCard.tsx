@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { type SystemMetrics } from "../../../../server/src/lib/schema.js";
 import { Sparkline } from "../ui/Sparkline";
 import { useMetricsStore } from "../../stores/metrics";
@@ -5,15 +6,30 @@ import { useMetricsStore } from "../../stores/metrics";
 interface MetricsCardProps {
   label: string;
   color: string;
-  value: string;
+  value: ReactNode;
   usage: number;
   historyValues: (metrics: SystemMetrics) => number;
+  formatSparkValue?: (value: number) => string;
+  sparkMin?: number;
+  sparkMax?: number;
 }
 
-export function MetricsCard({ label, color, value, usage, historyValues }: MetricsCardProps) {
+export function MetricsCard({
+  label,
+  color,
+  value,
+  usage,
+  historyValues,
+  formatSparkValue,
+  sparkMin,
+  sparkMax,
+}: MetricsCardProps) {
   const metrics = useMetricsStore();
 
-  const history = metrics.getHistory(60).map(historyValues);
+  const history = metrics
+    .getHistory(60)
+    .map(historyValues)
+    .filter((v) => Number.isFinite(v));
   const displayUsage = Math.min(100, usage);
 
   return (
@@ -33,7 +49,16 @@ export function MetricsCard({ label, color, value, usage, historyValues }: Metri
         />
       </div>
       <div className="metric-card-sparkline">
-        <Sparkline values={history} color={color} width={160} height={32} />
+        <Sparkline
+          values={history}
+          color={color}
+          width={160}
+          height={32}
+          showBounds
+          formatValue={formatSparkValue}
+          minValue={sparkMin}
+          maxValue={sparkMax}
+        />
       </div>
     </div>
   );

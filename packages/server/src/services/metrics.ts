@@ -1,5 +1,14 @@
 import si from "systeminformation";
-import type { SystemMetrics, CPUMetrics, MemoryMetrics, DiskMetrics, NetworkMetrics } from "../lib/schema.js";
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import type {
+  SystemMetrics,
+  CPUMetrics,
+  MemoryMetrics,
+  DiskMetrics,
+  NetworkMetrics,
+  ProcessMetrics,
+} from "../lib/schema.js";
 
 let cachedMetrics: SystemMetrics | null = null;
 let metricsSubscribers: Set<(metrics: SystemMetrics) => void> = new Set();
@@ -9,14 +18,111 @@ let metricsHistory: SystemMetrics[] = [];
 const POLL_INTERVAL = 2000;
 const HISTORY_SIZE = 60;
 
+let raplEnergyPath: string | null | undefined = undefined;
+let lastCpuEnergyUj: number | null = null;
+let lastCpuEnergyAtMs: number | null = null;
+
+async function readNumberFromFile(path: string): Promise<number | null> {
+  try {
+    const raw = await readFile(path, "utf8");
+    const value = Number.parseFloat(raw.trim());
+    return Number.isFinite(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function findRaplEnergyPath(): Promise<string | null> {
+  const candidates = [
+    "/sys/class/powercap/intel-rapl:0/energy_uj",
+    "/sys/class/powercap/amd-rapl:0/energy_uj",
+  ];
+
+  for (const candidate of candidates) {
+    const v = await readNumberFromFile(candidate);
+    if (v !== null) return candidate;
+  }
+
+  const base = "/sys/class/powercap";
+  try {
+    const scan = async (dir: string, depth: number): Promise<string | null> => {
+      if (depth < 0) return null;
+      const entries = await readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const child = join(dir, entry.name);
+        const energyPath = join(child, "energy_uj");
+        const v = await readNumberFromFile(energyPath);
+        if (v !== null) return energyPath;
+        const nested = await scan(child, depth - 1);
+        if (nested) return nested;
+      }
+      return null;
+    };
+
+    return await scan(base, 2);
+  } catch {
+    return null;
+  }
+}
+
+async function readCpuPowerWatts(nowMs: number): Promise<number | null> {
+  if (raplEnergyPath === undefined) {
+    raplEnergyPath = await findRaplEnergyPath();
+  }
+  if (!raplEnergyPath) return null;
+
+  const energyUj = await readNumberFromFile(raplEnergyPath);
+  if (energyUj === null) return null;
+
+  if (lastCpuEnergyUj === null || lastCpuEnergyAtMs === null) {
+    lastCpuEnergyUj = energyUj;
+    lastCpuEnergyAtMs = nowMs;
+    return null;
+  }
+
+  const deltaUj = energyUj - lastCpuEnergyUj;
+  const deltaS = (nowMs - lastCpuEnergyAtMs) / 1000;
+
+  lastCpuEnergyUj = energyUj;
+  lastCpuEnergyAtMs = nowMs;
+
+  if (deltaUj <= 0 || deltaS <= 0) return null;
+  const watts = deltaUj / 1_000_000 / deltaS;
+  return Number.isFinite(watts) ? watts : null;
+}
+
 async function collectCPUMetrics(): Promise<CPUMetrics> {
   const cpuLoad = await si.currentLoad();
   const cpu = await si.cpu();
+  const nowMs = Date.now();
+
+  let temperatureC: number | null = null;
+  try {
+    const temp = await si.cpuTemperature();
+    if (
+      typeof temp.main === "number" &&
+      Number.isFinite(temp.main) &&
+      temp.main > 0
+    ) {
+      temperatureC = temp.main;
+    }
+  } catch {
+    temperatureC = null;
+  }
+
+  const powerWatts = await readCpuPowerWatts(nowMs);
   return {
     usage: cpuLoad.currentLoad,
-    load: [cpuLoad.currentLoadUser, cpuLoad.currentLoadSystem, cpuLoad.currentLoadIdle],
+    load: [
+      cpuLoad.currentLoadUser,
+      cpuLoad.currentLoadSystem,
+      cpuLoad.currentLoadIdle,
+    ],
     cores: cpu.cores,
     speed: cpu.speed,
+    temperatureC,
+    powerWatts,
   };
 }
 
@@ -24,11 +130,27 @@ async function collectMemoryMetrics(): Promise<MemoryMetrics> {
   const mem = await si.mem();
   const total = mem.total;
   const used = mem.used;
+  const swapTotal = mem.swaptotal || 0;
+  const swapUsed = mem.swapused || 0;
   return {
     total,
     used,
     free: mem.free,
     usage: (used / total) * 100,
+    swapTotal,
+    swapUsed,
+    swapFree: Math.max(0, swapTotal - swapUsed),
+    swapUsage: swapTotal > 0 ? (swapUsed / swapTotal) * 100 : 0,
+  };
+}
+
+async function collectProcessMetrics(): Promise<ProcessMetrics> {
+  const processes = await si.processes();
+  return {
+    all: processes.all,
+    running: processes.running,
+    blocked: processes.blocked,
+    sleeping: processes.sleeping,
   };
 }
 
@@ -47,13 +169,16 @@ async function collectDiskMetrics(): Promise<DiskMetrics> {
 
 async function collectNetworkMetrics(): Promise<NetworkMetrics> {
   const networkStats = await si.networkStats();
-  const interfaces: Record<string, {
-    rx_bytes: number;
-    tx_bytes: number;
-    rx_sec: number;
-    tx_sec: number;
-  }> = {};
-  
+  const interfaces: Record<
+    string,
+    {
+      rx_bytes: number;
+      tx_bytes: number;
+      rx_sec: number;
+      tx_sec: number;
+    }
+  > = {};
+
   for (const iface of networkStats) {
     interfaces[iface.iface] = {
       rx_bytes: iface.rx_bytes,
@@ -62,14 +187,15 @@ async function collectNetworkMetrics(): Promise<NetworkMetrics> {
       tx_sec: iface.tx_sec,
     };
   }
-  
+
   return { interfaces };
 }
 
 async function collectMetrics(): Promise<SystemMetrics> {
-  const [cpu, memory, disk, network] = await Promise.all([
+  const [cpu, memory, processes, disk, network] = await Promise.all([
     collectCPUMetrics(),
     collectMemoryMetrics(),
+    collectProcessMetrics(),
     collectDiskMetrics(),
     collectNetworkMetrics(),
   ]);
@@ -77,6 +203,7 @@ async function collectMetrics(): Promise<SystemMetrics> {
   const metrics: SystemMetrics = {
     cpu,
     memory,
+    processes,
     disk,
     network,
     timestamp: new Date().toISOString(),
@@ -116,7 +243,9 @@ export function getMetricsHistory(): SystemMetrics[] {
   return metricsHistory;
 }
 
-export function subscribeToMetrics(callback: (metrics: SystemMetrics) => void): () => void {
+export function subscribeToMetrics(
+  callback: (metrics: SystemMetrics) => void,
+): () => void {
   metricsSubscribers.add(callback);
   return () => metricsSubscribers.delete(callback);
 }

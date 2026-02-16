@@ -213,6 +213,12 @@
   margin-top: var(--space-2);
 }
 
+.metrics-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-2);
+}
+
 @media (max-width: 1439px) {
   .metrics-grid {
     grid-template-columns: repeat(4, 1fr);
@@ -236,6 +242,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  min-width: 0;
 }
 
 .metric-card-header {
@@ -248,6 +255,43 @@
   font-size: var(--text-2xl);
   font-weight: 700;
   color: var(--text-primary);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.metric-value-sep {
+  color: var(--text-muted);
+  font-size: var(--text-xl);
+  font-weight: 600;
+}
+
+.metric-value-secondary {
+  color: var(--text-secondary);
+  font-size: var(--text-xl);
+  font-weight: 600;
+}
+
+.metric-value-unit {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.metric-value-dir {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  line-height: 1;
+  position: relative;
+  top: -1px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .metric-card-bar-container {
@@ -263,7 +307,30 @@
 
 .metric-card-sparkline {
   height: 32px;
-  overflow: hidden;
+  overflow: visible;
+}
+
+.sparkline {
+  position: relative;
+  width: 100%;
+}
+
+.sparkline-label {
+  position: absolute;
+  right: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.sparkline-label-max {
+  top: 0;
+}
+
+.sparkline-label-min {
+  bottom: 0;
 }
 
 /* ---- System Info Bar ---- */

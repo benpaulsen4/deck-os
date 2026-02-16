@@ -72,6 +72,7 @@ export function Button({
   return (
     <button
       className={cn("deckos-button", className)}
+      data-variant={variant}
       style={{
         ...baseStyles,
         ...variantStyles[variant],

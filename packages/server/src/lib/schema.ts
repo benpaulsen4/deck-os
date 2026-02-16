@@ -13,9 +13,13 @@ const AppMetadataSchema = z.object({
 
 const ComposeFileSchema = z.object({
   version: z.string().optional(),
-  services: z.record(z.object({
-    image: z.string(),
-  }).passthrough()),
+  services: z.record(
+    z
+      .object({
+        image: z.string(),
+      })
+      .passthrough(),
+  ),
 });
 
 const AppSchema = z.object({
@@ -40,6 +44,8 @@ const CPUMetricsSchema = z.object({
   load: z.array(z.number()),
   cores: z.number(),
   speed: z.number().optional(),
+  temperatureC: z.number().nullable().optional(),
+  powerWatts: z.number().nullable().optional(),
 });
 
 const MemoryMetricsSchema = z.object({
@@ -47,30 +53,46 @@ const MemoryMetricsSchema = z.object({
   used: z.number(),
   free: z.number(),
   usage: z.number(),
+  swapTotal: z.number().optional(),
+  swapUsed: z.number().optional(),
+  swapFree: z.number().optional(),
+  swapUsage: z.number().optional(),
+});
+
+const ProcessMetricsSchema = z.object({
+  all: z.number(),
+  running: z.number(),
+  blocked: z.number(),
+  sleeping: z.number(),
 });
 
 const DiskMetricsSchema = z.object({
-  fs: z.array(z.object({
-    fs: z.string(),
-    mount: z.string(),
-    size: z.number(),
-    used: z.number(),
-    usePercent: z.number(),
-  })),
+  fs: z.array(
+    z.object({
+      fs: z.string(),
+      mount: z.string(),
+      size: z.number(),
+      used: z.number(),
+      usePercent: z.number(),
+    }),
+  ),
 });
 
 const NetworkMetricsSchema = z.object({
-  interfaces: z.record(z.object({
-    rx_bytes: z.number(),
-    tx_bytes: z.number(),
-    rx_sec: z.number(),
-    tx_sec: z.number(),
-  })),
+  interfaces: z.record(
+    z.object({
+      rx_bytes: z.number(),
+      tx_bytes: z.number(),
+      rx_sec: z.number(),
+      tx_sec: z.number(),
+    }),
+  ),
 });
 
 const SystemMetricsSchema = z.object({
   cpu: CPUMetricsSchema,
   memory: MemoryMetricsSchema,
+  processes: ProcessMetricsSchema,
   disk: DiskMetricsSchema,
   network: NetworkMetricsSchema,
   timestamp: z.string().datetime(),
@@ -96,11 +118,13 @@ const ContainerStateSchema = z.object({
   finishedAt: z.string().optional(),
 });
 
-const ContainerStatsSchema = z.object({
-  cpu: z.number(),
-  memory: z.number(),
-  memoryBytes: z.number(),
-}).optional();
+const ContainerStatsSchema = z
+  .object({
+    cpu: z.number(),
+    memory: z.number(),
+    memoryBytes: z.number(),
+  })
+  .optional();
 
 const ContainerInfoSchema = z.object({
   id: z.string(),
@@ -132,6 +156,7 @@ type CPUMetrics = z.infer<typeof CPUMetricsSchema>;
 type MemoryMetrics = z.infer<typeof MemoryMetricsSchema>;
 type DiskMetrics = z.infer<typeof DiskMetricsSchema>;
 type NetworkMetrics = z.infer<typeof NetworkMetricsSchema>;
+type ProcessMetrics = z.infer<typeof ProcessMetricsSchema>;
 type ContainerInfo = z.infer<typeof ContainerInfoSchema>;
 type ContainerState = z.infer<typeof ContainerStateSchema>;
 type StackStatus = z.infer<typeof StackStatusSchema>;
@@ -144,6 +169,7 @@ export {
   SystemMetricsSchema,
   CPUMetricsSchema,
   MemoryMetricsSchema,
+  ProcessMetricsSchema,
   DiskMetricsSchema,
   NetworkMetricsSchema,
   ContainerInfoSchema,
@@ -160,6 +186,7 @@ export type {
   SystemMetrics,
   CPUMetrics,
   MemoryMetrics,
+  ProcessMetrics,
   DiskMetrics,
   NetworkMetrics,
   ContainerInfo,

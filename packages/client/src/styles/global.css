@@ -133,22 +133,22 @@
   transition: background 80ms linear, color 80ms linear, border-color 80ms linear;
 }
 
-.deckos-button[variant="primary"]:hover {
+.deckos-button[data-variant="primary"]:hover {
   background: var(--accent-hover);
 }
 
-.deckos-button[variant="secondary"]:hover {
+.deckos-button[data-variant="secondary"]:hover {
   background: var(--bg-tertiary);
   border-color: var(--accent-primary);
   color: var(--accent-primary);
 }
 
-.deckos-button[variant="danger"]:hover {
+.deckos-button[data-variant="danger"]:hover {
   background: var(--status-stopped);
   color: var(--text-inverse);
 }
 
-.deckos-button[variant="icon"]:hover {
+.deckos-button[data-variant="icon"]:hover {
   border-color: var(--accent-primary);
   color: var(--accent-primary);
 }
