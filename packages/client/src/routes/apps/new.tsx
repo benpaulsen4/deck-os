@@ -31,26 +31,49 @@ function NewAppPage() {
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const createAppMutation = useMutation({
-    mutationFn: async (input: { name: string; description: string; icon: string; url: string; composeYaml: string }) => {
-      return await trpcClient.apps.create.mutate(input);
+    mutationFn: async (input: {
+      name: string;
+      description: string;
+      icon: string;
+      url: string;
+      composeYaml: string;
+    }) => {
+      const created = await trpcClient.apps.create.mutate(input);
+      try {
+        await trpcClient.docker.start.mutate({ appId: created.id });
+      } catch (err) {
+        let rollbackOk = false;
+        try {
+          await trpcClient.apps.delete.mutate({ id: created.id });
+          rollbackOk = true;
+        } catch {}
+        const reason = err instanceof Error ? err.message : "Deploy failed";
+        throw new Error(
+          rollbackOk
+            ? `${reason} (rolled back)`
+            : `${reason} (rollback failed)`,
+        );
+      }
+      return created;
     },
 
     onSuccess: async (result: any) => {
-      addToast("App created successfully", "success");
-      await trpcClient.docker.start.mutate({ appId: result.id });
+      addToast("App created & deployed successfully", "success");
       navigate({ to: "/apps/$appId", params: { appId: result.id } });
     },
 
     onError: (err: any) => {
-      addToast(`Failed to create app: ${err.message}`, "error");
+      addToast(`Failed to create/deploy app: ${err.message}`, "error");
     },
   });
 
   const handleValidate = async () => {
     setValidationError(null);
-    
+
     try {
-      const result = await trpcClient.apps.validateCompose.mutate({ composeYaml });
+      const result = await trpcClient.apps.validateCompose.mutate({
+        composeYaml,
+      });
       if (result.valid) {
         addToast("Compose YAML is valid", "success");
       }
@@ -115,14 +138,25 @@ function NewAppPage() {
 
   return (
     <div style={pageContainerStyle}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "var(--space-3)" }}>
-        <h1 style={{
-          fontFamily: "var(--font-display)",
-          fontSize: "var(--text-xl)",
-          fontWeight: 700,
-          textTransform: "uppercase",
-          letterSpacing: "0.06em",
-        }}>New App</h1>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: "var(--space-3)",
+        }}
+      >
+        <h1
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: "var(--text-xl)",
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+          }}
+        >
+          New App
+        </h1>
       </div>
 
       <div className="panel" style={{ padding: "var(--space-3)" }}>
@@ -134,21 +168,21 @@ function NewAppPage() {
             placeholder="my-app"
             required
           />
-          
+
           <Input
             label="DESCRIPTION"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="My awesome app"
           />
-          
+
           <Input
             label="ICON URL"
             value={icon}
             onChange={(e) => setIcon(e.target.value)}
             placeholder="https://example.com/icon.png"
           />
-          
+
           <Input
             label="WEB URL"
             value={url}
@@ -166,9 +200,7 @@ function NewAppPage() {
           </div>
 
           {validationError && (
-            <div style={errorBannerStyle}>
-              {validationError}
-            </div>
+            <div style={errorBannerStyle}>{validationError}</div>
           )}
 
           <div style={buttonContainerStyle}>

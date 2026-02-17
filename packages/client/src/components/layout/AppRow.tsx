@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useAppStatusStore, type AppStatus } from "../../stores/appStatus";
 import { Button } from "../../components/ui/Button";
@@ -17,6 +18,7 @@ export function AppRow({
   isActionPending,
 }: AppRowProps) {
   const appStatus = useAppStatusStore((state) => state.appStatuses);
+  const [iconErrored, setIconErrored] = useState(false);
 
   const liveStatus: AppStatus = appStatus[app.id] || "unknown";
 
@@ -103,6 +105,13 @@ export function AppRow({
     minWidth: "32px",
   };
 
+  const iconUrl = app.metadata.icon || "";
+  const firstLetter = app.metadata.name.charAt(0).toUpperCase();
+
+  useEffect(() => {
+    setIconErrored(false);
+  }, [iconUrl]);
+
   return (
     <tr
       style={rowStyle}
@@ -119,37 +128,65 @@ export function AppRow({
         <Link
           to="/apps/$appId"
           params={{ appId: app.id }}
-          style={{ textDecoration: "none", color: "inherit" }}
+          style={{
+            textDecoration: "none",
+            color: "inherit",
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+          }}
         >
-          {app.metadata.name}
+          <span
+            style={{
+              width: "26px",
+              height: "26px",
+              borderRadius: "6px",
+              overflow: "hidden",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "var(--bg-tertiary)",
+              border: "1px solid var(--border-primary)",
+              fontSize: "var(--text-xs)",
+              color: "var(--text-secondary)",
+              flex: "0 0 auto",
+            }}
+          >
+            {iconUrl && !iconErrored ? (
+              <img
+                src={iconUrl}
+                alt={app.metadata.name}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                onError={() => setIconErrored(true)}
+              />
+            ) : (
+              firstLetter
+            )}
+          </span>
+          <span>{app.metadata.name}</span>
         </Link>
       </td>
-      <td
-        style={{
-          ...cellStyle,
-          display: "flex",
-          alignItems: "center",
-          gap: "8px",
-        }}
-      >
-        <span
-          style={{
-            width: "8px",
-            height: "8px",
-            backgroundColor: getStatusColor(),
-            display: "inline-block",
-            borderRadius: "50%",
-          }}
-        />
-        <span
-          style={{
-            fontSize: "var(--text-xs)",
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-          }}
-        >
-          {getStatusLabel()}
-        </span>
+      <td style={cellStyle}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span
+            style={{
+              width: "8px",
+              height: "8px",
+              backgroundColor: getStatusColor(),
+              display: "inline-block",
+              borderRadius: "50%",
+            }}
+          />
+          <span
+            style={{
+              fontSize: "var(--text-xs)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+            }}
+          >
+            {getStatusLabel()}
+          </span>
+        </div>
       </td>
       <td style={{ ...cellStyle, fontSize: "var(--text-xs)" }}>
         {stackStatus ? `${stackStatus.containers.length} containers` : "—"}

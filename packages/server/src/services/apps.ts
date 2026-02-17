@@ -104,13 +104,18 @@ export async function createApp(
   ComposeFileSchema.parse(parsed);
 
   const appDirPath = path.join(DATA_DIR, id);
-  await fs.ensureDir(appDirPath);
+  try {
+    await fs.ensureDir(appDirPath);
 
-  const metadataPath = path.join(appDirPath, METADATA_FILE);
-  const composePath = path.join(appDirPath, COMPOSE_FILE);
+    const metadataPath = path.join(appDirPath, METADATA_FILE);
+    const composePath = path.join(appDirPath, COMPOSE_FILE);
 
-  await fs.writeJson(metadataPath, metadata, { spaces: 2 });
-  await fs.writeFile(composePath, composeYaml, "utf-8");
+    await fs.writeJson(metadataPath, metadata, { spaces: 2 });
+    await fs.writeFile(composePath, composeYaml, "utf-8");
+  } catch (err) {
+    await fs.remove(appDirPath).catch(() => {});
+    throw err;
+  }
 
   return {
     id,

@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTRPC } from "../../trpc";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { trpcClient } from "../../trpc";
 import { useToastStore } from "../../stores/toast";
 import { useAppStatus } from "../../hooks/useAppStatus";
@@ -14,6 +14,7 @@ export const Route = createFileRoute("/apps/")({
 
 function AppsPage() {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const { addToast } = useToastStore();
 
   // Initialize app status listener
@@ -76,8 +77,11 @@ function AppsPage() {
   const deleteMutation = useMutation({
     mutationFn: async (appId: string) =>
       await trpcClient.apps.delete.mutate({ id: appId }),
-    onSuccess: () => {
+    onSuccess: async () => {
       addToast("App deleted", "success");
+      await queryClient.invalidateQueries({
+        queryKey: trpc.apps.list.queryOptions().queryKey,
+      });
     },
     onError: (err: any) => {
       addToast(`Failed to delete: ${err.message}`, "error");

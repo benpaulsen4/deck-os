@@ -178,7 +178,8 @@ app.get("/api/docker/events", async (c) => {
 // SSE endpoint for container logs
 app.get("/api/logs/:containerId", async (c) => {
   const { containerId } = c.req.param();
-  const tail = c.req.query("tail") || "200";
+  const tailQuery = c.req.query("tail") || "2000";
+  const sinceQuery = c.req.query("since");
 
   const docker = dockerService.getDocker();
   if (!docker) {
@@ -195,13 +196,29 @@ app.get("/api/logs/:containerId", async (c) => {
       console.warn("[deckos] Failed to inspect container for logs:", err);
     }
 
-    const logStream = (await container.logs({
+    const since =
+      sinceQuery && Number.isFinite(parseInt(sinceQuery, 10))
+        ? parseInt(sinceQuery, 10)
+        : undefined;
+
+    const logOptions: any = {
       follow: true,
-      tail: parseInt(tail, 10),
       stdout: true,
       stderr: true,
       timestamps: false,
-    })) as NodeJS.ReadableStream;
+    };
+
+    if (tailQuery !== "all") {
+      const parsedTail = parseInt(tailQuery, 10);
+      logOptions.tail = Number.isFinite(parsedTail) ? parsedTail : 2000;
+    }
+    if (since !== undefined) {
+      logOptions.since = since;
+    }
+
+    const logStream = (await container.logs(
+      logOptions as any,
+    )) as any as NodeJS.ReadableStream;
 
     let lineBuffer = "";
     let binaryBuffer = Buffer.alloc(0);
