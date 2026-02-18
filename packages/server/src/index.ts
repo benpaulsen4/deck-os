@@ -39,7 +39,7 @@ app.use(
     endpoint: "/api/trpc",
     router: appRouter,
     createContext: (_opts, _c) => createContext(),
-  }),
+  })
 );
 
 // Health check
@@ -52,7 +52,7 @@ app.get("/api/docker/status", (c) => {
   const docker = dockerService.getDocker();
   const isWindows = process.platform === "win32";
 
-  let dockerStatus = {
+  const dockerStatus = {
     available: !!docker,
     platform: process.platform,
     message: docker ? "Docker is accessible" : "Docker is not accessible",
@@ -187,7 +187,7 @@ app.post("/api/apps/:appId/pull/start", async (c) => {
     }
     return c.json(
       { error: err instanceof Error ? err.message : "Failed to start pull" },
-      500,
+      500
     );
   }
 });
@@ -243,7 +243,7 @@ app.get("/api/logs/:containerId", async (c) => {
     }
 
     const logStream = (await container.logs(
-      logOptions as any,
+      logOptions as any
     )) as any as NodeJS.ReadableStream;
 
     let lineBuffer = "";

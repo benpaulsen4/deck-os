@@ -199,21 +199,25 @@ A table/list view of all managed apps with more detail than the dashboard tiles:
 Single-app management view with three sections in a vertical stack:
 
 **Section 1: App Header**
+
 - App icon (large, 64x64), name, description, status, external URL link button
 - Action bar: Start / Stop / Restart / Pull / Delete buttons
 
 **Section 2: Containers**
+
 - Table of containers in the compose stack
 - Columns: Name, Image, Status, CPU %, Memory, Ports
 - Per-container resource bars (same style as dashboard metric bars)
 
 **Section 3: Compose Editor**
+
 - Full-width CodeMirror editor showing the docker-compose.yml
 - Dark theme matching the DeckOS palette
 - Save button triggers validation + rewrite
 - Syntax errors shown inline
 
 **Section 4: Logs**
+
 - Tabbed log viewer (one tab per container in the stack)
 - Terminal-style rendering: monospace, `--bg-primary` background, `--text-secondary` text
 - Auto-scroll with a "follow" toggle
@@ -256,6 +260,7 @@ For creating a new app:
 ### Settings Page
 
 Minimal for now:
+
 - System information (read-only display of hostname, Docker version, OS, etc.)
 - Data directory path display
 - About section with version number

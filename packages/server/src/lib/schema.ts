@@ -12,7 +12,7 @@ const HttpUrlSchema = z
         return false;
       }
     },
-    { message: "Invalid URL" },
+    { message: "Invalid URL" }
   );
 
 const UrlOrEmptySchema = z.union([HttpUrlSchema, z.literal("")]);
@@ -36,7 +36,7 @@ const ComposeFileSchema = z.object({
       .object({
         image: z.string(),
       })
-      .passthrough(),
+      .passthrough()
   ),
 });
 
@@ -92,7 +92,7 @@ const DiskMetricsSchema = z.object({
       size: z.number(),
       used: z.number(),
       usePercent: z.number(),
-    }),
+    })
   ),
 });
 
@@ -103,7 +103,7 @@ const NetworkMetricsSchema = z.object({
       tx_bytes: z.number(),
       rx_sec: z.number(),
       tx_sec: z.number(),
-    }),
+    })
   ),
 });
 

@@ -74,7 +74,7 @@ function NewAppPage() {
         rollbackOk
           ? `Failed to deploy app: ${reason} (rolled back)`
           : `Failed to deploy app: ${reason} (rollback failed)`,
-        "error",
+        "error"
       );
       setDeployAppId(null);
     },
@@ -205,16 +205,10 @@ function NewAppPage() {
 
           <div style={composeSectionStyle}>
             <label style={labelStyle}>COMPOSE FILE</label>
-            <CodeEditor
-              value={composeYaml}
-              onChange={setComposeYaml}
-              minHeight="400px"
-            />
+            <CodeEditor value={composeYaml} onChange={setComposeYaml} minHeight="400px" />
           </div>
 
-          {validationError && (
-            <div style={errorBannerStyle}>{validationError}</div>
-          )}
+          {validationError && <div style={errorBannerStyle}>{validationError}</div>}
 
           <div style={buttonContainerStyle}>
             <Button
@@ -222,9 +216,7 @@ function NewAppPage() {
               variant="secondary"
               onClick={handleValidate}
               disabled={
-                createAppMutation.isPending ||
-                isPulling ||
-                deployMutation.isPending
+                createAppMutation.isPending || isPulling || deployMutation.isPending
               }
             >
               VALIDATE
@@ -268,7 +260,7 @@ function NewAppPage() {
               rollbackOk
                 ? `Failed to pull images: ${result.error || "Pull failed"} (rolled back)`
                 : `Failed to pull images: ${result.error || "Pull failed"} (rollback failed)`,
-              "error",
+              "error"
             );
             setDeployAppId(null);
             return;

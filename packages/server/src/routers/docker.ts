@@ -2,6 +2,7 @@ import { router, publicProcedure } from "../trpc/trpc.js";
 import { z } from "zod";
 import * as dockerService from "../services/docker.js";
 import * as appsService from "../services/apps.js";
+import { AppNotFoundError } from "../lib/errors.js";
 
 export const dockerRouter = router({
   getContainerStats: publicProcedure
@@ -18,9 +19,7 @@ export const dockerRouter = router({
       if (!docker) {
         return {
           available: false as const,
-          statuses: Object.fromEntries(
-            uniqueAppIds.map((appId) => [appId, null]),
-          ),
+          statuses: Object.fromEntries(uniqueAppIds.map((appId) => [appId, null])),
         };
       }
 
@@ -32,7 +31,7 @@ export const dockerRouter = router({
           } catch {
             return [appId, null] as const;
           }
-        }),
+        })
       );
 
       const statuses: Record<
@@ -48,7 +47,7 @@ export const dockerRouter = router({
     .mutation(async ({ input }) => {
       const app = await appsService.getApp(input.appId);
       if (!app) {
-        throw new Error("App not found");
+        throw new AppNotFoundError(input.appId);
       }
       await dockerService.startStack(input.appId);
       return { success: true };
@@ -59,7 +58,7 @@ export const dockerRouter = router({
     .mutation(async ({ input }) => {
       const app = await appsService.getApp(input.appId);
       if (!app) {
-        throw new Error("App not found");
+        throw new AppNotFoundError(input.appId);
       }
       await dockerService.stopStack(input.appId);
       return { success: true };
@@ -70,7 +69,7 @@ export const dockerRouter = router({
     .mutation(async ({ input }) => {
       const app = await appsService.getApp(input.appId);
       if (!app) {
-        throw new Error("App not found");
+        throw new AppNotFoundError(input.appId);
       }
       await dockerService.restartStack(input.appId);
       return { success: true };
@@ -81,7 +80,7 @@ export const dockerRouter = router({
     .mutation(async ({ input }) => {
       const app = await appsService.getApp(input.appId);
       if (!app) {
-        throw new Error("App not found");
+        throw new AppNotFoundError(input.appId);
       }
       await dockerService.pullStack(input.appId, () => {});
       return { success: true };
@@ -92,7 +91,7 @@ export const dockerRouter = router({
     .query(async ({ input }) => {
       const app = await appsService.getApp(input.appId);
       if (!app) {
-        throw new Error("App not found");
+        throw new AppNotFoundError(input.appId);
       }
       return await dockerService.getStackContainers(input.appId);
     }),
@@ -102,7 +101,7 @@ export const dockerRouter = router({
     .query(async ({ input }) => {
       const app = await appsService.getApp(input.appId);
       if (!app) {
-        throw new Error("App not found");
+        throw new AppNotFoundError(input.appId);
       }
       return await dockerService.getStackStatus(input.appId);
     }),

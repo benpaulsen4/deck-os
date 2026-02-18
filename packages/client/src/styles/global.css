@@ -130,7 +130,10 @@
 
 /* ---- Button Hover States ---- */
 .deckos-button:hover {
-  transition: background 80ms linear, color 80ms linear, border-color 80ms linear;
+  transition:
+    background 80ms linear,
+    color 80ms linear,
+    border-color 80ms linear;
 }
 
 .deckos-button[data-variant="primary"]:hover {

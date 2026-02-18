@@ -9,14 +9,12 @@ import type {
   NetworkMetrics,
   ProcessMetrics,
 } from "../lib/schema.js";
+import { POLL_INTERVAL_MS, METRICS_HISTORY_SIZE } from "../lib/config.js";
 
 let cachedMetrics: SystemMetrics | null = null;
-let metricsSubscribers: Set<(metrics: SystemMetrics) => void> = new Set();
+const metricsSubscribers: Set<(metrics: SystemMetrics) => void> = new Set();
 let pollInterval: NodeJS.Timeout | null = null;
-let metricsHistory: SystemMetrics[] = [];
-
-const POLL_INTERVAL = 2000;
-const HISTORY_SIZE = 60;
+const metricsHistory: SystemMetrics[] = [];
 
 let raplEnergyPath: string | null | undefined = undefined;
 let lastCpuEnergyUj: number | null = null;
@@ -100,11 +98,7 @@ async function collectCPUMetrics(): Promise<CPUMetrics> {
   let temperatureC: number | null = null;
   try {
     const temp = await si.cpuTemperature();
-    if (
-      typeof temp.main === "number" &&
-      Number.isFinite(temp.main) &&
-      temp.main > 0
-    ) {
+    if (typeof temp.main === "number" && Number.isFinite(temp.main) && temp.main > 0) {
       temperatureC = temp.main;
     }
   } catch {
@@ -114,11 +108,7 @@ async function collectCPUMetrics(): Promise<CPUMetrics> {
   const powerWatts = await readCpuPowerWatts(nowMs);
   return {
     usage: cpuLoad.currentLoad,
-    load: [
-      cpuLoad.currentLoadUser,
-      cpuLoad.currentLoadSystem,
-      cpuLoad.currentLoadIdle,
-    ],
+    load: [cpuLoad.currentLoadUser, cpuLoad.currentLoadSystem, cpuLoad.currentLoadIdle],
     cores: cpu.cores,
     speed: cpu.speed,
     temperatureC,
@@ -211,7 +201,7 @@ async function collectMetrics(): Promise<SystemMetrics> {
 
   cachedMetrics = metrics;
   metricsHistory.push(metrics);
-  if (metricsHistory.length > HISTORY_SIZE) {
+  if (metricsHistory.length > METRICS_HISTORY_SIZE) {
     metricsHistory.shift();
   }
 
@@ -225,7 +215,7 @@ async function collectMetrics(): Promise<SystemMetrics> {
 export function startMetricsPolling(): void {
   if (pollInterval) return;
   collectMetrics();
-  pollInterval = setInterval(collectMetrics, POLL_INTERVAL);
+  pollInterval = setInterval(collectMetrics, POLL_INTERVAL_MS);
 }
 
 export function stopMetricsPolling(): void {
@@ -244,7 +234,7 @@ export function getMetricsHistory(): SystemMetrics[] {
 }
 
 export function subscribeToMetrics(
-  callback: (metrics: SystemMetrics) => void,
+  callback: (metrics: SystemMetrics) => void
 ): () => void {
   metricsSubscribers.add(callback);
   return () => metricsSubscribers.delete(callback);

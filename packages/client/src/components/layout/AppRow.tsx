@@ -11,12 +11,7 @@ interface AppRowProps {
   isActionPending: (action: string) => boolean;
 }
 
-export function AppRow({
-  app,
-  stackStatus,
-  onAction,
-  isActionPending,
-}: AppRowProps) {
+export function AppRow({ app, stackStatus, onAction, isActionPending }: AppRowProps) {
   const appStatus = useAppStatusStore((state) => state.appStatuses);
 
   const liveStatus: AppStatus = appStatus[app.id] || "unknown";
@@ -34,10 +29,7 @@ export function AppRow({
     if (stackStatus.restarting > 0) {
       return "restarting";
     }
-    if (
-      stackStatus.stopped > 0 ||
-      (stackStatus.containers?.length ?? 0) === 0
-    ) {
+    if (stackStatus.stopped > 0 || (stackStatus.containers?.length ?? 0) === 0) {
       return "stopped";
     }
     return "unknown";
@@ -114,9 +106,7 @@ export function AppRow({
         e.currentTarget.style.backgroundColor = "";
       }}
     >
-      <td
-        style={{ ...cellStyle, color: "var(--text-primary)", fontWeight: 500 }}
-      >
+      <td style={{ ...cellStyle, color: "var(--text-primary)", fontWeight: 500 }}>
         <Link
           to="/apps/$appId"
           params={{ appId: app.id }}

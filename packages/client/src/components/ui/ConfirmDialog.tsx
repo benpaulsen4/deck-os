@@ -86,16 +86,13 @@ export function ConfirmDialog({
     <div style={overlayStyle}>
       <div style={backdropStyle} onClick={onCancel} />
       <div style={dialogStyle}>
-        <button
-          style={closeStyle}
-          onClick={onCancel}
-        >
+        <button style={closeStyle} onClick={onCancel}>
           <X size={16} />
         </button>
-        
+
         <h2 style={titleStyle}>{title}</h2>
         <p style={messageStyle}>{message}</p>
-        
+
         <div style={buttonGroupStyle}>
           <Button variant="secondary" onClick={onCancel}>
             {cancelText}

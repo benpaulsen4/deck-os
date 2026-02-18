@@ -1,11 +1,8 @@
 import { router, publicProcedure } from "../trpc/trpc.js";
 import si from "systeminformation";
 import * as metricsService from "../services/metrics.js";
-import * as path from "path";
-import { getDocker } from "../services/docker.js";
-
-const DATA_DIR =
-  process.env.DECKOS_DATA_DIR || path.join(process.cwd(), "data", "apps");
+import { getDockerAsync } from "../services/docker.js";
+import { DATA_DIR } from "../lib/config.js";
 
 export const systemRouter = router({
   getDataDir: publicProcedure.query(async () => {
@@ -25,8 +22,11 @@ export const systemRouter = router({
 
     let dockerVersion: string | null = null;
     try {
-      const dockerInfo = await getDocker()?.info();
-      dockerVersion = dockerInfo.ServerVersion || null;
+      const docker = await getDockerAsync();
+      if (docker) {
+        const dockerInfo = await docker.info();
+        dockerVersion = dockerInfo.ServerVersion || null;
+      }
     } catch {
       dockerVersion = null;
     }

@@ -17,7 +17,7 @@ export function useAppStatus() {
   useDockerEvents((event: DockerEvent) => {
     if (event.Actor?.Attributes?.["com.docker.compose.project"]) {
       const projectName = event.Actor.Attributes["com.docker.compose.project"];
-      
+
       if (!projectName.startsWith(APP_ID_PREFIX)) {
         return;
       }

@@ -42,7 +42,7 @@ function DraggableAppTile({ app, isDragging }: DraggableAppTileProps) {
       setDraggableNodeRef(node);
       setDroppableNodeRef(node);
     },
-    [setDraggableNodeRef, setDroppableNodeRef],
+    [setDraggableNodeRef, setDroppableNodeRef]
   );
 
   return (
@@ -74,7 +74,7 @@ export function AppLauncherGrid({ apps, onReorder }: AppLauncherGridProps) {
       activationConstraint: {
         distance: 5,
       },
-    }),
+    })
   );
 
   const handleDragStart = useCallback(
@@ -86,7 +86,7 @@ export function AppLauncherGrid({ apps, onReorder }: AppLauncherGridProps) {
         setDraggedApp(app);
       }
     },
-    [apps],
+    [apps]
   );
 
   const handleDragEnd = useCallback(
@@ -116,7 +116,7 @@ export function AppLauncherGrid({ apps, onReorder }: AppLauncherGridProps) {
       const orderedIds = newApps.map((a) => a.id);
       onReorder?.(orderedIds);
     },
-    [apps, onReorder],
+    [apps, onReorder]
   );
 
   return (

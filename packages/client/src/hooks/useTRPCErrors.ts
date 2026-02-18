@@ -16,12 +16,12 @@ export function useTRPCErrors(error: TRPCAppError | null) {
 
   useEffect(() => {
     if (error) {
-      const message = error.data?.path 
+      const message = error.data?.path
         ? `Error in ${error.data.path}: ${error.message}`
         : error.message;
 
       addToast(message, "error");
-      
+
       console.error("tRPC Error:", error);
     }
   }, [error, addToast]);
@@ -29,10 +29,10 @@ export function useTRPCErrors(error: TRPCAppError | null) {
 
 export function formatTRPCError(error: TRPCAppError | null): string {
   if (!error) return "";
-  
+
   if (error.data?.path) {
     return `${error.data.path}: ${error.message}`;
   }
-  
+
   return error.message;
 }

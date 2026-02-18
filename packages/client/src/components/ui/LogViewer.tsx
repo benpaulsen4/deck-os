@@ -23,21 +23,17 @@ interface LogViewerProps {
 type FollowState = boolean | Record<string, boolean>;
 
 export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
-  const [activeContainerId, setActiveContainerId] = useState<string | null>(
-    null,
-  );
-  const [logsByContainer, setLogsByContainer] = useState<
-    Record<string, LogEntry[]>
-  >({});
+  const [activeContainerId, setActiveContainerId] = useState<string | null>(null);
+  const [logsByContainer, setLogsByContainer] = useState<Record<string, LogEntry[]>>({});
   const [isConnectedByContainer, setIsConnectedByContainer] = useState<
     Record<string, boolean>
   >({});
   const [isConnectingByContainer, setIsConnectingByContainer] = useState<
     Record<string, boolean>
   >({});
-  const [errorByContainer, setErrorByContainer] = useState<
-    Record<string, string | null>
-  >({});
+  const [errorByContainer, setErrorByContainer] = useState<Record<string, string | null>>(
+    {}
+  );
   const [follow, setFollow] = useState<FollowState>(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamControllersRef = useRef<Record<string, AbortController>>({});
@@ -82,7 +78,7 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
         setLogsByContainer((prev) => ({
           ...prev,
           [containerId]: [...(prev[containerId] || []), ...batch].slice(
-            -maxEntriesPerContainer,
+            -maxEntriesPerContainer
           ),
         }));
       }, 50);
@@ -119,20 +115,16 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
           }
         }
 
-        const res = await fetch(
-          `/api/logs/${containerId}?${params.toString()}`,
-          {
-            signal: controller.signal,
-            headers: { Accept: "text/event-stream" },
-          },
-        );
+        const res = await fetch(`/api/logs/${containerId}?${params.toString()}`, {
+          signal: controller.signal,
+          headers: { Accept: "text/event-stream" },
+        });
 
         if (!res.ok) {
           throw new Error(`HTTP ${res.status} from /api/logs`);
         }
 
-        sinceByContainerRef.current[containerId] =
-          Math.floor(Date.now() / 1000) - 2;
+        sinceByContainerRef.current[containerId] = Math.floor(Date.now() / 1000) - 2;
         setIsConnectedByContainer((prev) => ({ ...prev, [containerId]: true }));
         setIsConnectingByContainer((prev) => ({
           ...prev,
@@ -155,9 +147,7 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
           if (done) break;
           if (!value) continue;
 
-          buffer += decoder
-            .decode(value, { stream: true })
-            .replace(/\r\n/g, "\n");
+          buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
           const blocks = buffer.split("\n\n");
           buffer = blocks.pop() ?? "";
 
@@ -177,8 +167,7 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
             const nowMs = Date.now();
             try {
               const parsed = JSON.parse(rawData) as { line?: unknown };
-              const line =
-                typeof parsed?.line === "string" ? parsed.line : rawData;
+              const line = typeof parsed?.line === "string" ? parsed.line : rawData;
               const lastSeen = recent.get(line);
               if (lastSeen !== undefined && nowMs - lastSeen < 2000) {
                 continue;
@@ -225,8 +214,7 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
         }));
         setErrorByContainer((prev) => ({
           ...prev,
-          [containerId]:
-            err instanceof Error ? err.message : "Connection failed",
+          [containerId]: err instanceof Error ? err.message : "Connection failed",
         }));
       } finally {
         if (streamControllersRef.current[containerId] === controller) {
@@ -299,8 +287,7 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
 
   useEffect(() => {
     const currentFollow =
-      follow === true ||
-      (follow as Record<string, boolean>)[activeContainerId || ""];
+      follow === true || (follow as Record<string, boolean>)[activeContainerId || ""];
 
     if (
       currentFollow &&
@@ -347,9 +334,7 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
       ? ((follow as Record<string, boolean>)[activeContainerId || ""] ?? true)
       : follow;
 
-  const currentLogs = activeContainerId
-    ? logsByContainer[activeContainerId] || []
-    : [];
+  const currentLogs = activeContainerId ? logsByContainer[activeContainerId] || [] : [];
   const isConnected = activeContainerId
     ? isConnectedByContainer[activeContainerId] || false
     : false;
@@ -477,8 +462,7 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
           <span style={statusDotStyle} />
           <span>
             {activeContainerId
-              ? containers.find((c) => c.id === activeContainerId)?.name ||
-                "Unknown"
+              ? containers.find((c) => c.id === activeContainerId)?.name || "Unknown"
               : "Select a container"}
           </span>
           {isConnecting ? (
@@ -494,9 +478,7 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
           style={{
             background: currentFollow ? "var(--accent-muted)" : "transparent",
             border: "1px solid var(--border-primary)",
-            color: currentFollow
-              ? "var(--accent-primary)"
-              : "var(--text-secondary)",
+            color: currentFollow ? "var(--accent-primary)" : "var(--text-secondary)",
             padding: "4px 8px",
             fontSize: "var(--text-xs)",
             textTransform: "uppercase",
@@ -512,9 +494,7 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
       </div>
       <div ref={scrollRef} style={contentStyle} onScroll={handleScroll}>
         {!activeContainerId || currentLogs.length === 0 ? (
-          <div
-            style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}
-          >
+          <div style={{ color: "var(--text-muted)", fontSize: "var(--text-sm)" }}>
             {activeContainerId ? "Waiting for logs..." : "Select a container"}
           </div>
         ) : (

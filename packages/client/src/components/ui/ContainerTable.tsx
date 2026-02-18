@@ -40,16 +40,21 @@ interface ContainerTableProps {
 }
 
 export function ContainerTable({ containers }: ContainerTableProps) {
-  const [containerStats, setContainerStats] = useState<Record<string, { cpu: number; memory: number; memoryBytes: number }>>({});
+  const [containerStats, setContainerStats] = useState<
+    Record<string, { cpu: number; memory: number; memoryBytes: number }>
+  >({});
 
   useEffect(() => {
     const fetchStats = async () => {
-      const stats: Record<string, { cpu: number; memory: number; memoryBytes: number }> = {};
-      
+      const stats: Record<string, { cpu: number; memory: number; memoryBytes: number }> =
+        {};
+
       for (const container of containers) {
         if (container.state.running) {
           try {
-            const result = await trpcClient.docker.getContainerStats.query({ containerId: container.id });
+            const result = await trpcClient.docker.getContainerStats.query({
+              containerId: container.id,
+            });
             if (result) {
               stats[container.id] = result;
             }
@@ -58,14 +63,14 @@ export function ContainerTable({ containers }: ContainerTableProps) {
           }
         }
       }
-      
+
       setContainerStats(stats);
     };
 
     fetchStats();
-    
+
     const interval = setInterval(fetchStats, 5000);
-    
+
     return () => clearInterval(interval);
   }, [containers]);
 
@@ -81,9 +86,15 @@ export function ContainerTable({ containers }: ContainerTableProps) {
   };
 
   const portsFromList = (ports: ContainerInfo["ports"]) => {
-    return ports?.map((port: { public?: number; private: number; type?: string }) =>
-      port.public ? `${port.public}:${port.private}/${port.type}` : `${port.private}/${port.type}`
-    ).join(", ") || "—";
+    return (
+      ports
+        ?.map((port: { public?: number; private: number; type?: string }) =>
+          port.public
+            ? `${port.public}:${port.private}/${port.type}`
+            : `${port.private}/${port.type}`
+        )
+        .join(", ") || "—"
+    );
   };
 
   const formatBytes = (bytes: number): string => {
@@ -182,11 +193,14 @@ export function ContainerTable({ containers }: ContainerTableProps) {
           const cpu = stats?.cpu || 0;
           const memory = stats?.memory || 0;
           const memoryBytes = stats?.memoryBytes || 0;
-          
+
           return (
             <tr
               key={container.id}
-              style={{ borderBottom: "1px solid var(--border-primary)", transition: "background-color 80ms linear" }}
+              style={{
+                borderBottom: "1px solid var(--border-primary)",
+                transition: "background-color 80ms linear",
+              }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.backgroundColor = "var(--bg-tertiary)";
               }}
@@ -194,9 +208,7 @@ export function ContainerTable({ containers }: ContainerTableProps) {
                 e.currentTarget.style.backgroundColor = "";
               }}
             >
-              <td style={nameStyle}>
-                {container.names[0]?.replace(/^\//, "") || "—"}
-              </td>
+              <td style={nameStyle}>{container.names[0]?.replace(/^\//, "") || "—"}</td>
               <td style={imageStyle} title={container.image}>
                 {container.image}
               </td>
@@ -207,7 +219,13 @@ export function ContainerTable({ containers }: ContainerTableProps) {
               </td>
               <td style={cellStyle}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", minWidth: "32px" }}>
+                  <span
+                    style={{
+                      fontSize: "var(--text-xs)",
+                      color: "var(--text-secondary)",
+                      minWidth: "32px",
+                    }}
+                  >
                     {container.state.running ? `${cpu}%` : "—"}
                   </span>
                   {container.state.running && (
@@ -225,7 +243,13 @@ export function ContainerTable({ containers }: ContainerTableProps) {
               </td>
               <td style={cellStyle}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span style={{ fontSize: "var(--text-xs)", color: "var(--text-secondary)", minWidth: "32px" }}>
+                  <span
+                    style={{
+                      fontSize: "var(--text-xs)",
+                      color: "var(--text-secondary)",
+                      minWidth: "32px",
+                    }}
+                  >
                     {container.state.running ? `${formatBytes(memoryBytes)}` : "—"}
                   </span>
                   {container.state.running && (

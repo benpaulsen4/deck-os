@@ -42,8 +42,7 @@ function AppsPage() {
   });
 
   const startMutation = useMutation({
-    mutationFn: async (appId: string) =>
-      await trpcClient.docker.start.mutate({ appId }),
+    mutationFn: async (appId: string) => await trpcClient.docker.start.mutate({ appId }),
     onSuccess: () => {
       addToast("App started", "success");
     },
@@ -53,8 +52,7 @@ function AppsPage() {
   });
 
   const stopMutation = useMutation({
-    mutationFn: async (appId: string) =>
-      await trpcClient.docker.stop.mutate({ appId }),
+    mutationFn: async (appId: string) => await trpcClient.docker.stop.mutate({ appId }),
     onSuccess: () => {
       addToast("App stopped", "success");
     },

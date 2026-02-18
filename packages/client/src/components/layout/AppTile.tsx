@@ -14,20 +14,13 @@ interface AppTileProps {
   rootProps?: React.HTMLAttributes<HTMLDivElement>;
 }
 
-export function AppTile({
-  app,
-  style,
-  className,
-  rootRef,
-  rootProps,
-}: AppTileProps) {
+export function AppTile({ app, style, className, rootRef, rootProps }: AppTileProps) {
   const appStatus = useAppStatusStore((state) => state.appStatuses);
   const flashStates = useAppStatusStore((state) => state.flashStates);
 
   const { data: stackStatus } = useQuery({
     queryKey: ["stackStatus", app.id],
-    queryFn: async () =>
-      await trpcClient.docker.getStatus.query({ appId: app.id }),
+    queryFn: async () => await trpcClient.docker.getStatus.query({ appId: app.id }),
     refetchInterval: 5000,
   });
 
@@ -47,10 +40,7 @@ export function AppTile({
     if (stackStatus.restarting > 0) {
       return "restarting";
     }
-    if (
-      stackStatus.stopped > 0 ||
-      (stackStatus.containers?.length ?? 0) === 0
-    ) {
+    if (stackStatus.stopped > 0 || (stackStatus.containers?.length ?? 0) === 0) {
       return "stopped";
     }
     return "unknown";
@@ -59,8 +49,7 @@ export function AppTile({
   const status = getActualStatus();
 
   const safeUrl = (() => {
-    const u =
-      typeof app.metadata.url === "string" ? app.metadata.url.trim() : "";
+    const u = typeof app.metadata.url === "string" ? app.metadata.url.trim() : "";
     if (!u) return "";
     return /^https?:\/\//i.test(u) ? u : "";
   })();

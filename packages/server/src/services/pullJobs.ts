@@ -55,9 +55,7 @@ function pruneJobs(now: number = Date.now()) {
 function getImagesFromCompose(composeYaml: string): string[] {
   const parsed = parse(composeYaml) as any;
   const services =
-    parsed?.services && typeof parsed.services === "object"
-      ? parsed.services
-      : {};
+    parsed?.services && typeof parsed.services === "object" ? parsed.services : {};
   return Object.values(services)
     .map((svc: any) => (typeof svc?.image === "string" ? svc.image : ""))
     .map((s: string) => s.trim())
@@ -124,7 +122,7 @@ export async function startPullJob(appId: string): Promise<PullJobSnapshot> {
         if (!j) return;
         j.progress = progress;
       },
-      controller.signal,
+      controller.signal
     )
     .then(() => {
       const j = jobs.get(jobId);

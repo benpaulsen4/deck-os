@@ -30,12 +30,7 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(digits)} ${units[idx]}`;
 }
 
-export function PullProgress({
-  isOpen,
-  appId,
-  title,
-  onComplete,
-}: PullProgressProps) {
+export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressProps) {
   const [error, setError] = useState<string | null>(null);
   const [isPulling, setIsPulling] = useState(false);
   const [progress, setProgress] = useState<PullOverallProgress | null>(null);
@@ -81,17 +76,14 @@ export function PullProgress({
       }
       setIsPulling(false);
       setError(message);
-      setTimeout(
-        () => onCompleteRef.current({ ok: false, error: message }),
-        2000,
-      );
+      setTimeout(() => onCompleteRef.current({ ok: false, error: message }), 2000);
     };
 
     const start = async () => {
       try {
         const startRes = await fetch(
           `/api/apps/${encodeURIComponent(appId)}/pull/start`,
-          { method: "POST", signal: controller.signal },
+          { method: "POST", signal: controller.signal }
         );
         if (!startRes.ok) {
           const body = (await startRes.json().catch(() => null)) as any;
@@ -140,8 +132,7 @@ export function PullProgress({
             }
           } catch (err: unknown) {
             if (finished) return;
-            if (err instanceof DOMException && err.name === "AbortError")
-              return;
+            if (err instanceof DOMException && err.name === "AbortError") return;
           }
         };
 
@@ -150,9 +141,7 @@ export function PullProgress({
       } catch (err: unknown) {
         if (finished) return;
         if (err instanceof DOMException && err.name === "AbortError") return;
-        completeErr(
-          err instanceof Error ? err.message : "Failed to start pull",
-        );
+        completeErr(err instanceof Error ? err.message : "Failed to start pull");
       }
     };
 
@@ -241,8 +230,7 @@ export function PullProgress({
             <div>
               <div style={statusStyle}>
                 {progress
-                  ? progress.currentBytes !== null &&
-                    progress.totalBytes !== null
+                  ? progress.currentBytes !== null && progress.totalBytes !== null
                     ? `${Math.floor(progress.percent)}% (${formatBytes(progress.currentBytes)} / ${formatBytes(progress.totalBytes)})`
                     : `${Math.floor(progress.percent)}% (${progress.completedImages}/${progress.totalImages} images)`
                   : "Preparing pull..."}

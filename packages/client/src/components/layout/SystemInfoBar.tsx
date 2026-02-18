@@ -33,7 +33,9 @@ export function SystemInfoBar() {
       </div>
       <div className="system-info-item">
         <span className="system-info-label">OS</span>
-        <span className="system-info-value">{info.osDistro || info.os} {info.osRelease || ""}</span>
+        <span className="system-info-value">
+          {info.osDistro || info.os} {info.osRelease || ""}
+        </span>
       </div>
       <div className="system-info-item">
         <span className="system-info-label">UPTIME</span>

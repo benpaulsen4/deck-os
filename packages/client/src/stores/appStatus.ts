@@ -1,6 +1,12 @@
 import { create } from "zustand";
 
-export type AppStatus = "running" | "stopped" | "restarting" | "warning" | "pulling" | "unknown";
+export type AppStatus =
+  | "running"
+  | "stopped"
+  | "restarting"
+  | "warning"
+  | "pulling"
+  | "unknown";
 
 export interface AppStatusState {
   appStatuses: Record<string, AppStatus>;

@@ -1,14 +1,9 @@
 import fs from "fs-extra";
-import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { parse } from "yaml";
 import type { App, AppMetadata } from "../lib/schema.js";
 import { AppMetadataSchema, ComposeFileSchema } from "../lib/schema.js";
-
-const DATA_DIR =
-  process.env.DECKOS_DATA_DIR || path.join(process.cwd(), "data", "apps");
-const METADATA_FILE = "metadata.json";
-const COMPOSE_FILE = "docker-compose.yml";
+import { DATA_DIR, getAppDir, getMetadataPath, getComposePath } from "../lib/config.js";
 
 async function ensureDataDir(): Promise<void> {
   await fs.ensureDir(DATA_DIR);
@@ -22,9 +17,9 @@ export async function listApps(): Promise<App[]> {
   for (const dir of appDirs) {
     if (!dir.isDirectory()) continue;
 
-    const appDirPath = path.join(DATA_DIR, dir.name);
-    const metadataPath = path.join(appDirPath, METADATA_FILE);
-    const composePath = path.join(appDirPath, COMPOSE_FILE);
+    const appId = dir.name;
+    const metadataPath = getMetadataPath(appId);
+    const composePath = getComposePath(appId);
 
     try {
       const metadataExists = await fs.pathExists(metadataPath);
@@ -42,7 +37,7 @@ export async function listApps(): Promise<App[]> {
         composeYaml,
       });
     } catch (error) {
-      console.error(`Error reading app ${dir.name}:`, error);
+      console.error(`Error reading app ${appId}:`, error);
     }
   }
 
@@ -52,9 +47,8 @@ export async function listApps(): Promise<App[]> {
 
 export async function getApp(id: string): Promise<App | null> {
   await ensureDataDir();
-  const appDirPath = path.join(DATA_DIR, id);
-  const metadataPath = path.join(appDirPath, METADATA_FILE);
-  const composePath = path.join(appDirPath, COMPOSE_FILE);
+  const metadataPath = getMetadataPath(id);
+  const composePath = getComposePath(id);
 
   const metadataExists = await fs.pathExists(metadataPath);
   const composeExists = await fs.pathExists(composePath);
@@ -82,7 +76,7 @@ export async function createApp(
   description: string,
   icon: string,
   url: string,
-  composeYaml: string,
+  composeYaml: string
 ): Promise<App> {
   await ensureDataDir();
 
@@ -103,17 +97,14 @@ export async function createApp(
   const parsed = parse(composeYaml);
   ComposeFileSchema.parse(parsed);
 
-  const appDirPath = path.join(DATA_DIR, id);
+  const appDir = getAppDir(id);
   try {
-    await fs.ensureDir(appDirPath);
+    await fs.ensureDir(appDir);
 
-    const metadataPath = path.join(appDirPath, METADATA_FILE);
-    const composePath = path.join(appDirPath, COMPOSE_FILE);
-
-    await fs.writeJson(metadataPath, metadata, { spaces: 2 });
-    await fs.writeFile(composePath, composeYaml, "utf-8");
+    await fs.writeJson(getMetadataPath(id), metadata, { spaces: 2 });
+    await fs.writeFile(getComposePath(id), composeYaml, "utf-8");
   } catch (err) {
-    await fs.remove(appDirPath).catch(() => {});
+    await fs.remove(appDir).catch(() => {});
     throw err;
   }
 
@@ -131,7 +122,7 @@ export async function updateApp(
     description: string;
     icon: string;
     url: string;
-  }>,
+  }>
 ): Promise<App | null> {
   const existing = await getApp(id);
   if (!existing) return null;
@@ -143,10 +134,7 @@ export async function updateApp(
   };
 
   const metadata = AppMetadataSchema.parse(updated);
-  const appDirPath = path.join(DATA_DIR, id);
-  const metadataPath = path.join(appDirPath, METADATA_FILE);
-
-  await fs.writeJson(metadataPath, metadata, { spaces: 2 });
+  await fs.writeJson(getMetadataPath(id), metadata, { spaces: 2 });
 
   return {
     id: existing.id,
@@ -157,7 +145,7 @@ export async function updateApp(
 
 export async function updateCompose(
   id: string,
-  composeYaml: string,
+  composeYaml: string
 ): Promise<App | null> {
   const existing = await getApp(id);
   if (!existing) return null;
@@ -165,10 +153,7 @@ export async function updateCompose(
   const parsed = parse(composeYaml);
   ComposeFileSchema.parse(parsed);
 
-  const appDirPath = path.join(DATA_DIR, id);
-  const composePath = path.join(appDirPath, COMPOSE_FILE);
-
-  await fs.writeFile(composePath, composeYaml, "utf-8");
+  await fs.writeFile(getComposePath(id), composeYaml, "utf-8");
 
   return {
     id: existing.id,
@@ -178,12 +163,12 @@ export async function updateCompose(
 }
 
 export async function deleteApp(id: string): Promise<boolean> {
-  const appDirPath = path.join(DATA_DIR, id);
-  const exists = await fs.pathExists(appDirPath);
+  const appDir = getAppDir(id);
+  const exists = await fs.pathExists(appDir);
 
   if (!exists) return false;
 
-  await fs.remove(appDirPath);
+  await fs.remove(appDir);
   return true;
 }
 
@@ -205,17 +190,13 @@ export async function reorderApps(orderedIds: string[]): Promise<void> {
   }
 
   for (const app of ordered) {
-    const appDirPath = path.join(DATA_DIR, app.id);
-    const metadataPath = path.join(appDirPath, METADATA_FILE);
-    await fs.writeJson(metadataPath, app.metadata, { spaces: 2 });
+    await fs.writeJson(getMetadataPath(app.id), app.metadata, { spaces: 2 });
   }
 
   const remaining = apps.filter((app) => !orderedIds.includes(app.id));
   for (let i = 0; i < remaining.length; i++) {
     const app = remaining[i];
     app.metadata.order = ordered.length + i;
-    const appDirPath = path.join(DATA_DIR, app.id);
-    const metadataPath = path.join(appDirPath, METADATA_FILE);
-    await fs.writeJson(metadataPath, app.metadata, { spaces: 2 });
+    await fs.writeJson(getMetadataPath(app.id), app.metadata, { spaces: 2 });
   }
 }

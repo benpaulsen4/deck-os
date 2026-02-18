@@ -18,8 +18,7 @@ export function Button({
     textTransform: "uppercase",
     fontWeight: "500",
     cursor: "pointer",
-    transition:
-      "background 80ms linear, color 80ms linear, border-color 80ms linear",
+    transition: "background 80ms linear, color 80ms linear, border-color 80ms linear",
     fontSize: "var(--text-sm)",
     letterSpacing: "0.06em",
     borderRadius: 0,

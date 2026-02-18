@@ -2,40 +2,26 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
-import { TRPCProvider } from "./trpc";
+import { TRPCProvider, trpcClient } from "./trpc";
 import { routeTree } from "./routeTree.gen";
 import { ErrorBoundary } from "./components/layout/ErrorBoundary";
+import { QUERY_STALE_TIME_MS } from "./lib/constants.js";
 
 import "./styles/global.css";
 import "./styles/shell.css";
 
-import type { AppRouter } from "../../server/src/trpc/router.js";
-
-// Create query client
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
       retry: 1,
-      staleTime: 5000,
+      staleTime: QUERY_STALE_TIME_MS,
     },
   },
 });
 
-// Create tRPC client
-const trpcClient = createTRPCClient<AppRouter>({
-  links: [
-    httpBatchLink({
-      url: "/api/trpc",
-    }),
-  ],
-});
-
-// Create router
 const router = createRouter({ routeTree });
 
-// Register router for type safety
 declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router;

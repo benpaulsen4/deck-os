@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { SystemMetrics } from "../../../server/src/lib/schema.js";
+import { METRICS_HISTORY_SIZE } from "../lib/constants.js";
 
 interface MetricsState {
   metrics: SystemMetrics | null;
@@ -10,8 +11,6 @@ interface MetricsState {
   getHistory: (count?: number) => SystemMetrics[];
 }
 
-const HISTORY_SIZE = 60;
-
 export const useMetricsStore = create<MetricsState>((set, get) => ({
   metrics: null,
   history: [],
@@ -20,7 +19,7 @@ export const useMetricsStore = create<MetricsState>((set, get) => ({
   setMetrics: (metrics) => {
     set({
       metrics,
-      history: [...get().history, metrics].slice(-HISTORY_SIZE),
+      history: [...get().history, metrics].slice(-METRICS_HISTORY_SIZE),
     });
   },
 
@@ -28,7 +27,7 @@ export const useMetricsStore = create<MetricsState>((set, get) => ({
     set({ isConnected: connected });
   },
 
-  getHistory: (count = HISTORY_SIZE) => {
+  getHistory: (count = METRICS_HISTORY_SIZE) => {
     return get().history.slice(-count);
   },
 }));

@@ -3,21 +3,20 @@ import { z } from "zod";
 import * as appsService from "../services/apps.js";
 import * as dockerService from "../services/docker.js";
 import { OptionalUrlSchema, UrlOrEmptySchema } from "../lib/schema.js";
+import { AppNotFoundError, getErrorMessage } from "../lib/errors.js";
 
 export const appsRouter = router({
   list: publicProcedure.query(async () => {
     return await appsService.listApps();
   }),
 
-  get: publicProcedure
-    .input(z.object({ id: z.string() }))
-    .query(async ({ input }) => {
-      const app = await appsService.getApp(input.id);
-      if (!app) {
-        throw new Error("App not found");
-      }
-      return app;
-    }),
+  get: publicProcedure.input(z.object({ id: z.string() })).query(async ({ input }) => {
+    const app = await appsService.getApp(input.id);
+    if (!app) {
+      throw new AppNotFoundError(input.id);
+    }
+    return app;
+  }),
 
   validateCompose: publicProcedure
     .input(z.object({ composeYaml: z.string() }))
@@ -30,10 +29,10 @@ export const appsRouter = router({
         ComposeFileSchema.parse(parsed);
 
         return { valid: true, message: "Compose YAML is valid" };
-      } catch (error: any) {
+      } catch (error: unknown) {
         return {
           valid: false,
-          message: error.message || "Invalid compose YAML",
+          message: getErrorMessage(error),
         };
       }
     }),
@@ -46,7 +45,7 @@ export const appsRouter = router({
         icon: OptionalUrlSchema,
         url: OptionalUrlSchema,
         composeYaml: z.string().min(1),
-      }),
+      })
     )
     .mutation(async ({ input }) => {
       return await appsService.createApp(
@@ -54,7 +53,7 @@ export const appsRouter = router({
         input.description,
         input.icon,
         input.url,
-        input.composeYaml,
+        input.composeYaml
       );
     }),
 
@@ -66,19 +65,18 @@ export const appsRouter = router({
         description: z.string().optional(),
         icon: UrlOrEmptySchema.optional(),
         url: UrlOrEmptySchema.optional(),
-      }),
+      })
     )
     .mutation(async ({ input }) => {
       const updates: Record<string, string> = {};
       if (input.name !== undefined) updates.name = input.name;
-      if (input.description !== undefined)
-        updates.description = input.description;
+      if (input.description !== undefined) updates.description = input.description;
       if (input.icon !== undefined) updates.icon = input.icon;
       if (input.url !== undefined) updates.url = input.url;
 
       const app = await appsService.updateApp(input.id, updates);
       if (!app) {
-        throw new Error("App not found");
+        throw new AppNotFoundError(input.id);
       }
       return app;
     }),
@@ -88,12 +86,12 @@ export const appsRouter = router({
       z.object({
         id: z.string(),
         composeYaml: z.string().min(1),
-      }),
+      })
     )
     .mutation(async ({ input }) => {
       const app = await appsService.updateCompose(input.id, input.composeYaml);
       if (!app) {
-        throw new Error("App not found");
+        throw new AppNotFoundError(input.id);
       }
       return app;
     }),
@@ -103,10 +101,12 @@ export const appsRouter = router({
     .mutation(async ({ input }) => {
       try {
         await dockerService.stopStack(input.id);
-      } catch {}
+      } catch {
+        // Ignore stop errors during delete
+      }
       const deleted = await appsService.deleteApp(input.id);
       if (!deleted) {
-        throw new Error("App not found");
+        throw new AppNotFoundError(input.id);
       }
       return { success: true };
     }),

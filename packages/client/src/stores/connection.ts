@@ -36,7 +36,9 @@ export const useConnectionStore = create<ConnectionsState>((set, get) => ({
         ...state.connections,
         [type]: {
           connected,
-          lastConnectedAt: connected ? Date.now() : state.connections[type].lastConnectedAt,
+          lastConnectedAt: connected
+            ? Date.now()
+            : state.connections[type].lastConnectedAt,
           attemptCount: connected ? 0 : state.connections[type].attemptCount + 1,
         },
       },

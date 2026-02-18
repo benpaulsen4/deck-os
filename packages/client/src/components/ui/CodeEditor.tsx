@@ -25,7 +25,12 @@ interface CodeEditorProps {
   minHeight?: string;
 }
 
-export function CodeEditor({ value, onChange, readonly = false, minHeight = "300px" }: CodeEditorProps) {
+export function CodeEditor({
+  value,
+  onChange,
+  readonly = false,
+  minHeight = "300px",
+}: CodeEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
 
@@ -37,48 +42,51 @@ export function CodeEditor({ value, onChange, readonly = false, minHeight = "300
       EditorView.editable.of(!readonly),
       yaml(),
       syntaxHighlighting(deckosHighlight),
-      EditorView.theme({
-        "&": {
-          backgroundColor: "var(--bg-primary)",
-          color: "var(--text-primary)",
-          fontSize: "var(--text-base)",
-          fontFamily: "'JetBrains Mono', monospace",
+      EditorView.theme(
+        {
+          "&": {
+            backgroundColor: "var(--bg-primary)",
+            color: "var(--text-primary)",
+            fontSize: "var(--text-base)",
+            fontFamily: "'JetBrains Mono', monospace",
+          },
+          ".cm-content": {
+            padding: "var(--space-2)",
+            minHeight,
+          },
+          ".cm-gutters": {
+            backgroundColor: "var(--bg-secondary)",
+            color: "var(--text-muted)",
+            border: "1px solid var(--border-primary)",
+            fontSize: "var(--text-xs)",
+          },
+          ".cm-lineNumbers": {
+            color: "var(--text-muted)",
+          },
+          ".cm-activeLineGutter": {
+            backgroundColor: "var(--bg-tertiary)",
+            color: "var(--text-primary)",
+          },
+          ".cm-line": {
+            padding: 0,
+          },
+          ".cm-activeLine": {
+            backgroundColor: "rgba(0, 255, 136, 0.05)",
+          },
+          ".cm-scroller": {
+            border: "1px solid var(--border-primary)",
+            borderRadius: 0,
+          },
+          ".cm-focused": {
+            outline: "none",
+            borderColor: "var(--accent-primary)",
+          },
+          "&.cm-focused .cm-activeLine": {
+            backgroundColor: "rgba(0, 255, 136, 0.08)",
+          },
         },
-        ".cm-content": {
-          padding: "var(--space-2)",
-          minHeight,
-        },
-        ".cm-gutters": {
-          backgroundColor: "var(--bg-secondary)",
-          color: "var(--text-muted)",
-          border: "1px solid var(--border-primary)",
-          fontSize: "var(--text-xs)",
-        },
-        ".cm-lineNumbers": {
-          color: "var(--text-muted)",
-        },
-        ".cm-activeLineGutter": {
-          backgroundColor: "var(--bg-tertiary)",
-          color: "var(--text-primary)",
-        },
-        ".cm-line": {
-          padding: 0,
-        },
-        ".cm-activeLine": {
-          backgroundColor: "rgba(0, 255, 136, 0.05)",
-        },
-        ".cm-scroller": {
-          border: "1px solid var(--border-primary)",
-          borderRadius: 0,
-        },
-        ".cm-focused": {
-          outline: "none",
-          borderColor: "var(--accent-primary)",
-        },
-        "&.cm-focused .cm-activeLine": {
-          backgroundColor: "rgba(0, 255, 136, 0.08)",
-        },
-      }, { dark: true }),
+        { dark: true }
+      ),
       EditorView.lineWrapping,
       EditorState.tabSize.of(2),
       EditorView.updateListener.of((update) => {

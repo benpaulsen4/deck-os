@@ -16,14 +16,16 @@ export function ToastContainer() {
 
   return (
     <div style={containerStyle}>
-      {toasts.map((toast: { id: string; message: string; type: "success" | "error" | "info" }) => (
-        <Toast
-          key={toast.id}
-          message={toast.message}
-          type={toast.type}
-          onClose={() => removeToast(toast.id)}
-        />
-      ))}
+      {toasts.map(
+        (toast: { id: string; message: string; type: "success" | "error" | "info" }) => (
+          <Toast
+            key={toast.id}
+            message={toast.message}
+            type={toast.type}
+            onClose={() => removeToast(toast.id)}
+          />
+        )
+      )}
     </div>
   );
 }

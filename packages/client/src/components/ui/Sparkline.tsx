@@ -23,20 +23,16 @@ export function Sparkline({
 }: SparklineProps) {
   const { points, min, max } = useMemo(() => {
     const finiteValues = values.filter(
-      (v): v is number => typeof v === "number" && Number.isFinite(v),
+      (v): v is number => typeof v === "number" && Number.isFinite(v)
     );
     if (finiteValues.length === 0) return { points: "", min: 0, max: 0 };
 
     const dataMax = Math.max(...finiteValues);
     const dataMin = Math.min(...finiteValues);
     const computedMin =
-      typeof minValue === "number" && Number.isFinite(minValue)
-        ? minValue
-        : dataMin;
+      typeof minValue === "number" && Number.isFinite(minValue) ? minValue : dataMin;
     const computedMax =
-      typeof maxValue === "number" && Number.isFinite(maxValue)
-        ? maxValue
-        : dataMax;
+      typeof maxValue === "number" && Number.isFinite(maxValue) ? maxValue : dataMax;
 
     let min = computedMin;
     let max = computedMax;
@@ -102,16 +98,10 @@ export function Sparkline({
     <div className="sparkline" style={{ height }}>
       {showBounds ? (
         <>
-          <div
-            className="sparkline-label sparkline-label-max"
-            style={{ color }}
-          >
+          <div className="sparkline-label sparkline-label-max" style={{ color }}>
             {maxLabel}
           </div>
-          <div
-            className="sparkline-label sparkline-label-min"
-            style={{ color }}
-          >
+          <div className="sparkline-label sparkline-label-min" style={{ color }}>
             {minLabel}
           </div>
         </>

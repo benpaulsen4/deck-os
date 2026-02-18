@@ -117,7 +117,13 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
           {error && (
             <div style={{ marginBottom: "var(--space-2)" }}>
-              <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", marginBottom: "4px" }}>
+              <div
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--text-muted)",
+                  marginBottom: "4px",
+                }}
+              >
                 ERROR MESSAGE:
               </div>
               <div style={{ fontSize: "var(--text-sm)", color: "var(--status-stopped)" }}>
@@ -128,12 +134,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
           {errorInfo && (
             <div>
-              <div style={{ fontSize: "var(--text-xs)", color: "var(--text-muted)", marginBottom: "4px" }}>
+              <div
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--text-muted)",
+                  marginBottom: "4px",
+                }}
+              >
                 STACK TRACE:
               </div>
-              <div style={stackTraceStyle}>
-                {errorInfo.componentStack}
-              </div>
+              <div style={stackTraceStyle}>{errorInfo.componentStack}</div>
             </div>
           )}
 
@@ -142,7 +152,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               <RefreshCw size={16} style={{ marginRight: "8px" }} />
               RELOAD
             </Button>
-            <Button variant="secondary" onClick={() => window.location.href = "/"}>
+            <Button variant="secondary" onClick={() => (window.location.href = "/")}>
               <Home size={16} style={{ marginRight: "8px" }} />
               HOME
             </Button>

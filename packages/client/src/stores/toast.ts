@@ -11,10 +11,7 @@ export const useToastStore = create<ToastState>((set) => ({
   toasts: [],
   addToast: (message, type = "info") =>
     set((state) => ({
-      toasts: [
-        ...state.toasts,
-        { id: crypto.randomUUID(), message, type },
-      ],
+      toasts: [...state.toasts, { id: crypto.randomUUID(), message, type }],
     })),
   removeToast: (id) =>
     set((state) => ({

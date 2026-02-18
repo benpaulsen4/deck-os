@@ -34,14 +34,12 @@ function DashboardPage() {
         queryKey: trpc.apps.list.queryOptions().queryKey,
       });
       const previous = queryClient.getQueryData(
-        trpc.apps.list.queryOptions().queryKey,
+        trpc.apps.list.queryOptions().queryKey
       ) as any[] | undefined;
 
       if (previous && Array.isArray(previous)) {
         const byId = new Map(previous.map((a: any) => [a.id, a]));
-        const next = orderedIds
-          .map((id) => byId.get(id))
-          .filter(Boolean) as any[];
+        const next = orderedIds.map((id) => byId.get(id)).filter(Boolean) as any[];
         queryClient.setQueryData(trpc.apps.list.queryOptions().queryKey, next);
       }
 
@@ -49,10 +47,7 @@ function DashboardPage() {
     },
     onError: (err: any, _orderedIds, ctx) => {
       if (ctx?.previous) {
-        queryClient.setQueryData(
-          trpc.apps.list.queryOptions().queryKey,
-          ctx.previous,
-        );
+        queryClient.setQueryData(trpc.apps.list.queryOptions().queryKey, ctx.previous);
       }
       addToast(`Failed to reorder: ${err.message}`, "error");
     },
@@ -81,14 +76,14 @@ function DashboardPage() {
 
   const formatBytesPair = (
     usedBytes: number,
-    totalBytes: number,
+    totalBytes: number
   ): { used: string; total: string; unit: string } => {
     if (totalBytes <= 0) return { used: "0.0", total: "0.0", unit: "B" };
     const k = 1024;
     const sizes = ["B", "KB", "MB", "GB", "TB"];
     const unitIndex = Math.min(
       sizes.length - 1,
-      Math.max(0, Math.floor(Math.log(totalBytes) / Math.log(k))),
+      Math.max(0, Math.floor(Math.log(totalBytes) / Math.log(k)))
     );
     return {
       used: formatBytesInUnit(usedBytes, unitIndex),
@@ -99,14 +94,14 @@ function DashboardPage() {
 
   const formatSpeedPair = (
     txBytesPerSecond: number,
-    rxBytesPerSecond: number,
+    rxBytesPerSecond: number
   ): { tx: string; rx: string; unitPerSec: string } => {
     const k = 1024;
     const sizes = ["B", "KB", "MB", "GB"];
     const max = Math.max(txBytesPerSecond, rxBytesPerSecond, 1);
     const unitIndex = Math.min(
       sizes.length - 1,
-      Math.max(0, Math.floor(Math.log(max) / Math.log(k))),
+      Math.max(0, Math.floor(Math.log(max) / Math.log(k)))
     );
     return {
       tx: formatBytesInUnit(txBytesPerSecond, unitIndex),
@@ -137,16 +132,12 @@ function DashboardPage() {
   };
 
   const getNetworkRxSpeed = (m: SystemMetrics): number => {
-    const speeds = Object.values(m.network.interfaces).map(
-      (i) => i.rx_sec || 0,
-    );
+    const speeds = Object.values(m.network.interfaces).map((i) => i.rx_sec || 0);
     return speeds.reduce((a, b) => a + b, 0);
   };
 
   const getNetworkTxSpeed = (m: SystemMetrics): number => {
-    const speeds = Object.values(m.network.interfaces).map(
-      (i) => i.tx_sec || 0,
-    );
+    const speeds = Object.values(m.network.interfaces).map((i) => i.tx_sec || 0);
     return speeds.reduce((a, b) => a + b, 0);
   };
 
@@ -177,7 +168,7 @@ function DashboardPage() {
               value={(() => {
                 const p = formatBytesPair(
                   metrics.metrics.memory.used,
-                  metrics.metrics.memory.total,
+                  metrics.metrics.memory.total
                 );
                 return (
                   <>
@@ -290,18 +281,14 @@ function DashboardPage() {
                       ? (() => {
                           const p = formatBytesPair(
                             metrics.metrics.memory.swapUsed ?? 0,
-                            metrics.metrics.memory.swapTotal ?? 0,
+                            metrics.metrics.memory.swapTotal ?? 0
                           );
                           return (
                             <>
                               <span>{p.used}</span>
                               <span className="metric-value-sep">/</span>
-                              <span className="metric-value-secondary">
-                                {p.total}
-                              </span>
-                              <span className="metric-value-unit">
-                                {p.unit}
-                              </span>
+                              <span className="metric-value-secondary">{p.total}</span>
+                              <span className="metric-value-unit">{p.unit}</span>
                             </>
                           );
                         })()
@@ -355,10 +342,7 @@ function DashboardPage() {
       </div>
       {metrics.metrics ? (
         <div className="metrics-controls">
-          <Button
-            variant="secondary"
-            onClick={() => setShowMoreMetrics((v) => !v)}
-          >
+          <Button variant="secondary" onClick={() => setShowMoreMetrics((v) => !v)}>
             {showMoreMetrics ? "Hide extra metrics" : "Show more metrics"}
           </Button>
         </div>
