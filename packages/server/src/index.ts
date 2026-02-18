@@ -7,6 +7,7 @@ import { appRouter } from "./trpc/router.js";
 import { createContext } from "./trpc/context.js";
 import * as metricsService from "./services/metrics.js";
 import * as dockerService from "./services/docker.js";
+import * as pullJobsService from "./services/pullJobs.js";
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -173,6 +174,31 @@ app.get("/api/docker/events", async (c) => {
 
     await stream.sleep(1000000);
   });
+});
+
+app.post("/api/apps/:appId/pull/start", async (c) => {
+  const { appId } = c.req.param();
+  try {
+    const job = await pullJobsService.startPullJob(appId);
+    return c.json(job);
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message === "App not found") {
+      return c.json({ error: err.message }, 404);
+    }
+    return c.json(
+      { error: err instanceof Error ? err.message : "Failed to start pull" },
+      500,
+    );
+  }
+});
+
+app.get("/api/pull/:jobId", async (c) => {
+  const { jobId } = c.req.param();
+  const job = pullJobsService.getPullJob(jobId);
+  if (!job) {
+    return c.json({ error: "Not found" }, 404);
+  }
+  return c.json(job);
 });
 
 // SSE endpoint for container logs

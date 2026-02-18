@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useTRPC } from "../trpc";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useMetricsStream } from "../hooks/useMetricsStream";
 import { useAppStatus } from "../hooks/useAppStatus";
@@ -18,6 +18,7 @@ export const Route = createFileRoute("/")({
 
 function DashboardPage() {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const { addToast } = useToastStore();
   const metrics = useMetricsStream();
   const { data: apps } = useQuery(trpc.apps.list.queryOptions());
@@ -28,8 +29,37 @@ function DashboardPage() {
   const reorderMutation = useMutation({
     mutationFn: async (orderedIds: string[]) =>
       await trpcClient.apps.reorder.mutate({ orderedIds }),
-    onError: (err: any) => {
+    onMutate: async (orderedIds: string[]) => {
+      await queryClient.cancelQueries({
+        queryKey: trpc.apps.list.queryOptions().queryKey,
+      });
+      const previous = queryClient.getQueryData(
+        trpc.apps.list.queryOptions().queryKey,
+      ) as any[] | undefined;
+
+      if (previous && Array.isArray(previous)) {
+        const byId = new Map(previous.map((a: any) => [a.id, a]));
+        const next = orderedIds
+          .map((id) => byId.get(id))
+          .filter(Boolean) as any[];
+        queryClient.setQueryData(trpc.apps.list.queryOptions().queryKey, next);
+      }
+
+      return { previous };
+    },
+    onError: (err: any, _orderedIds, ctx) => {
+      if (ctx?.previous) {
+        queryClient.setQueryData(
+          trpc.apps.list.queryOptions().queryKey,
+          ctx.previous,
+        );
+      }
       addToast(`Failed to reorder: ${err.message}`, "error");
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: trpc.apps.list.queryOptions().queryKey,
+      });
     },
   });
 

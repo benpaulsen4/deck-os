@@ -1,10 +1,28 @@
 import { z } from "zod";
 
+const HttpUrlSchema = z
+  .string()
+  .url()
+  .refine(
+    (value) => {
+      try {
+        const u = new URL(value);
+        return u.protocol === "http:" || u.protocol === "https:";
+      } catch {
+        return false;
+      }
+    },
+    { message: "Invalid URL" },
+  );
+
+const UrlOrEmptySchema = z.union([HttpUrlSchema, z.literal("")]);
+const OptionalUrlSchema = UrlOrEmptySchema.optional().default("");
+
 const AppMetadataSchema = z.object({
   id: z.string(),
   name: z.string(),
-  icon: z.string().url().optional().default(""),
-  url: z.string().url().optional().default(""),
+  icon: OptionalUrlSchema,
+  url: OptionalUrlSchema,
   description: z.string().optional().default(""),
   order: z.number().int().default(0),
   createdAt: z.string().datetime(),
@@ -176,6 +194,8 @@ export {
   ContainerStateSchema,
   ContainerPortSchema,
   StackStatusSchema,
+  UrlOrEmptySchema,
+  OptionalUrlSchema,
 };
 
 export type {

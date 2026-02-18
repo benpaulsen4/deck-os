@@ -95,6 +95,7 @@ export async function restartStack(appId: string): Promise<void> {
 export async function pullStack(
   appId: string,
   onOutput?: (line: string) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (!onOutput) {
     onOutput = () => {};
@@ -113,6 +114,16 @@ export async function pullStack(
         const child = spawn("docker", args);
 
         const outputCallback = onOutput!;
+
+        if (signal) {
+          if (signal.aborted) {
+            child.kill();
+          } else {
+            signal.addEventListener("abort", () => {
+              child.kill();
+            });
+          }
+        }
 
         child.stdout?.on("data", (data) => {
           outputCallback(data.toString());
@@ -140,6 +151,214 @@ export async function pullStack(
       })
       .catch(reject);
   });
+}
+
+export type PullOverallProgress = {
+  currentBytes: number | null;
+  totalBytes: number | null;
+  percent: number;
+  completedImages: number;
+  totalImages: number;
+  activeImage?: string;
+  indeterminate: boolean;
+};
+
+function unitToMultiplier(unit: string): number {
+  const u = unit.toUpperCase();
+  if (u === "B") return 1;
+  if (u === "KB" || u === "KIB") return 1024;
+  if (u === "MB" || u === "MIB") return 1024 ** 2;
+  if (u === "GB" || u === "GIB") return 1024 ** 3;
+  if (u === "TB" || u === "TIB") return 1024 ** 4;
+  return 1;
+}
+
+function parseBytesToken(token: string): number | null {
+  const trimmed = token.trim();
+  const match = /^(\d+(?:\.\d+)?)\s*([a-zA-Z]{1,3})$/.exec(trimmed);
+  if (!match) return null;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) return null;
+  const mult = unitToMultiplier(match[2]);
+  return Math.round(value * mult);
+}
+
+function parseProgressBytes(progress: unknown): {
+  current?: number;
+  total?: number;
+} {
+  if (typeof progress !== "string") return {};
+  const match =
+    /(\d+(?:\.\d+)?)\s*([a-zA-Z]{1,3})\s*\/\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]{1,3})/.exec(
+      progress,
+    );
+  if (!match) return {};
+  const current = parseBytesToken(`${match[1]}${match[2]}`);
+  const total = parseBytesToken(`${match[3]}${match[4]}`);
+  return { current: current ?? undefined, total: total ?? undefined };
+}
+
+export async function pullImagesWithProgress(
+  images: string[],
+  onProgress: (progress: PullOverallProgress) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const dockerClient = ensureDockerAvailable();
+  const modem: any = (dockerClient as any).modem;
+  const uniqueImages = Array.from(
+    new Set(images.map((i) => i.trim()).filter(Boolean)),
+  );
+
+  const state = new Map<
+    string,
+    {
+      layers: Map<string, { current?: number; total?: number }>;
+      done?: boolean;
+    }
+  >();
+
+  const emit = (activeImage?: string) => {
+    let currentBytes = 0;
+    let totalBytes = 0;
+    let hasTotals = false;
+    let completedImages = 0;
+    let imagesWithTotals = 0;
+    let sumImagePercents = 0;
+
+    for (const image of uniqueImages) {
+      const p = state.get(image);
+      if (p?.done) completedImages++;
+
+      const layers = p?.layers;
+      if (!layers || layers.size === 0) {
+        sumImagePercents += p?.done ? 1 : 0;
+        continue;
+      }
+
+      let imgCurrent = 0;
+      let imgTotal = 0;
+      let layersWithTotals = 0;
+      let doneLayers = 0;
+
+      for (const layer of layers.values()) {
+        if (typeof layer.total === "number" && layer.total > 0) {
+          layersWithTotals++;
+          imgTotal += layer.total;
+          imgCurrent += Math.min(layer.current ?? 0, layer.total);
+          if ((layer.current ?? 0) >= layer.total) doneLayers++;
+        }
+      }
+
+      if (imgTotal > 0) {
+        hasTotals = true;
+        imagesWithTotals++;
+        totalBytes += imgTotal;
+        currentBytes += imgCurrent;
+        sumImagePercents += imgCurrent / imgTotal;
+      } else if (layersWithTotals > 0) {
+        sumImagePercents += doneLayers / layersWithTotals;
+      } else {
+        sumImagePercents += p?.done ? 1 : 0;
+      }
+    }
+
+    const totalImages = uniqueImages.length;
+    const percent =
+      totalImages > 0
+        ? Math.max(0, Math.min(100, (sumImagePercents / totalImages) * 100))
+        : 100;
+
+    onProgress({
+      currentBytes: hasTotals ? currentBytes : null,
+      totalBytes: hasTotals ? totalBytes : null,
+      percent,
+      completedImages,
+      totalImages,
+      activeImage,
+      indeterminate: !hasTotals,
+    });
+  };
+
+  emit();
+
+  for (const image of uniqueImages) {
+    if (signal?.aborted) {
+      throw new Error("Pull aborted");
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      dockerClient.pull(image, (err: any, stream: any) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        if (signal) {
+          if (signal.aborted) {
+            try {
+              stream?.destroy?.();
+            } catch {}
+          } else {
+            signal.addEventListener(
+              "abort",
+              () => {
+                try {
+                  stream?.destroy?.();
+                } catch {}
+              },
+              { once: true },
+            );
+          }
+        }
+
+        modem.followProgress(
+          stream,
+          (followErr: any) => {
+            if (followErr) {
+              reject(followErr);
+              return;
+            }
+            const existing = state.get(image) || {
+              layers: new Map<string, { current?: number; total?: number }>(),
+            };
+            state.set(image, { ...existing, done: true });
+            emit(image);
+            resolve();
+          },
+          (event: any) => {
+            const detail = event?.progressDetail;
+            const id =
+              typeof event?.id === "string" && event.id.trim()
+                ? event.id.trim()
+                : undefined;
+            const current =
+              typeof detail?.current === "number" ? detail.current : undefined;
+            const total =
+              typeof detail?.total === "number" ? detail.total : undefined;
+            const fromText = parseProgressBytes(event?.progress);
+            const mergedCurrent = current ?? fromText.current;
+            const mergedTotal = total ?? fromText.total;
+
+            const existing = state.get(image) || {
+              layers: new Map<string, { current?: number; total?: number }>(),
+            };
+            if (id) {
+              const prevLayer = existing.layers.get(id) || {};
+              existing.layers.set(id, {
+                ...prevLayer,
+                current: mergedCurrent,
+                total: mergedTotal,
+              });
+            }
+            state.set(image, existing);
+            emit(image);
+          },
+        );
+      });
+    });
+  }
+
+  emit();
 }
 
 export async function getStackContainers(

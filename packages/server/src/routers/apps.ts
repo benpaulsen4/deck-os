@@ -2,6 +2,7 @@ import { router, publicProcedure } from "../trpc/trpc.js";
 import { z } from "zod";
 import * as appsService from "../services/apps.js";
 import * as dockerService from "../services/docker.js";
+import { OptionalUrlSchema, UrlOrEmptySchema } from "../lib/schema.js";
 
 export const appsRouter = router({
   list: publicProcedure.query(async () => {
@@ -42,8 +43,8 @@ export const appsRouter = router({
       z.object({
         name: z.string().min(1),
         description: z.string().optional().default(""),
-        icon: z.string().url().optional().default(""),
-        url: z.string().url().optional().default(""),
+        icon: OptionalUrlSchema,
+        url: OptionalUrlSchema,
         composeYaml: z.string().min(1),
       }),
     )
@@ -63,8 +64,8 @@ export const appsRouter = router({
         id: z.string(),
         name: z.string().optional(),
         description: z.string().optional(),
-        icon: z.string().optional(),
-        url: z.string().optional(),
+        icon: UrlOrEmptySchema.optional(),
+        url: UrlOrEmptySchema.optional(),
       }),
     )
     .mutation(async ({ input }) => {

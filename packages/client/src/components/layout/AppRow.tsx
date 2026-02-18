@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useAppStatusStore, type AppStatus } from "../../stores/appStatus";
 import { Button } from "../../components/ui/Button";
 import type { App, StackStatus } from "../../../../server/src/lib/schema.js";
+import { AppIcon } from "../ui/AppIcon";
 
 interface AppRowProps {
   app: App;
@@ -18,7 +18,6 @@ export function AppRow({
   isActionPending,
 }: AppRowProps) {
   const appStatus = useAppStatusStore((state) => state.appStatuses);
-  const [iconErrored, setIconErrored] = useState(false);
 
   const liveStatus: AppStatus = appStatus[app.id] || "unknown";
 
@@ -105,13 +104,6 @@ export function AppRow({
     minWidth: "32px",
   };
 
-  const iconUrl = app.metadata.icon || "";
-  const firstLetter = app.metadata.name.charAt(0).toUpperCase();
-
-  useEffect(() => {
-    setIconErrored(false);
-  }, [iconUrl]);
-
   return (
     <tr
       style={rowStyle}
@@ -152,16 +144,11 @@ export function AppRow({
               flex: "0 0 auto",
             }}
           >
-            {iconUrl && !iconErrored ? (
-              <img
-                src={iconUrl}
-                alt={app.metadata.name}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                onError={() => setIconErrored(true)}
-              />
-            ) : (
-              firstLetter
-            )}
+            <AppIcon
+              name={app.metadata.name}
+              src={app.metadata.icon}
+              imgStyle={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
           </span>
           <span>{app.metadata.name}</span>
         </Link>

@@ -5,6 +5,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Input } from "../../components/ui/Input";
 import { Button } from "../../components/ui/Button";
 import { CodeEditor } from "../../components/ui/CodeEditor";
+import { PullProgress } from "../../components/ui/PullProgress";
 import { useToastStore } from "../../stores/toast";
 
 export const Route = createFileRoute("/apps/new")({
@@ -29,6 +30,8 @@ function NewAppPage() {
   const [url, setUrl] = useState("");
   const [composeYaml, setComposeYaml] = useState(defaultCompose);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [deployAppId, setDeployAppId] = useState<string | null>(null);
+  const [isPulling, setIsPulling] = useState(false);
 
   const createAppMutation = useMutation({
     mutationFn: async (input: {
@@ -38,32 +41,42 @@ function NewAppPage() {
       url: string;
       composeYaml: string;
     }) => {
-      const created = await trpcClient.apps.create.mutate(input);
-      try {
-        await trpcClient.docker.start.mutate({ appId: created.id });
-      } catch (err) {
-        let rollbackOk = false;
-        try {
-          await trpcClient.apps.delete.mutate({ id: created.id });
-          rollbackOk = true;
-        } catch {}
-        const reason = err instanceof Error ? err.message : "Deploy failed";
-        throw new Error(
-          rollbackOk
-            ? `${reason} (rolled back)`
-            : `${reason} (rollback failed)`,
-        );
-      }
-      return created;
+      return await trpcClient.apps.create.mutate(input);
     },
 
     onSuccess: async (result: any) => {
-      addToast("App created & deployed successfully", "success");
-      navigate({ to: "/apps/$appId", params: { appId: result.id } });
+      setDeployAppId(result.id);
+      setIsPulling(true);
     },
 
     onError: (err: any) => {
-      addToast(`Failed to create/deploy app: ${err.message}`, "error");
+      addToast(`Failed to create app: ${err.message}`, "error");
+    },
+  });
+
+  const deployMutation = useMutation({
+    mutationFn: async (appId: string) => {
+      await trpcClient.docker.start.mutate({ appId });
+      return appId;
+    },
+    onSuccess: async (appId: string) => {
+      addToast("App created & deployed successfully", "success");
+      navigate({ to: "/apps/$appId", params: { appId } });
+    },
+    onError: async (err: any, appId: string) => {
+      let rollbackOk = false;
+      try {
+        await trpcClient.apps.delete.mutate({ id: appId });
+        rollbackOk = true;
+      } catch {}
+      const reason = err instanceof Error ? err.message : "Deploy failed";
+      addToast(
+        rollbackOk
+          ? `Failed to deploy app: ${reason} (rolled back)`
+          : `Failed to deploy app: ${reason} (rollback failed)`,
+        "error",
+      );
+      setDeployAppId(null);
     },
   });
 
@@ -208,20 +221,62 @@ function NewAppPage() {
               type="button"
               variant="secondary"
               onClick={handleValidate}
-              disabled={createAppMutation.isPending}
+              disabled={
+                createAppMutation.isPending ||
+                isPulling ||
+                deployMutation.isPending
+              }
             >
               VALIDATE
             </Button>
             <Button
               type="button"
               onClick={handleCreateAndDeploy}
-              disabled={createAppMutation.isPending || !name || !composeYaml}
+              disabled={
+                createAppMutation.isPending ||
+                isPulling ||
+                deployMutation.isPending ||
+                !name ||
+                !composeYaml
+              }
             >
-              {createAppMutation.isPending ? "CREATING..." : "CREATE & DEPLOY"}
+              {createAppMutation.isPending
+                ? "CREATING..."
+                : deployMutation.isPending
+                  ? "DEPLOYING..."
+                  : "CREATE & DEPLOY"}
             </Button>
           </div>
         </form>
       </div>
+
+      <PullProgress
+        isOpen={isPulling}
+        appId={isPulling ? deployAppId : null}
+        title="Pulling Images"
+        onComplete={async (result) => {
+          setIsPulling(false);
+          if (!deployAppId) return;
+
+          if (!result.ok) {
+            let rollbackOk = false;
+            try {
+              await trpcClient.apps.delete.mutate({ id: deployAppId });
+              rollbackOk = true;
+            } catch {}
+            addToast(
+              rollbackOk
+                ? `Failed to pull images: ${result.error || "Pull failed"} (rolled back)`
+                : `Failed to pull images: ${result.error || "Pull failed"} (rollback failed)`,
+              "error",
+            );
+            setDeployAppId(null);
+            return;
+          }
+
+          deployMutation.mutate(deployAppId);
+        }}
+      />
     </div>
   );
 }

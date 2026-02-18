@@ -140,7 +140,16 @@ export function AppLauncherGrid({ apps, onReorder }: AppLauncherGridProps) {
       </div>
       {draggedApp && (
         <DragOverlay>
-          <DraggableAppTile app={draggedApp} isDragging={true} />
+          <div style={{ pointerEvents: "none" }}>
+            <AppTile
+              app={draggedApp}
+              style={{
+                opacity: 0.85,
+                cursor: "grabbing",
+                userSelect: "none",
+              }}
+            />
+          </div>
         </DragOverlay>
       )}
     </DndContext>

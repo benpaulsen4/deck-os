@@ -36,14 +36,17 @@ export function useDockerEvents(callback: (event: DockerEvent) => void) {
         setConnected("events", true);
       };
 
-      eventSource.onmessage = (event) => {
+      const handleDockerEvent = (event: Event) => {
         try {
-          const data = JSON.parse(event.data);
+          const messageEvent = event as MessageEvent;
+          const data = JSON.parse(messageEvent.data);
           callbackRef.current(data as DockerEvent);
         } catch (e) {
           console.error("Failed to parse Docker event:", e);
         }
       };
+
+      eventSource.addEventListener("docker-event", handleDockerEvent);
 
       eventSource.onerror = (error) => {
         console.error("Docker events SSE error:", error);

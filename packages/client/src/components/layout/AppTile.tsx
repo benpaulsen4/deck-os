@@ -4,6 +4,7 @@ import { useAppStatusStore } from "../../stores/appStatus";
 import { useQuery } from "@tanstack/react-query";
 import { trpcClient } from "../../trpc";
 import type { AppStatus } from "../../stores/appStatus";
+import { AppIcon } from "../ui/AppIcon";
 
 interface AppTileProps {
   app: App;
@@ -57,6 +58,13 @@ export function AppTile({
 
   const status = getActualStatus();
 
+  const safeUrl = (() => {
+    const u =
+      typeof app.metadata.url === "string" ? app.metadata.url.trim() : "";
+    if (!u) return "";
+    return /^https?:\/\//i.test(u) ? u : "";
+  })();
+
   const getStatusLabel = (): string => {
     switch (status) {
       case "running":
@@ -74,8 +82,6 @@ export function AppTile({
     }
   };
 
-  const iconUrl = app.metadata.icon || "";
-  const firstLetter = app.metadata.name.charAt(0).toUpperCase();
   const {
     className: rootClassName,
     style: rootStyle,
@@ -90,9 +96,9 @@ export function AppTile({
       {...restRootProps}
     >
       <a
-        href={app.metadata.url || "#"}
-        target={app.metadata.url ? "_blank" : undefined}
-        rel={app.metadata.url ? "noopener noreferrer" : undefined}
+        href={safeUrl || "#"}
+        target={safeUrl ? "_blank" : undefined}
+        rel={safeUrl ? "noopener noreferrer" : undefined}
         className="app-tile-inner"
         style={{
           textDecoration: "none",
@@ -105,11 +111,7 @@ export function AppTile({
         }}
       >
         <div className="app-tile-icon">
-          {iconUrl ? (
-            <img src={iconUrl} alt={app.metadata.name} />
-          ) : (
-            firstLetter
-          )}
+          <AppIcon name={app.metadata.name} src={app.metadata.icon} />
         </div>
         <span className="app-tile-name">{app.metadata.name}</span>
         <span className="app-tile-status">
