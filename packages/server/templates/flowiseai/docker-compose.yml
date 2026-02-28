@@ -1,0 +1,22 @@
+services:
+  flowise:
+    image: flowiseai/flowise:latest
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    environment:
+      - PORT=3025
+      - DATABASE_PATH=/root/.flowise
+      - APIKEY_PATH=/root/.flowise
+      - SECRETKEY_PATH=/root/.flowise
+      - LOG_PATH=/root/.flowise/logs
+      - BLOB_STORAGE_PATH=/root/.flowise/storage
+      - FLOWISE_USERNAME=casaos
+      - FLOWISE_PASSWORD=casaos
+    ports:
+      - "{{WEB_PORT}}:3025"
+    volumes:
+      - "{{VOLUME_FLOWISE__ROOT__FLOWISE}}:/root/.flowise"
+    entrypoint: /bin/sh -c "sleep 3; flowise start"

@@ -1,0 +1,31 @@
+{
+  "id": "stremio",
+  "title": "Stremio",
+  "description": "Stremio is a modern media center that gives you the freedom to watch everything you want.",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "11470",
+      "required": true
+    },
+    {
+      "key": "PORT_STREMIO_8080",
+      "label": "PORT STREMIO 8080",
+      "type": "port",
+      "defaultValue": "8100",
+      "required": false
+    },
+    {
+      "key": "VOLUME_STREMIO__ROOT__STREMIO_SERVER",
+      "label": "STREMIO /ROOT/.STREMIO-SERVER",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    }
+  ]
+}

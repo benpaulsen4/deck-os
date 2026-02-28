@@ -1,0 +1,26 @@
+services:
+  stremio:
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    environment:
+      - NO_CORS=1
+      - AUTO_SERVER_URL=1
+    devices:
+      - /dev/dri:/dev/dri
+    image: tsaridas/stremio-docker:latest
+    volumes:
+      - type: bind
+        source: "{{VOLUME_STREMIO__ROOT__STREMIO_SERVER}}"
+        target: /root/.stremio-server
+    ports:
+      - target: 11470
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 8080
+        published: "{{PORT_STREMIO_8080}}"
+        protocol: tcp
+    restart: unless-stopped
+    network_mode: bridge
+    privileged: false

@@ -1,0 +1,38 @@
+{
+  "id": "sickchill",
+  "title": "Sickchill",
+  "description": "SickChill is an automatic Video Library Manager for TV Shows. It watches for new episodes of your favorite shows, and when they are posted it does its magic: automatic torrent/nzb searching, downloading, and processing at the qualities you want.",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8081",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SICKCHILL__CONFIG",
+      "label": "SICKCHILL /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SICKCHILL__DOWNLOADS",
+      "label": "SICKCHILL /DOWNLOADS",
+      "type": "path",
+      "defaultValue": "./downloads",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SICKCHILL__TV",
+      "label": "SICKCHILL /TV",
+      "type": "path",
+      "defaultValue": "./tv",
+      "required": true
+    }
+  ]
+}

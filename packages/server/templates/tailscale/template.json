@@ -1,0 +1,24 @@
+{
+  "id": "tailscale",
+  "title": "Tailscale",
+  "description": "Connect your devices and users together in your own secure virtual private network.",
+  "categories": ["Network"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "",
+  "parameters": [
+    {
+      "key": "VOLUME_TAILSCALE__VAR_LIB_TAILSCALE",
+      "label": "TAILSCALE /VAR/LIB/TAILSCALE",
+      "type": "path",
+      "defaultValue": "./tailscale",
+      "required": true
+    },
+    {
+      "key": "VOLUME_TAILSCALE__DEV_NET_TUN",
+      "label": "TAILSCALE /DEV/NET/TUN",
+      "type": "path",
+      "defaultValue": "./tun",
+      "required": true
+    }
+  ]
+}

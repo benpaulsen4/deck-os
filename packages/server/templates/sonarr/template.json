@@ -1,0 +1,59 @@
+{
+  "id": "sonarr",
+  "title": "Sonarr",
+  "description": "Sonarr is a PVR for Usenet and BitTorrent users. It can monitor multiple RSS feeds for new episodes of your favorite shows and will grab, sort and rename them. It can also be configured to automatically upgrade the quality of files already downloaded when a better quality format becomes available.",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "PGID",
+      "label": "PGID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "PUID",
+      "label": "PUID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8989",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SONARR__CONFIG",
+      "label": "SONARR /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SONARR__TV",
+      "label": "SONARR /TV",
+      "type": "path",
+      "defaultValue": "./tv",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SONARR__DOWNLOADS",
+      "label": "SONARR /DOWNLOADS",
+      "type": "path",
+      "defaultValue": "./downloads",
+      "required": true
+    }
+  ]
+}

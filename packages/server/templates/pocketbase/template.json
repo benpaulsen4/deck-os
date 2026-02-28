@@ -1,0 +1,24 @@
+{
+  "id": "pocketbase",
+  "title": "PocketBase",
+  "description": "Open Source realtime backend in 1 file",
+  "categories": ["Developer"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8090",
+      "required": true
+    },
+    {
+      "key": "VOLUME_POCKETBASE__PB_DATA",
+      "label": "POCKETBASE /PB_DATA",
+      "type": "path",
+      "defaultValue": "./pb_data",
+      "required": true
+    }
+  ]
+}

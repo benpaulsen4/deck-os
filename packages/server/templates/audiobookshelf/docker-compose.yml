@@ -1,0 +1,15 @@
+services:
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    restart: unless-stopped
+    volumes:
+      - "{{VOLUME_AUDIOBOOKSHELF__AUDIOBOOKS}}:/audiobooks"
+      - "{{VOLUME_AUDIOBOOKSHELF__PODCASTS}}:/podcasts"
+      - "{{VOLUME_AUDIOBOOKSHELF__CONFIG}}:/config"
+      - "{{VOLUME_AUDIOBOOKSHELF__METADATA}}:/metadata"
+    ports:
+      - "{{WEB_PORT}}:80"

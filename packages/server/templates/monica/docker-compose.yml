@@ -1,0 +1,48 @@
+services:
+  monica:
+    image: monica:latest
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 256M
+    restart: unless-stopped
+    ports:
+      - target: 80
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_MONICA__VAR_WWW_HTML_STORAGE}}"
+        target: /var/www/html/storage
+    environment:
+      APP_KEY: ChangeMeBy32KeyLengthOrGenerated
+      DB_HOST: monica-db
+      DB_USERNAME: monicauser
+      DB_PASSWORD: monicasecret
+    networks:
+      - monica_network
+    depends_on:
+      - monica-db
+  monica-db:
+    image: mariadb:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    volumes:
+      - type: bind
+        source: "{{VOLUME_MONICA_DB__VAR_LIB_MYSQL}}"
+        target: /var/lib/mysql
+    environment:
+      MARIADB_RANDOM_ROOT_PASSWORD: true
+      MARIADB_DATABASE: monica
+      MARIADB_USER: monicauser
+      MARIADB_PASSWORD: monicasecret
+    restart: unless-stopped
+    networks:
+      - monica_network
+networks:
+  monica_network:
+    driver: bridge

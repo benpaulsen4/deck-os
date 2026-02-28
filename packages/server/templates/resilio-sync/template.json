@@ -1,0 +1,45 @@
+{
+  "id": "resilio-sync",
+  "title": "resilio-sync",
+  "description": "Unleash the power of seamless file synchronization.",
+  "categories": ["File Sync"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "55555",
+      "required": true
+    },
+    {
+      "key": "PORT_RESILIO_SYNC_8888",
+      "label": "PORT RESILIO SYNC 8888",
+      "type": "port",
+      "defaultValue": "8888",
+      "required": false
+    },
+    {
+      "key": "VOLUME_RESILIO_SYNC__SYNC",
+      "label": "RESILIO-SYNC /SYNC",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_RESILIO_SYNC__CONFIG",
+      "label": "RESILIO-SYNC /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_RESILIO_SYNC__DOWNLOADS",
+      "label": "RESILIO-SYNC /DOWNLOADS",
+      "type": "path",
+      "defaultValue": "./downloads",
+      "required": true
+    }
+  ]
+}

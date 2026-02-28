@@ -1,0 +1,17 @@
+{
+  "id": "duckdns",
+  "title": "duckdns",
+  "description": "Dynamic DNS for your domain, supporting both IPv4 and IPv6",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "",
+  "parameters": [
+    {
+      "key": "VOLUME_DUCKDNS__CONFIG",
+      "label": "DUCKDNS /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "id": "jdownloader2",
+  "title": "JDownloader2",
+  "description": "Free & open-source download management tool",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "5800",
+      "required": true
+    },
+    {
+      "key": "PORT_JDOWNLOADER2_5900",
+      "label": "PORT JDOWNLOADER2 5900",
+      "type": "port",
+      "defaultValue": "5900",
+      "required": false
+    },
+    {
+      "key": "PORT_JDOWNLOADER2_3129",
+      "label": "PORT JDOWNLOADER2 3129",
+      "type": "port",
+      "defaultValue": "3129",
+      "required": false
+    },
+    {
+      "key": "VOLUME_JDOWNLOADER2__CONFIG",
+      "label": "JDOWNLOADER2 /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_JDOWNLOADER2__OUTPUT",
+      "label": "JDOWNLOADER2 /OUTPUT",
+      "type": "path",
+      "defaultValue": "./output",
+      "required": true
+    }
+  ]
+}

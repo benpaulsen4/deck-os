@@ -1,0 +1,31 @@
+{
+  "id": "deepseek-ocr-nvidia",
+  "title": "DeepSeek OCR(Nvidia GPU)",
+  "description": "Powerful OCR powered by DeepSeek AI",
+  "categories": ["AI"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "22523",
+      "required": true
+    },
+    {
+      "key": "VOLUME_DEEPSEEK_OCR_BACKEND__MODELS",
+      "label": "DEEPSEEK-OCR-BACKEND /MODELS",
+      "type": "path",
+      "defaultValue": "./models",
+      "required": true
+    },
+    {
+      "key": "PORT_DEEPSEEK_OCR_FRONTEND_80",
+      "label": "PORT DEEPSEEK OCR FRONTEND 80",
+      "type": "port",
+      "defaultValue": "23000",
+      "required": false
+    }
+  ]
+}

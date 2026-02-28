@@ -14,6 +14,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppsIndexRouteImport } from './routes/apps/index'
 import { Route as AppsNewRouteImport } from './routes/apps/new'
 import { Route as AppsAppIdRouteImport } from './routes/apps/$appId'
+import { Route as AppsTemplatesIndexRouteImport } from './routes/apps/templates/index'
+import { Route as AppsTemplatesTemplateIdRouteImport } from './routes/apps/templates/$templateId'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -40,6 +42,16 @@ const AppsAppIdRoute = AppsAppIdRouteImport.update({
   path: '/apps/$appId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppsTemplatesIndexRoute = AppsTemplatesIndexRouteImport.update({
+  id: '/apps/templates/',
+  path: '/apps/templates/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppsTemplatesTemplateIdRoute = AppsTemplatesTemplateIdRouteImport.update({
+  id: '/apps/templates/$templateId',
+  path: '/apps/templates/$templateId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -47,6 +59,8 @@ export interface FileRoutesByFullPath {
   '/apps/$appId': typeof AppsAppIdRoute
   '/apps/new': typeof AppsNewRoute
   '/apps/': typeof AppsIndexRoute
+  '/apps/templates/$templateId': typeof AppsTemplatesTemplateIdRoute
+  '/apps/templates/': typeof AppsTemplatesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +68,8 @@ export interface FileRoutesByTo {
   '/apps/$appId': typeof AppsAppIdRoute
   '/apps/new': typeof AppsNewRoute
   '/apps': typeof AppsIndexRoute
+  '/apps/templates/$templateId': typeof AppsTemplatesTemplateIdRoute
+  '/apps/templates': typeof AppsTemplatesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,13 +78,37 @@ export interface FileRoutesById {
   '/apps/$appId': typeof AppsAppIdRoute
   '/apps/new': typeof AppsNewRoute
   '/apps/': typeof AppsIndexRoute
+  '/apps/templates/$templateId': typeof AppsTemplatesTemplateIdRoute
+  '/apps/templates/': typeof AppsTemplatesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/settings' | '/apps/$appId' | '/apps/new' | '/apps/'
+  fullPaths:
+    | '/'
+    | '/settings'
+    | '/apps/$appId'
+    | '/apps/new'
+    | '/apps/'
+    | '/apps/templates/$templateId'
+    | '/apps/templates/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/settings' | '/apps/$appId' | '/apps/new' | '/apps'
-  id: '__root__' | '/' | '/settings' | '/apps/$appId' | '/apps/new' | '/apps/'
+  to:
+    | '/'
+    | '/settings'
+    | '/apps/$appId'
+    | '/apps/new'
+    | '/apps'
+    | '/apps/templates/$templateId'
+    | '/apps/templates'
+  id:
+    | '__root__'
+    | '/'
+    | '/settings'
+    | '/apps/$appId'
+    | '/apps/new'
+    | '/apps/'
+    | '/apps/templates/$templateId'
+    | '/apps/templates/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -77,6 +117,8 @@ export interface RootRouteChildren {
   AppsAppIdRoute: typeof AppsAppIdRoute
   AppsNewRoute: typeof AppsNewRoute
   AppsIndexRoute: typeof AppsIndexRoute
+  AppsTemplatesTemplateIdRoute: typeof AppsTemplatesTemplateIdRoute
+  AppsTemplatesIndexRoute: typeof AppsTemplatesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -116,6 +158,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppsAppIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/apps/templates/': {
+      id: '/apps/templates/'
+      path: '/apps/templates'
+      fullPath: '/apps/templates/'
+      preLoaderRoute: typeof AppsTemplatesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/apps/templates/$templateId': {
+      id: '/apps/templates/$templateId'
+      path: '/apps/templates/$templateId'
+      fullPath: '/apps/templates/$templateId'
+      preLoaderRoute: typeof AppsTemplatesTemplateIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -125,6 +181,8 @@ const rootRouteChildren: RootRouteChildren = {
   AppsAppIdRoute: AppsAppIdRoute,
   AppsNewRoute: AppsNewRoute,
   AppsIndexRoute: AppsIndexRoute,
+  AppsTemplatesTemplateIdRoute: AppsTemplatesTemplateIdRoute,
+  AppsTemplatesIndexRoute: AppsTemplatesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

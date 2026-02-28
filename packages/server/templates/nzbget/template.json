@@ -1,0 +1,31 @@
+{
+  "id": "nzbget",
+  "title": "Nzbget",
+  "description": "NZBGet can run on almost any device - classic PC, NAS, media player, SAT-receiver, WLAN-router, etc. The download area provides precompiled binaries for Windows, macOS, Linux (compatible with many CPUs and platform variants), FreeBSD and Android. For other platforms the program can be compiled from sources.",
+  "categories": ["Downloader"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "6789",
+      "required": true
+    },
+    {
+      "key": "VOLUME_NZBGET__CONFIG",
+      "label": "NZBGET /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_NZBGET__DOWNLOADS",
+      "label": "NZBGET /DOWNLOADS",
+      "type": "path",
+      "defaultValue": "./downloads",
+      "required": true
+    }
+  ]
+}

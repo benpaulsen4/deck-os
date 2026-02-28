@@ -1,0 +1,17 @@
+services:
+  alist:
+    image: xhofe/alist:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 5244
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_ALIST__OPT_ALIST_DATA}}"
+        target: /opt/alist/data

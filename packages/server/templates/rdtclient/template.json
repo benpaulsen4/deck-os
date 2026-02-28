@@ -1,0 +1,52 @@
+{
+  "id": "rdtclient",
+  "title": "Real-Debrid Torrent Client",
+  "description": "",
+  "categories": ["Downloader"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "PGID",
+      "label": "PGID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "PUID",
+      "label": "PUID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "6500",
+      "required": true
+    },
+    {
+      "key": "VOLUME_RDTCLIENT__DATA_DOWNLOADS",
+      "label": "RDTCLIENT /DATA/DOWNLOADS",
+      "type": "path",
+      "defaultValue": "./downloads",
+      "required": true
+    },
+    {
+      "key": "VOLUME_RDTCLIENT__DATA_DB",
+      "label": "RDTCLIENT /DATA/DB",
+      "type": "path",
+      "defaultValue": "./db",
+      "required": true
+    }
+  ]
+}

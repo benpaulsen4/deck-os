@@ -1,0 +1,38 @@
+{
+  "id": "plex-nvidia",
+  "title": "Plex(Nvidia GPU)",
+  "description": "Stream Movies & TV Shows",
+  "categories": ["Media"],
+  "icon": "https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/Plex/icon.png",
+  "webUrlTemplate": "",
+  "parameters": [
+    {
+      "key": "PGID",
+      "label": "PGID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "PUID",
+      "label": "PUID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "VOLUME_PLEX__CONFIG",
+      "label": "PLEX /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_PLEX__MEDIA",
+      "label": "PLEX /MEDIA",
+      "type": "path",
+      "defaultValue": "./media",
+      "required": true
+    }
+  ]
+}

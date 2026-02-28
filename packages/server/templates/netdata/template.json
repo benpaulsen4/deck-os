@@ -1,0 +1,80 @@
+{
+  "id": "netdata",
+  "title": "Netdata",
+  "description": "Real-time Performance Monitoring",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "19999",
+      "required": true
+    },
+    {
+      "key": "VOLUME_APP__ETC_NETDATA",
+      "label": "APP /ETC/NETDATA",
+      "type": "path",
+      "defaultValue": "./netdata",
+      "required": true
+    },
+    {
+      "key": "VOLUME_APP__VAR_LIB_NETDATA",
+      "label": "APP /VAR/LIB/NETDATA",
+      "type": "path",
+      "defaultValue": "./netdata",
+      "required": true
+    },
+    {
+      "key": "VOLUME_APP__VAR_CACHE_NETDATA",
+      "label": "APP /VAR/CACHE/NETDATA",
+      "type": "path",
+      "defaultValue": "./netdata",
+      "required": true
+    },
+    {
+      "key": "VOLUME_APP__HOST_ETC_PASSWD",
+      "label": "APP /HOST/ETC/PASSWD",
+      "type": "path",
+      "defaultValue": "./passwd",
+      "required": true
+    },
+    {
+      "key": "VOLUME_APP__HOST_ETC_GROUP",
+      "label": "APP /HOST/ETC/GROUP",
+      "type": "path",
+      "defaultValue": "./group",
+      "required": true
+    },
+    {
+      "key": "VOLUME_APP__HOST_PROC",
+      "label": "APP /HOST/PROC",
+      "type": "path",
+      "defaultValue": "./proc",
+      "required": true
+    },
+    {
+      "key": "VOLUME_APP__HOST_SYS",
+      "label": "APP /HOST/SYS",
+      "type": "path",
+      "defaultValue": "./sys",
+      "required": true
+    },
+    {
+      "key": "VOLUME_APP__HOST_ETC_OS_RELEASE",
+      "label": "APP /HOST/ETC/OS-RELEASE",
+      "type": "path",
+      "defaultValue": "./os-release",
+      "required": true
+    },
+    {
+      "key": "VOLUME_APP__VAR_RUN_DOCKER_SOCK",
+      "label": "APP /VAR/RUN/DOCKER.SOCK",
+      "type": "path",
+      "defaultValue": "./docker-sock",
+      "required": true
+    }
+  ]
+}

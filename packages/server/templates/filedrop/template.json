@@ -1,0 +1,45 @@
+{
+  "id": "filedrop",
+  "title": "FileDrop",
+  "description": "FileDrop is a free, open source file sharing service",
+  "categories": ["Cloud"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "PGID",
+      "label": "PGID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "PUID",
+      "label": "PUID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8000",
+      "required": true
+    },
+    {
+      "key": "VOLUME_FILEDROP__VAR_FILE_DROP_FILES",
+      "label": "FILEDROP /VAR/FILE_DROP_FILES",
+      "type": "path",
+      "defaultValue": "./file-drop-files",
+      "required": true
+    }
+  ]
+}

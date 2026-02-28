@@ -1,0 +1,52 @@
+{
+  "id": "emby",
+  "title": "Emby",
+  "description": "Bringing all of your home videos, music, and photos together into one place has never been easier. Your personal Emby Server automatically converts and streams your media on-the-fly to play on any device.",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8096",
+      "required": true
+    },
+    {
+      "key": "PORT_EMBY_8920",
+      "label": "PORT EMBY 8920",
+      "type": "port",
+      "defaultValue": "8920",
+      "required": false
+    },
+    {
+      "key": "VOLUME_EMBY__CONFIG",
+      "label": "EMBY /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_EMBY__DATA_TVSHOWS",
+      "label": "EMBY /DATA/TVSHOWS",
+      "type": "path",
+      "defaultValue": "./tvshows",
+      "required": true
+    },
+    {
+      "key": "VOLUME_EMBY__DATA_MOVIES",
+      "label": "EMBY /DATA/MOVIES",
+      "type": "path",
+      "defaultValue": "./movies",
+      "required": true
+    }
+  ]
+}

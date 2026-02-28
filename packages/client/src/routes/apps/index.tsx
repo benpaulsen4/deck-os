@@ -154,9 +154,14 @@ function AppsPage() {
     <div className="page-container page-container--viewport">
       <div className="page-header">
         <h1 className="page-title">Apps</h1>
-        <Link to="/apps/new" className="page-header-action">
-          + NEW APP
-        </Link>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <Link to="/apps/templates" className="page-header-action">
+            + TEMPLATED APP
+          </Link>
+          <Link to="/apps/new" className="page-header-action">
+            + CUSTOM APP
+          </Link>
+        </div>
       </div>
       <div className="page-body">
         {apps && apps.length > 0 ? (

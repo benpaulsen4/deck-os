@@ -1,0 +1,59 @@
+{
+  "id": "unifi-network-application",
+  "title": "Unifi Network Application",
+  "description": "The Unifi network application software is a powerful, enterprise wireless software engine ideal for high-density client deployments requiring low latency and high uptime performance.",
+  "categories": ["Network"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8443",
+      "required": true
+    },
+    {
+      "key": "PORT_UNIFI_NETWORK_APPLICATION_3478",
+      "label": "PORT UNIFI NETWORK APPLICATION 3478",
+      "type": "port",
+      "defaultValue": "3478",
+      "required": false
+    },
+    {
+      "key": "PORT_UNIFI_NETWORK_APPLICATION_10001",
+      "label": "PORT UNIFI NETWORK APPLICATION 10001",
+      "type": "port",
+      "defaultValue": "10001",
+      "required": false
+    },
+    {
+      "key": "PORT_UNIFI_NETWORK_APPLICATION_8080",
+      "label": "PORT UNIFI NETWORK APPLICATION 8080",
+      "type": "port",
+      "defaultValue": "8080",
+      "required": false
+    },
+    {
+      "key": "VOLUME_UNIFI_NETWORK_APPLICATION__CONFIG",
+      "label": "UNIFI-NETWORK-APPLICATION /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "PORT_UNIFI_DB_27017",
+      "label": "PORT UNIFI DB 27017",
+      "type": "port",
+      "defaultValue": "27017",
+      "required": false
+    },
+    {
+      "key": "VOLUME_UNIFI_DB__DATA_DB",
+      "label": "UNIFI-DB /DATA/DB",
+      "type": "path",
+      "defaultValue": "./db",
+      "required": true
+    }
+  ]
+}

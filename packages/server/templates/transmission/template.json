@@ -1,0 +1,52 @@
+{
+  "id": "transmission",
+  "title": "Transmission",
+  "description": "Transmission is an open source, volunteer-based project. Unlike some BitTorrent clients, Transmission doesn't play games with its users to make money:  Transmission doesn't bundle toolbars, pop-up ads, flash ads, twitter tools, or anything else. It doesn't hold some features back for a payware version. Its source code is available for anyone to review. We don't track our users, and our website and forums have no third-party ads or analytics.",
+  "categories": ["Downloader"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "9091",
+      "required": true
+    },
+    {
+      "key": "PORT_TRANSMISSION_51413",
+      "label": "PORT TRANSMISSION 51413",
+      "type": "port",
+      "defaultValue": "51413",
+      "required": false
+    },
+    {
+      "key": "PORT_TRANSMISSION_51413_2",
+      "label": "PORT TRANSMISSION 51413",
+      "type": "port",
+      "defaultValue": "51413",
+      "required": false
+    },
+    {
+      "key": "VOLUME_TRANSMISSION__CONFIG",
+      "label": "TRANSMISSION /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_TRANSMISSION__DOWNLOADS",
+      "label": "TRANSMISSION /DOWNLOADS",
+      "type": "path",
+      "defaultValue": "./downloads",
+      "required": true
+    },
+    {
+      "key": "VOLUME_TRANSMISSION__WATCH",
+      "label": "TRANSMISSION /WATCH",
+      "type": "path",
+      "defaultValue": "./watch",
+      "required": true
+    }
+  ]
+}

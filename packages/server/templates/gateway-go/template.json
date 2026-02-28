@@ -1,0 +1,24 @@
+{
+  "id": "gateway-go",
+  "title": "gateway-go",
+  "description": "A third-party client for casaos and zimaOS, remote access management interface, remote access to installed applications.",
+  "categories": ["Network"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "34323",
+      "required": true
+    },
+    {
+      "key": "VOLUME_GATEWAY_GO__ROOT",
+      "label": "GATEWAY-GO /ROOT",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    }
+  ]
+}

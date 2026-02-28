@@ -1,0 +1,13 @@
+services:
+  cloudflared:
+    image: wisdomsky/cloudflared-web:latest
+    restart: unless-stopped
+    network_mode: host
+    ports:
+      - target: 14333
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_CLOUDFLARED__CONFIG}}"
+        target: /config

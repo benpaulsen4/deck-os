@@ -1,0 +1,19 @@
+version: "3.7"
+services:
+  cloudbeaver:
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    image: dbeaver/cloudbeaver:latest
+    ports:
+      - target: 8978
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_CLOUDBEAVER__OPT_CLOUDBEAVER_WORKSPACE}}"
+        target: /opt/cloudbeaver/workspace
+    network_mode: bridge
+    privileged: false

@@ -1,0 +1,26 @@
+services:
+  portainer:
+    image: portainer/portainer-ce:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 32M
+    network_mode: bridge
+    ports:
+      - target: 8000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 9000
+        published: "{{PORT_PORTAINER_9000}}"
+        protocol: tcp
+      - target: 9443
+        published: "{{PORT_PORTAINER_9443}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_PORTAINER__DATA}}"
+        target: /data
+      - type: bind
+        source: "{{VOLUME_PORTAINER__VAR_RUN_DOCKER_SOCK}}"
+        target: /var/run/docker.sock

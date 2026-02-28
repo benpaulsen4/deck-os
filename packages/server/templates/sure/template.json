@@ -1,0 +1,45 @@
+{
+  "id": "sure",
+  "title": "Sure",
+  "description": "Personal finance management application",
+  "categories": ["Finance"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "23000",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SURE_WEB__RAILS_STORAGE",
+      "label": "SURE-WEB /RAILS/STORAGE",
+      "type": "path",
+      "defaultValue": "./app/storage",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SURE_WORKER__RAILS_STORAGE",
+      "label": "SURE-WORKER /RAILS/STORAGE",
+      "type": "path",
+      "defaultValue": "./app/storage",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SURE_DB__VAR_LIB_POSTGRESQL_DATA",
+      "label": "SURE-DB /VAR/LIB/POSTGRESQL/DATA",
+      "type": "path",
+      "defaultValue": "./pgdata",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SURE_REDIS__DATA",
+      "label": "SURE-REDIS /DATA",
+      "type": "path",
+      "defaultValue": "./redis/data",
+      "required": true
+    }
+  ]
+}

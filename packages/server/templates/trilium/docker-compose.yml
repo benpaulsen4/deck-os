@@ -1,0 +1,21 @@
+services:
+  trilium:
+    command: []
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    image: triliumnext/trilium:latest
+    labels:
+      icon: https://icon.casaos.io/main/all/trilium.png
+    ports:
+      - target: 8080
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_TRILIUM__HOME_NODE_TRILIUM_DATA}}"
+        target: /home/node/trilium-data
+    network_mode: bridge
+    privileged: false

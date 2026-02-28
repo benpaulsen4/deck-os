@@ -1,0 +1,31 @@
+{
+  "id": "snapdrop",
+  "title": "snapdrop",
+  "description": "Cross-platform file sharing made easy.",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "443",
+      "required": true
+    },
+    {
+      "key": "PORT_SNAPDROP_80",
+      "label": "PORT SNAPDROP 80",
+      "type": "port",
+      "defaultValue": "89",
+      "required": false
+    },
+    {
+      "key": "VOLUME_SNAPDROP__CONFIG",
+      "label": "SNAPDROP /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    }
+  ]
+}

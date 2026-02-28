@@ -1,0 +1,22 @@
+services:
+  kavita:
+    image: jvmilazz0/kavita:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+    network_mode: bridge
+    restart: unless-stopped
+    ports:
+      - target: 5000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_KAVITA__KAVITA_CONFIG}}"
+        target: /kavita/config
+      - type: bind
+        source: "{{VOLUME_KAVITA__MANGA}}"
+        target: /manga
+    environment:
+      TZ: "{{TZ}}"

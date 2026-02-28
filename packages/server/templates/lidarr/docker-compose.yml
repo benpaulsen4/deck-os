@@ -1,0 +1,27 @@
+services:
+  lidarr:
+    environment:
+      PGID: "1000"
+      PUID: "1000"
+      TZ: Europe/London
+    image: linuxserver/lidarr:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 8686
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_LIDARR__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_LIDARR__MUSIC}}"
+        target: /music
+      - type: bind
+        source: "{{VOLUME_LIDARR__DOWNLOADS}}"
+        target: /downloads

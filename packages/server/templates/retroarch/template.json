@@ -1,0 +1,17 @@
+{
+  "id": "retroarch",
+  "title": "RetroArch",
+  "description": "Online retro games emulator",
+  "categories": ["Games"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8183",
+      "required": true
+    }
+  ]
+}

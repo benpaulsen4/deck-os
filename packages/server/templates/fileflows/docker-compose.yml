@@ -1,0 +1,37 @@
+services:
+  fileflows:
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    hostname: fileflows
+    image: revenz/fileflows:stable
+    labels:
+      icon: https://fileflows.com/img/logo.svg
+    restart: unless-stopped
+    ports:
+      - target: 5000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    network_mode: bridge
+    volumes:
+      - type: bind
+        source: "{{VOLUME_FILEFLOWS__APP_DATA}}"
+        target: /app/Data
+      - type: bind
+        source: "{{VOLUME_FILEFLOWS__APP_LOGS}}"
+        target: /app/Logs
+      - type: bind
+        source: "{{VOLUME_FILEFLOWS__APP_COMMON}}"
+        target: /app/common
+      - type: bind
+        source: "{{VOLUME_FILEFLOWS__TEMP}}"
+        target: /temp
+      - type: bind
+        source: "{{VOLUME_FILEFLOWS__MEDIA}}"
+        target: /Media
+      - type: bind
+        source: "{{VOLUME_FILEFLOWS__VAR_RUN_DOCKER_SOCK}}"
+        target: /var/run/docker.sock

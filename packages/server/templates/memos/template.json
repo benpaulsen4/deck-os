@@ -1,0 +1,45 @@
+{
+  "id": "memos",
+  "title": "Memos",
+  "description": "Memos is a lightweight, self-hosted memo hub. Open Source and Free forever.",
+  "categories": ["Notes"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "PGID",
+      "label": "PGID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "PUID",
+      "label": "PUID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "5230",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MEMOS__VAR_OPT_MEMOS",
+      "label": "MEMOS /VAR/OPT/MEMOS",
+      "type": "path",
+      "defaultValue": "./memos",
+      "required": true
+    }
+  ]
+}

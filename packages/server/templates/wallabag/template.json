@@ -1,0 +1,24 @@
+{
+  "id": "wallabag",
+  "title": "Wallabag",
+  "description": "Save and classify articles. Read them later. Freely.",
+  "categories": ["Notes"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "25661",
+      "required": true
+    },
+    {
+      "key": "VOLUME_WALLABAG__VAR_WWW_WALLABAG_WEB_ASSETS_IMAGES",
+      "label": "WALLABAG /VAR/WWW/WALLABAG/WEB/ASSETS/IMAGES",
+      "type": "path",
+      "defaultValue": "./images",
+      "required": true
+    }
+  ]
+}

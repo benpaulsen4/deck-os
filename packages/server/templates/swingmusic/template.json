@@ -1,0 +1,31 @@
+{
+  "id": "swingmusic",
+  "title": "Swing Music",
+  "description": "Swing Music is a beautifully designed, self-hosted music streaming server. Like a cooler Spotify ... but bring your own music.",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "1970",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SWINGMUSIC__CONFIG",
+      "label": "SWINGMUSIC /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SWINGMUSIC__MUSIC",
+      "label": "SWINGMUSIC /MUSIC",
+      "type": "path",
+      "defaultValue": "./music",
+      "required": true
+    }
+  ]
+}

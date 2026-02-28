@@ -1,0 +1,21 @@
+services:
+  siyuan-note:
+    command: --accessAuthCode=casaos --workspace=/siyuan/workspace/
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+    image: b3log/siyuan:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 512M
+    network_mode: bridge
+    ports:
+      - target: 6806
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_SIYUAN_NOTE__SIYUAN_WORKSPACE}}"
+        target: /siyuan/workspace

@@ -1,0 +1,17 @@
+{
+  "id": "excalidraw",
+  "title": "Excalidraw",
+  "description": "Virtual whiteboard for sketching hand-drawn like diagrams",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "17638",
+      "required": true
+    }
+  ]
+}

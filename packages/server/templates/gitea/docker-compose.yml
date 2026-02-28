@@ -1,0 +1,23 @@
+services:
+  gitea:
+    environment:
+      USER_GID: "1000"
+      USER_UID: "1000"
+    image: gitea/gitea:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    network_mode: bridge
+    ports:
+      - target: 3000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 22
+        published: "{{PORT_GITEA_22}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_GITEA__DATA}}"
+        target: /data

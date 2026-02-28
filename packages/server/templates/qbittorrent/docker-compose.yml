@@ -1,0 +1,25 @@
+services:
+  qbittorrent:
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+      UMASK: "002"
+    image: ghcr.io/hotio/qbittorrent:release-5.0.4
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    network_mode: bridge
+    ports:
+      - target: 8080
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_QBITTORRENT__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_QBITTORRENT__DATA}}"
+        target: /DATA

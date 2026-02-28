@@ -1,0 +1,29 @@
+services:
+  icewhale-stable-diffusion-webui:
+    image: johnguan/stable-diffusion-webui:latest
+    runtime: nvidia
+    ipc: host
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CPU_FALLBACK=true
+    deploy:
+      resources:
+        reservations:
+          memory: 512M
+    network_mode: bridge
+    ports:
+      - target: 7860
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_ICEWHALE_STABLE_DIFFUSION_WEBUI__DATA_MODELS}}"
+        target: /data/models
+      - type: bind
+        source: "{{VOLUME_ICEWHALE_STABLE_DIFFUSION_WEBUI__DATA_OUTPUTS}}"
+        target: /data/outputs
+      - type: bind
+        source: "{{VOLUME_ICEWHALE_STABLE_DIFFUSION_WEBUI__DATA_CONFIG}}"
+        target: /data/config
+    privileged: false

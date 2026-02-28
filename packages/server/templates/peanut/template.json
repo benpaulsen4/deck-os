@@ -1,0 +1,24 @@
+{
+  "id": "peanut",
+  "title": "PeaNUT",
+  "description": "UPS monitoring and power outage notification system",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8084",
+      "required": true
+    },
+    {
+      "key": "VOLUME_PEANUT__CONFIG",
+      "label": "PEANUT /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    }
+  ]
+}

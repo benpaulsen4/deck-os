@@ -1,0 +1,27 @@
+services:
+  sabnzbd:
+    environment:
+      PGID: "1000"
+      PUID: "1000"
+      TZ: Europe/London
+    image: linuxserver/sabnzbd:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 8080
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_SABNZBD__INCOMPLETE_DOWNLOADS}}"
+        target: /incomplete-downloads
+      - type: bind
+        source: "{{VOLUME_SABNZBD__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_SABNZBD__DOWNLOADS}}"
+        target: /downloads

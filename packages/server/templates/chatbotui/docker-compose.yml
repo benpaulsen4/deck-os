@@ -1,0 +1,13 @@
+services:
+  chatbot-ui:
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    image: ghcr.io/mckaywrigley/chatbot-ui:main
+    network_mode: bridge
+    ports:
+      - target: 3000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped

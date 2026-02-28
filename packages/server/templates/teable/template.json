@@ -1,0 +1,38 @@
+{
+  "id": "teable",
+  "title": "Teable",
+  "description": "Teable adopts a concise spreadsheet interface, yet creates powerful database applications",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3200",
+      "required": true
+    },
+    {
+      "key": "VOLUME_TEABLE__APP__ASSETS",
+      "label": "TEABLE /APP/.ASSETS",
+      "type": "path",
+      "defaultValue": "./assets",
+      "required": true
+    },
+    {
+      "key": "VOLUME_TEABLE_DB__VAR_LIB_POSTGRESQL_DATA",
+      "label": "TEABLE-DB /VAR/LIB/POSTGRESQL/DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_TEABLE_CACHE__DATA",
+      "label": "TEABLE-CACHE /DATA",
+      "type": "path",
+      "defaultValue": "./teable-cache-data",
+      "required": true
+    }
+  ]
+}

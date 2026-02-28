@@ -1,0 +1,24 @@
+services:
+  pinchflat:
+    image: ghcr.io/kieraneglin/pinchflat:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    network_mode: bridge
+    ports:
+      - target: 8945
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    environment:
+      - TZ=$TZ
+      - PUID=$PUID
+      - PGID=$PGID
+    volumes:
+      - type: bind
+        source: "{{VOLUME_PINCHFLAT__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_PINCHFLAT__DOWNLOADS}}"
+        target: /downloads

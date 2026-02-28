@@ -1,0 +1,27 @@
+services:
+  jellyseerr:
+    cpu_shares: 50
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 256M
+    environment:
+      - LOG_LEVEL=debug
+      - TZ=$TZ
+    image: fallenbagel/jellyseerr:latest
+    ports:
+      - mode: ingress
+        target: 5055
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_JELLYSEERR__APP_CONFIG}}"
+        target: /app/config
+        bind:
+          create_host_path: true
+    network_mode: bridge
+    privileged: false

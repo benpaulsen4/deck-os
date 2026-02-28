@@ -1,0 +1,19 @@
+services:
+  index-tts-nvidia:
+    image: icewhaletech/index-tts:latest
+    restart: unless-stopped
+    ports:
+      - target: 7860
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+    deploy:
+      resources:
+        reservations:
+          memory: 8G
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                - gpu

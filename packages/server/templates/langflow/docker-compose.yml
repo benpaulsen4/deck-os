@@ -1,0 +1,32 @@
+services:
+  langflow:
+    image: langflowai/langflow:latest
+    user: 0:0
+    ports:
+      - target: 7860
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    depends_on:
+      - langflow-postgres
+    networks:
+      - langflow-net
+    environment:
+      - LANGFLOW_DATABASE_URL=postgresql://langflow:langflow@langflow-postgres:5432/langflow
+      - LANGFLOW_CONFIG_DIR=/app/langflow
+    volumes:
+      - "{{VOLUME_LANGFLOW__APP_LANGFLOW}}:/app/langflow"
+  langflow-postgres:
+    image: postgres:latest
+    environment:
+      - POSTGRES_USER=langflow
+      - POSTGRES_PASSWORD=langflow
+      - POSTGRES_DB=langflow
+    networks:
+      - langflow-net
+    volumes:
+      - type: bind
+        source: "{{VOLUME_LANGFLOW_POSTGRES__VAR_LIB_POSTGRESQL_DATA}}"
+        target: /var/lib/postgresql/data
+networks:
+  langflow-net:
+    driver: bridge

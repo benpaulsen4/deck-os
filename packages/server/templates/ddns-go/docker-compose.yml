@@ -1,0 +1,17 @@
+services:
+  ddns-go:
+    image: jeessy/ddns-go:latest
+    network_mode: bridge
+    deploy:
+      resources:
+        reservations:
+          memory: 32M
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_DDNS_GO__ROOT}}"
+        target: /root
+    ports:
+      - target: 9876
+        published: "{{WEB_PORT}}"
+        protocol: tcp

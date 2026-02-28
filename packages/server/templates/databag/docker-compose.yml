@@ -1,0 +1,12 @@
+services:
+  databag:
+    image: balzack/databag:latest
+    restart: unless-stopped
+    ports:
+      - target: 7000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_DATABAG__VAR_LIB_DATABAG}}"
+        target: /var/lib/databag

@@ -1,0 +1,52 @@
+{
+  "id": "homeassistant",
+  "title": "Home Assistant",
+  "description": "Open source home automation that puts local control and privacy first.",
+  "categories": ["Home Automation"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "",
+  "parameters": [
+    {
+      "key": "PGID",
+      "label": "PGID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "PUID",
+      "label": "PUID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "VOLUME_HOMEASSISTANT__CONFIG",
+      "label": "HOMEASSISTANT /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_HOMEASSISTANT__ETC_LOCALTIME",
+      "label": "HOMEASSISTANT /ETC/LOCALTIME",
+      "type": "path",
+      "defaultValue": "./localtime",
+      "required": true
+    },
+    {
+      "key": "VOLUME_HOMEASSISTANT__RUN_DBUS",
+      "label": "HOMEASSISTANT /RUN/DBUS",
+      "type": "path",
+      "defaultValue": "./dbus",
+      "required": true
+    }
+  ]
+}

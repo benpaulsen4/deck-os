@@ -1,0 +1,52 @@
+{
+  "id": "emulatorjs",
+  "title": "emulatorjs",
+  "description": "EmulatorJS is a Docker-based emulator application that can simulate various operating systems and device environments within containers for development, testing, and learning purposes.",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3001",
+      "required": true
+    },
+    {
+      "key": "PORT_EMULATORJS_4001",
+      "label": "PORT EMULATORJS 4001",
+      "type": "port",
+      "defaultValue": "4001",
+      "required": false
+    },
+    {
+      "key": "PORT_EMULATORJS_80",
+      "label": "PORT EMULATORJS 80",
+      "type": "port",
+      "defaultValue": "88",
+      "required": false
+    },
+    {
+      "key": "VOLUME_EMULATORJS__CONFIG",
+      "label": "EMULATORJS /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_EMULATORJS__DATA",
+      "label": "EMULATORJS /DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_EMULATORJS__DATA_NES_ROMS",
+      "label": "EMULATORJS /DATA/NES/ROMS",
+      "type": "path",
+      "defaultValue": "./roms",
+      "required": true
+    }
+  ]
+}

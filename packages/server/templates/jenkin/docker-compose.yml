@@ -1,0 +1,20 @@
+services:
+  jenkins:
+    image: jenkins/jenkins:lts-jdk17
+    privileged: false
+    user: root
+    restart: always
+    network_mode: bridge
+    cpu_shares: 50
+    ports:
+      - target: 8080
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_JENKINS__DATA}}"
+        target: /data
+      - type: bind
+        source: "{{VOLUME_JENKINS__VAR_JENKINS_HOME}}"
+        target: /var/jenkins_home
+    hostname: Jenkins

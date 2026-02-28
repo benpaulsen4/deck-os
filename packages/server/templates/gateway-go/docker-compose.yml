@@ -1,0 +1,19 @@
+services:
+  gateway-go:
+    image: openiothub/gateway-go:latest
+    network_mode: host
+    deploy:
+      resources:
+        reservations:
+          memory: 32M
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/Gateway-go/icon.png
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_GATEWAY_GO__ROOT}}"
+        target: /root
+    ports:
+      - target: 34323
+        published: "{{WEB_PORT}}"
+        protocol: tcp

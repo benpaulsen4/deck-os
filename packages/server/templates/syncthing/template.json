@@ -1,0 +1,73 @@
+{
+  "id": "syncthing",
+  "title": "Syncthing",
+  "description": "Syncthing is a continuous file synchronization program. It synchronizes files between two or more computers in real time, safely protected from prying eyes. Your data is your data alone and you deserve to choose where it is stored, whether it is shared with some third party, and how it's transmitted over the internet.",
+  "categories": ["Backup", "File Sync"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "PGID",
+      "label": "PGID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "PUID",
+      "label": "PUID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8384",
+      "required": true
+    },
+    {
+      "key": "PORT_SYNCTHING_22000",
+      "label": "PORT SYNCTHING 22000",
+      "type": "port",
+      "defaultValue": "22000",
+      "required": false
+    },
+    {
+      "key": "PORT_SYNCTHING_22000_2",
+      "label": "PORT SYNCTHING 22000",
+      "type": "port",
+      "defaultValue": "22000",
+      "required": false
+    },
+    {
+      "key": "PORT_SYNCTHING_21027",
+      "label": "PORT SYNCTHING 21027",
+      "type": "port",
+      "defaultValue": "21027",
+      "required": false
+    },
+    {
+      "key": "VOLUME_SYNCTHING__CONFIG",
+      "label": "SYNCTHING /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SYNCTHING__DATA",
+      "label": "SYNCTHING /DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+services:
+  albyhub:
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+      UMASK: "002"
+      WORK_DIR: /data/albyhub
+      LOG_EVENTS: true
+    command: []
+    image: ghcr.io/getalby/hub:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 1024M
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/getAlby/umbrel-community-app-store@master/alby-albyhub/images/icon.svg
+    ports:
+      - target: 8080
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: on-failure
+    stop_grace_period: 1m
+    volumes:
+      - type: bind
+        source: "{{VOLUME_ALBYHUB__DATA}}"
+        target: /data
+    network_mode: bridge
+    privileged: false

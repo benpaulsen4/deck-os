@@ -1,0 +1,38 @@
+{
+  "id": "medusa",
+  "title": "Medusa",
+  "description": "Automatic Video Library Manager for TV Shows. It watches for new episodes of your favorite shows, and when they are posted it does its magic.",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8081",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MEDUSA__CONFIG",
+      "label": "MEDUSA /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MEDUSA__DOWNLOADS",
+      "label": "MEDUSA /DOWNLOADS",
+      "type": "path",
+      "defaultValue": "./Downloads/Television",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MEDUSA__TV",
+      "label": "MEDUSA /TV",
+      "type": "path",
+      "defaultValue": "./Media/Television",
+      "required": true
+    }
+  ]
+}

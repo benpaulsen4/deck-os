@@ -1,0 +1,31 @@
+services:
+  emulatorjs:
+    environment:
+      - PGID=$PGID
+      - PUID=$PUID
+      - SUBFOLDER=/
+      - TZ=$TZ
+    image: linuxserver/emulatorjs:latest
+    network_mode: bridge
+    ports:
+      - target: 3000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 4001
+        published: "{{PORT_EMULATORJS_4001}}"
+        protocol: tcp
+      - target: 80
+        published: "{{PORT_EMULATORJS_80}}"
+        protocol: tcp
+    privileged: true
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_EMULATORJS__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_EMULATORJS__DATA}}"
+        target: /data
+      - type: bind
+        source: "{{VOLUME_EMULATORJS__DATA_NES_ROMS}}"
+        target: /data/nes/roms

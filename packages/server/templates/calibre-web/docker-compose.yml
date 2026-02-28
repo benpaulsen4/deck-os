@@ -1,0 +1,25 @@
+services:
+  calibre-web:
+    environment:
+      DOCKER_MODS: ghcr.io/linuxserver/mods:universal-calibre
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    image: linuxserver/calibre-web:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 8083
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_CALIBRE_WEB__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_CALIBRE_WEB__BOOKS}}"
+        target: /books

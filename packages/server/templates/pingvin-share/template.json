@@ -1,0 +1,31 @@
+{
+  "id": "pingvin-share",
+  "title": "Pingvin-Share",
+  "description": "Self-hosted file sharing with a modern web interface",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3410",
+      "required": true
+    },
+    {
+      "key": "VOLUME_PINGVIN_SHARE__OPT_APP_BACKEND_DATA",
+      "label": "PINGVIN-SHARE /OPT/APP/BACKEND/DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_PINGVIN_SHARE__OPT_APP_FRONTEND_PUBLIC_IMG",
+      "label": "PINGVIN-SHARE /OPT/APP/FRONTEND/PUBLIC/IMG",
+      "type": "path",
+      "defaultValue": "./images",
+      "required": true
+    }
+  ]
+}

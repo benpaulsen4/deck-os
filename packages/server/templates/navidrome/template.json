@@ -1,0 +1,38 @@
+{
+  "id": "navidrome",
+  "title": "Navidrome",
+  "description": "Music Collection and Streaming Server",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "4533",
+      "required": true
+    },
+    {
+      "key": "VOLUME_NAVIDROME__DATA",
+      "label": "NAVIDROME /DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_NAVIDROME__MUSIC",
+      "label": "NAVIDROME /MUSIC",
+      "type": "path",
+      "defaultValue": "./music",
+      "required": true
+    }
+  ]
+}

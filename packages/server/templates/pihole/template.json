@@ -1,0 +1,52 @@
+{
+  "id": "pihole",
+  "title": "Pi-hole",
+  "description": "Open source home automation that puts local control and privacy first. Powered by a worldwide community of tinkerers and DIY enthusiasts. Perfect to run on a Raspberry Pi or a local server.",
+  "categories": ["Network"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8800",
+      "required": true
+    },
+    {
+      "key": "PORT_PIHOLE_53",
+      "label": "PORT PIHOLE 53",
+      "type": "port",
+      "defaultValue": "53",
+      "required": false
+    },
+    {
+      "key": "PORT_PIHOLE_53_2",
+      "label": "PORT PIHOLE 53",
+      "type": "port",
+      "defaultValue": "53",
+      "required": false
+    },
+    {
+      "key": "PORT_PIHOLE_443",
+      "label": "PORT PIHOLE 443",
+      "type": "port",
+      "defaultValue": "8443",
+      "required": false
+    },
+    {
+      "key": "VOLUME_PIHOLE__ETC_PIHOLE",
+      "label": "PIHOLE /ETC/PIHOLE",
+      "type": "path",
+      "defaultValue": "./etc/pihole/",
+      "required": true
+    }
+  ]
+}

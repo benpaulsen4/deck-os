@@ -1,0 +1,24 @@
+{
+  "id": "anaconda3",
+  "title": "Anaconda3",
+  "description": "Your machine learning Env work with Jupyter Lab",
+  "categories": ["AI"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8888",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ANACONDA3__OPT_NOTEBOOKS",
+      "label": "ANACONDA3 /OPT/NOTEBOOKS",
+      "type": "path",
+      "defaultValue": "./notebooks",
+      "required": true
+    }
+  ]
+}

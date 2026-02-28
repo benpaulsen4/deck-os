@@ -1,0 +1,38 @@
+{
+  "id": "docmost",
+  "title": "Docmost",
+  "description": "A modern wiki and knowledge base for teams",
+  "categories": ["Notes"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3000",
+      "required": true
+    },
+    {
+      "key": "VOLUME_DOCMOST__APP_DATA_STORAGE",
+      "label": "DOCMOST /APP/DATA/STORAGE",
+      "type": "path",
+      "defaultValue": "./storage",
+      "required": true
+    },
+    {
+      "key": "VOLUME_DOCMOST_DB__VAR_LIB_POSTGRESQL_DATA",
+      "label": "DOCMOST-DB /VAR/LIB/POSTGRESQL/DATA",
+      "type": "path",
+      "defaultValue": "./pgdata",
+      "required": true
+    },
+    {
+      "key": "VOLUME_DOCMOST_REDIS__DATA",
+      "label": "DOCMOST-REDIS /DATA",
+      "type": "path",
+      "defaultValue": "./redis",
+      "required": true
+    }
+  ]
+}

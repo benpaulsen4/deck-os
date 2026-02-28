@@ -1,0 +1,26 @@
+services:
+  open-webui-ollama:
+    image: ghcr.io/open-webui/open-webui:ollama
+    runtime: nvidia
+    ipc: host
+    environment:
+      CPU_FALLBACK: "true"
+      NVIDIA_VISIBLE_DEVICES: all
+    deploy:
+      resources:
+        reservations:
+          memory: 512M
+    network_mode: bridge
+    ports:
+      - target: 8080
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: always
+    volumes:
+      - type: bind
+        source: "{{VOLUME_OPEN_WEBUI_OLLAMA__APP_BACKEND_DATA}}"
+        target: /app/backend/data
+      - type: bind
+        source: "{{VOLUME_OPEN_WEBUI_OLLAMA__ROOT__OLLAMA}}"
+        target: /root/.ollama
+    privileged: false

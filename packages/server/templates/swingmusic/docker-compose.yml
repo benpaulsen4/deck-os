@@ -1,0 +1,13 @@
+services:
+  swingmusic:
+    image: ghcr.io/swingmx/swingmusic:latest
+    volumes:
+      - type: bind
+        source: "{{VOLUME_SWINGMUSIC__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_SWINGMUSIC__MUSIC}}"
+        target: /music
+    ports:
+      - "{{WEB_PORT}}:1970"
+    restart: unless-stopped

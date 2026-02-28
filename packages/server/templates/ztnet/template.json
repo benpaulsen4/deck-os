@@ -1,0 +1,31 @@
+{
+  "id": "ztnet",
+  "title": "ZTnet",
+  "description": "Self-hosted ZeroTier network controller with web UI for centralized management.",
+  "categories": ["Network"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3050",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ZTNET__VAR_LIB_ZEROTIER_ONE",
+      "label": "ZTNET /VAR/LIB/ZEROTIER-ONE",
+      "type": "path",
+      "defaultValue": "./zerotier-one",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ZTNET_POSTGRES__VAR_LIB_POSTGRESQL_DATA",
+      "label": "ZTNET-POSTGRES /VAR/LIB/POSTGRESQL/DATA",
+      "type": "path",
+      "defaultValue": "./postgres-data",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+services:
+  mineos:
+    image: hexparrot/mineos:latest
+    networks:
+      - mineos
+    restart: unless-stopped
+    stop_grace_period: 10m
+    volumes:
+      - "{{VOLUME_MINEOS__VAR_GAMES_MINECRAFT}}:/var/games/minecraft"
+    environment:
+      USE_HTTPS: "true"
+      SERVER_PORT: 8443
+      USER_NAME: mc
+      USER_UID: 1000
+      USER_PASSWORD: root
+    ports:
+      - "{{WEB_PORT}}:8443/tcp"
+      - "{{PORT_MINEOS_25565_25570_TCP}}:25565-25570/tcp"
+      - "{{PORT_MINEOS_25565_25570_UDP}}:25565-25570/udp"
+volumes:
+  mineos_data: null
+networks:
+  mineos: null

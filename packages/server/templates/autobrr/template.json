@@ -1,0 +1,31 @@
+{
+  "id": "autobrr",
+  "title": "Autobrr",
+  "description": "Modern, easy to use download automation for torrents and usenet.",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "7474",
+      "required": true
+    },
+    {
+      "key": "VOLUME_AUTOBRR__CONFIG",
+      "label": "AUTOBRR /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    }
+  ]
+}

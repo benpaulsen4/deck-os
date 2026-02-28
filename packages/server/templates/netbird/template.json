@@ -1,0 +1,17 @@
+{
+  "id": "netbird",
+  "title": "NetBird",
+  "description": "Connect your devices into a secure WireGuard®-based overlay network with SSO, MFA and granular access controls.",
+  "categories": ["Network"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "",
+  "parameters": [
+    {
+      "key": "VOLUME_NETBIRD__VAR_LIB_NETBIRD",
+      "label": "NETBIRD /VAR/LIB/NETBIRD",
+      "type": "path",
+      "defaultValue": "./netbird",
+      "required": true
+    }
+  ]
+}

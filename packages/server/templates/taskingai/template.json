@@ -1,0 +1,59 @@
+{
+  "id": "taskingai",
+  "title": "TaskingAI",
+  "description": "The developer-friendly cloud platform for building and running LLM agents for AI-native applications.",
+  "categories": ["Chat"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "VOLUME_BACKEND_PLUGIN__VAR_LIB_DATA",
+      "label": "BACKEND-PLUGIN /VAR/LIB/DATA",
+      "type": "path",
+      "defaultValue": "./data/object_storage",
+      "required": true
+    },
+    {
+      "key": "VOLUME_BACKEND_API__VAR_LIB_DATA",
+      "label": "BACKEND-API /VAR/LIB/DATA",
+      "type": "path",
+      "defaultValue": "./data/object_storage",
+      "required": true
+    },
+    {
+      "key": "VOLUME_BACKEND_WEB__VAR_LIB_DATA",
+      "label": "BACKEND-WEB /VAR/LIB/DATA",
+      "type": "path",
+      "defaultValue": "./data/object_storage",
+      "required": true
+    },
+    {
+      "key": "VOLUME_DB__VAR_LIB_POSTGRESQL_DATA",
+      "label": "DB /VAR/LIB/POSTGRESQL/DATA",
+      "type": "path",
+      "defaultValue": "./data/postgres",
+      "required": true
+    },
+    {
+      "key": "VOLUME_CACHE__DATA",
+      "label": "CACHE /DATA",
+      "type": "path",
+      "defaultValue": "./data/redis",
+      "required": true
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3080",
+      "required": true
+    },
+    {
+      "key": "VOLUME_NGINX__VAR_CACHE_NGINX",
+      "label": "NGINX /VAR/CACHE/NGINX",
+      "type": "path",
+      "defaultValue": "./data/nginx_cache",
+      "required": true
+    }
+  ]
+}

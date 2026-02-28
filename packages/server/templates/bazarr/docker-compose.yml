@@ -1,0 +1,27 @@
+services:
+  bazarr:
+    environment:
+      PGID: "1000"
+      PUID: "1000"
+      TZ: Europe/London
+    image: linuxserver/bazarr:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 6767
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_BAZARR__MOVIES}}"
+        target: /movies
+      - type: bind
+        source: "{{VOLUME_BAZARR__TV}}"
+        target: /tv
+      - type: bind
+        source: "{{VOLUME_BAZARR__CONFIG}}"
+        target: /config

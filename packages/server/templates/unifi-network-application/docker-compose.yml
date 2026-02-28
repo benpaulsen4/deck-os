@@ -1,0 +1,69 @@
+services:
+  unifi-network-application:
+    depends_on:
+      unifi-db:
+        condition: service_started
+        required: true
+    environment:
+      - MONGO_DBNAME=unifi-db
+      - MONGO_HOST=unifi-db
+      - MONGO_PASS=pass
+      - MONGO_PORT=27017
+      - MONGO_USER=unifi
+      - PGID=$PGID
+      - PUID=$PUID
+      - TZ=$TZ
+    image: lscr.io/linuxserver/unifi-network-application:latest
+    ports:
+      - target: 8443
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 3478
+        published: "{{PORT_UNIFI_NETWORK_APPLICATION_3478}}"
+        protocol: udp
+      - target: 10001
+        published: "{{PORT_UNIFI_NETWORK_APPLICATION_10001}}"
+        protocol: udp
+      - target: 8080
+        published: "{{PORT_UNIFI_NETWORK_APPLICATION_8080}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_UNIFI_NETWORK_APPLICATION__CONFIG}}"
+        target: /config
+    networks:
+      - unifi-bridge
+    privileged: false
+  unifi-db:
+    image: docker.io/mongo:latest
+    configs:
+      - source: init-mongo.js
+        target: /docker-entrypoint-initdb.d/init-mongo.js
+    environment:
+      - PGID=$PGID
+      - PUID=$PUID
+      - TZ=$TZ
+    ports:
+      - target: 27017
+        published: "{{PORT_UNIFI_DB_27017}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_UNIFI_DB__DATA_DB}}"
+        target: /data/db
+    networks:
+      - unifi-bridge
+    privileged: false
+networks:
+  unifi-bridge:
+    driver: bridge
+configs:
+  init-mongo.js:
+    content: >
+      db.getSiblingDB("unifi-db").createUser({user: "unifi", pwd: "pass", roles:
+      [{role: "dbOwner", db: "unifi-db"}]}); 
+
+      db.getSiblingDB("unifi-db_stat").createUser({user: "unifi", pwd: "pass",
+      roles: [{role: "dbOwner", db: "unifi-db_stat"}]});

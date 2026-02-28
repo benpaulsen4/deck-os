@@ -1,0 +1,24 @@
+{
+  "id": "cloudflared",
+  "title": "Cloudflared",
+  "description": "A tunneling daemon by Cloudflare that safely exposes your web servers into the internet.",
+  "categories": ["Developer"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "14333",
+      "required": true
+    },
+    {
+      "key": "VOLUME_CLOUDFLARED__CONFIG",
+      "label": "CLOUDFLARED /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    }
+  ]
+}

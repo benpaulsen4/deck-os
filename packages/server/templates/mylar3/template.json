@@ -1,0 +1,59 @@
+{
+  "id": "mylar3",
+  "title": "Mylar3",
+  "description": "Mylar is an automated Comic Book (cbr/cbz) downloader program for use with NZB and torrents. Mylar allows you to create a watchlist of series that it monitors for various things (new issues, updated information, etc). It will grab, sort, and rename downloaded issues. It will also allow you to monitor weekly pull-lists for items belonging to said watchlisted series to download, as well as being able to monitor and maintain story-arcs.",
+  "categories": ["Downloader"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "PGID",
+      "label": "PGID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "PUID",
+      "label": "PUID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8090",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MYLAR3__CONFIG",
+      "label": "MYLAR3 /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MYLAR3__COMICS",
+      "label": "MYLAR3 /COMICS",
+      "type": "path",
+      "defaultValue": "./comics",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MYLAR3__DOWNLOADS",
+      "label": "MYLAR3 /DOWNLOADS",
+      "type": "path",
+      "defaultValue": "./downloads",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+services:
+  transmission:
+    environment:
+      PASS: casaos
+      PEERPORT: "51413"
+      PGID: "1000"
+      PUID: "1000"
+      TZ: Europe/London
+      USER: casaos
+    image: linuxserver/transmission:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 9091
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 51413
+        published: "{{PORT_TRANSMISSION_51413}}"
+        protocol: tcp
+      - target: 51413
+        published: "{{PORT_TRANSMISSION_51413_2}}"
+        protocol: UDP
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_TRANSMISSION__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_TRANSMISSION__DOWNLOADS}}"
+        target: /downloads
+      - type: bind
+        source: "{{VOLUME_TRANSMISSION__WATCH}}"
+        target: /watch

@@ -1,0 +1,21 @@
+services:
+  memos:
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    image: neosmemo/memos:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 5230
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_MEMOS__VAR_OPT_MEMOS}}"
+        target: /var/opt/memos

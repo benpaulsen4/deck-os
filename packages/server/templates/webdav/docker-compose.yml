@@ -1,0 +1,28 @@
+services:
+  webdav:
+    cpu_shares: 90
+    command: []
+    deploy:
+      resources:
+        limits:
+          memory: 15806M
+    environment:
+      - GID=1000
+      - PASSWORD=casaos
+      - TZ=Europe/Madrid
+      - UDI=1000
+      - USERNAME=casaos
+    image: ugeek/webdav:amd64
+    labels:
+      icon: https://icon.casaos.io/main/all/webdav.png
+    ports:
+      - target: 80
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_WEBDAV__MEDIA}}"
+        target: /media
+    network_mode: bridge
+    privileged: false

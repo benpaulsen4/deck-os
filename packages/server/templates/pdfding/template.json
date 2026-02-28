@@ -1,0 +1,31 @@
+{
+  "id": "pdfding",
+  "title": "PdfDing",
+  "description": "Selfhosted PDF manager, viewer and editor",
+  "categories": ["Documents"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8000",
+      "required": true
+    },
+    {
+      "key": "VOLUME_PDFDING__HOME_NONROOT_PDFDING_DB",
+      "label": "PDFDING /HOME/NONROOT/PDFDING/DB",
+      "type": "path",
+      "defaultValue": "./db",
+      "required": true
+    },
+    {
+      "key": "VOLUME_PDFDING__HOME_NONROOT_PDFDING_MEDIA",
+      "label": "PDFDING /HOME/NONROOT/PDFDING/MEDIA",
+      "type": "path",
+      "defaultValue": "./media",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "id": "librechat",
+  "title": "LibreChat",
+  "description": "A full-featured, open-source AI chat interface",
+  "categories": ["AI"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3080",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LIBRECHAT_API__APP_CLIENT_PUBLIC_IMAGES",
+      "label": "LIBRECHAT-API /APP/CLIENT/PUBLIC/IMAGES",
+      "type": "path",
+      "defaultValue": "./images",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LIBRECHAT_API__APP_UPLOADS",
+      "label": "LIBRECHAT-API /APP/UPLOADS",
+      "type": "path",
+      "defaultValue": "./uploads",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LIBRECHAT_API__APP_API_LOGS",
+      "label": "LIBRECHAT-API /APP/API/LOGS",
+      "type": "path",
+      "defaultValue": "./logs",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LIBRECHAT_MONGODB__DATA_DB",
+      "label": "LIBRECHAT-MONGODB /DATA/DB",
+      "type": "path",
+      "defaultValue": "./data-node",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LIBRECHAT_MEILISEARCH__MEILI_DATA",
+      "label": "LIBRECHAT-MEILISEARCH /MEILI_DATA",
+      "type": "path",
+      "defaultValue": "./meili_data_v1.12",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LIBRECHAT_VECTORDB__VAR_LIB_POSTGRESQL_DATA",
+      "label": "LIBRECHAT-VECTORDB /VAR/LIB/POSTGRESQL/DATA",
+      "type": "path",
+      "defaultValue": "./postgresql/data",
+      "required": true
+    }
+  ]
+}

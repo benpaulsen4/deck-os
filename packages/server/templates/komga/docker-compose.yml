@@ -1,0 +1,26 @@
+services:
+  komga:
+    image: gotson/komga:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+    network_mode: bridge
+    ports:
+      - target: 25600
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_KOMGA__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_KOMGA__DATA}}"
+        target: /data
+      - type: bind
+        source: "{{VOLUME_KOMGA__ETC_TIMEZONE}}"
+        target: /etc/timezone
+    environment:
+      PGID: "1000"
+      PUID: "1000"

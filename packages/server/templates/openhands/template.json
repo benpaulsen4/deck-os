@@ -1,0 +1,38 @@
+{
+  "id": "openhands",
+  "title": "OpenHands",
+  "description": "Open-source AI-powered coding assistant",
+  "categories": ["AI"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "13333",
+      "required": true
+    },
+    {
+      "key": "VOLUME_OPENHANDS__VAR_RUN_DOCKER_SOCK",
+      "label": "OPENHANDS /VAR/RUN/DOCKER.SOCK",
+      "type": "path",
+      "defaultValue": "./docker-sock",
+      "required": true
+    },
+    {
+      "key": "VOLUME_OPENHANDS___OPENHANDS",
+      "label": "OPENHANDS /.OPENHANDS",
+      "type": "path",
+      "defaultValue": "./openhands",
+      "required": true
+    },
+    {
+      "key": "VOLUME_OPENHANDS__OPT_WORKSPACE_BASE",
+      "label": "OPENHANDS /OPT/WORKSPACE_BASE",
+      "type": "path",
+      "defaultValue": "./workspace",
+      "required": true
+    }
+  ]
+}

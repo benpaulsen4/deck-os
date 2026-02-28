@@ -1,0 +1,27 @@
+services:
+  resilio-sync:
+    environment:
+      - PGID=$PGID
+      - PUID=$PUID
+      - TZ=$TZ
+    image: linuxserver/resilio-sync:latest
+    network_mode: bridge
+    ports:
+      - target: 55555
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 8888
+        published: "{{PORT_RESILIO_SYNC_8888}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_RESILIO_SYNC__SYNC}}"
+        target: /sync
+      - type: bind
+        source: "{{VOLUME_RESILIO_SYNC__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_RESILIO_SYNC__DOWNLOADS}}"
+        target: /downloads
+    privileged: false

@@ -1,0 +1,43 @@
+services:
+  emby:
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/vchiq:/dev/vchiq
+      - /dev/video10:/dev/video10
+      - /dev/video11:/dev/video11
+      - /dev/video12:/dev/video12
+    environment:
+      PGID: "1000"
+      PUID: "1000"
+      TZ: "{{TZ}}"
+      CPU_FALLBACK: "true"
+      NVIDIA_VISIBLE_DEVICES: all
+    image: linuxserver/emby:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                - gpu
+    network_mode: bridge
+    ports:
+      - target: 8096
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 8920
+        published: "{{PORT_EMBY_8920}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_EMBY__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_EMBY__DATA_TVSHOWS}}"
+        target: /data/tvshows
+      - type: bind
+        source: "{{VOLUME_EMBY__DATA_MOVIES}}"
+        target: /data/movies

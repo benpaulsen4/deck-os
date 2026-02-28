@@ -1,0 +1,164 @@
+{
+  "id": "weknora",
+  "title": "WeKnora",
+  "description": "WeKnora is an LLM-powered framework designed for deep document understanding and semantic retrieval, especially for handling complex, heterogeneous documents.",
+  "categories": ["AI"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "1080",
+      "required": true
+    },
+    {
+      "key": "VOLUME_APP__DATA_FILES",
+      "label": "APP /DATA/FILES",
+      "type": "path",
+      "defaultValue": "./files",
+      "required": true
+    },
+    {
+      "key": "VOLUME_WEKNORA_POSTGRES__VAR_LIB_POSTGRESQL_DATA",
+      "label": "WEKNORA-POSTGRES /VAR/LIB/POSTGRESQL/DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "PORT_MINIO_9000",
+      "label": "PORT MINIO 9000",
+      "type": "port",
+      "defaultValue": "19000",
+      "required": false
+    },
+    {
+      "key": "PORT_MINIO_9001",
+      "label": "PORT MINIO 9001",
+      "type": "port",
+      "defaultValue": "19001",
+      "required": false
+    },
+    {
+      "key": "VOLUME_MINIO__DATA",
+      "label": "MINIO /DATA",
+      "type": "path",
+      "defaultValue": "./minio-data",
+      "required": true
+    },
+    {
+      "key": "PORT_JAEGER_6831",
+      "label": "PORT JAEGER 6831",
+      "type": "port",
+      "defaultValue": "46831",
+      "required": false
+    },
+    {
+      "key": "PORT_JAEGER_6832",
+      "label": "PORT JAEGER 6832",
+      "type": "port",
+      "defaultValue": "46832",
+      "required": false
+    },
+    {
+      "key": "PORT_JAEGER_5778",
+      "label": "PORT JAEGER 5778",
+      "type": "port",
+      "defaultValue": "45778",
+      "required": false
+    },
+    {
+      "key": "PORT_JAEGER_16686",
+      "label": "PORT JAEGER 16686",
+      "type": "port",
+      "defaultValue": "16686",
+      "required": false
+    },
+    {
+      "key": "PORT_JAEGER_4317",
+      "label": "PORT JAEGER 4317",
+      "type": "port",
+      "defaultValue": "44317",
+      "required": false
+    },
+    {
+      "key": "PORT_JAEGER_4318",
+      "label": "PORT JAEGER 4318",
+      "type": "port",
+      "defaultValue": "44318",
+      "required": false
+    },
+    {
+      "key": "PORT_JAEGER_14250",
+      "label": "PORT JAEGER 14250",
+      "type": "port",
+      "defaultValue": "14250",
+      "required": false
+    },
+    {
+      "key": "PORT_JAEGER_14268",
+      "label": "PORT JAEGER 14268",
+      "type": "port",
+      "defaultValue": "14268",
+      "required": false
+    },
+    {
+      "key": "PORT_JAEGER_9411",
+      "label": "PORT JAEGER 9411",
+      "type": "port",
+      "defaultValue": "49411",
+      "required": false
+    },
+    {
+      "key": "VOLUME_JAEGER__VAR_LIB_JAEGER",
+      "label": "JAEGER /VAR/LIB/JAEGER",
+      "type": "path",
+      "defaultValue": "./jaeger",
+      "required": true
+    },
+    {
+      "key": "PORT_NEO4J_7474",
+      "label": "PORT NEO4J 7474",
+      "type": "port",
+      "defaultValue": "47474",
+      "required": false
+    },
+    {
+      "key": "PORT_NEO4J_7687",
+      "label": "PORT NEO4J 7687",
+      "type": "port",
+      "defaultValue": "47687",
+      "required": false
+    },
+    {
+      "key": "VOLUME_NEO4J__DATA",
+      "label": "NEO4J /DATA",
+      "type": "path",
+      "defaultValue": "./neo4j-data",
+      "required": true
+    },
+    {
+      "key": "PORT_QDRANT_6333",
+      "label": "PORT QDRANT 6333",
+      "type": "port",
+      "defaultValue": "46333",
+      "required": false
+    },
+    {
+      "key": "PORT_QDRANT_6334",
+      "label": "PORT QDRANT 6334",
+      "type": "port",
+      "defaultValue": "46334",
+      "required": false
+    },
+    {
+      "key": "VOLUME_QDRANT__QDRANT_STORAGE",
+      "label": "QDRANT /QDRANT/STORAGE",
+      "type": "path",
+      "defaultValue": "./storage",
+      "required": true
+    }
+  ]
+}

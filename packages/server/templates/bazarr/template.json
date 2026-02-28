@@ -1,0 +1,38 @@
+{
+  "id": "bazarr",
+  "title": "Bazarr",
+  "description": "Bazarr is a companion application to Sonarr and Radarr. It can manage and download subtitles based on your requirements. You define your preferences by TV show or movie and Bazarr takes care of everything for you.",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "6767",
+      "required": true
+    },
+    {
+      "key": "VOLUME_BAZARR__MOVIES",
+      "label": "BAZARR /MOVIES",
+      "type": "path",
+      "defaultValue": "./movies",
+      "required": true
+    },
+    {
+      "key": "VOLUME_BAZARR__TV",
+      "label": "BAZARR /TV",
+      "type": "path",
+      "defaultValue": "./tv",
+      "required": true
+    },
+    {
+      "key": "VOLUME_BAZARR__CONFIG",
+      "label": "BAZARR /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    }
+  ]
+}

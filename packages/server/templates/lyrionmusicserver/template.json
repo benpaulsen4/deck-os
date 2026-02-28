@@ -1,0 +1,73 @@
+{
+  "id": "lyrionmusicserver",
+  "title": "LyrionMusicServer",
+  "description": "Lyrion Music Server is a streaming audio server for Squeezebox audio players.",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "9000",
+      "required": true
+    },
+    {
+      "key": "PORT_LYRIONMUSICSERVER_9090",
+      "label": "PORT LYRIONMUSICSERVER 9090",
+      "type": "port",
+      "defaultValue": "9090",
+      "required": false
+    },
+    {
+      "key": "PORT_LYRIONMUSICSERVER_3483",
+      "label": "PORT LYRIONMUSICSERVER 3483",
+      "type": "port",
+      "defaultValue": "3483",
+      "required": false
+    },
+    {
+      "key": "PORT_LYRIONMUSICSERVER_3483_2",
+      "label": "PORT LYRIONMUSICSERVER 3483",
+      "type": "port",
+      "defaultValue": "3483",
+      "required": false
+    },
+    {
+      "key": "VOLUME_LYRIONMUSICSERVER__CONFIG",
+      "label": "LYRIONMUSICSERVER /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LYRIONMUSICSERVER__MUSIC",
+      "label": "LYRIONMUSICSERVER /MUSIC",
+      "type": "path",
+      "defaultValue": "./music",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LYRIONMUSICSERVER__PLAYLIST",
+      "label": "LYRIONMUSICSERVER /PLAYLIST",
+      "type": "path",
+      "defaultValue": "./playlists",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LYRIONMUSICSERVER__ETC_LOCALTIME",
+      "label": "LYRIONMUSICSERVER /ETC/LOCALTIME",
+      "type": "path",
+      "defaultValue": "./localtime",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LYRIONMUSICSERVER__ETC_TIMEZONE",
+      "label": "LYRIONMUSICSERVER /ETC/TIMEZONE",
+      "type": "path",
+      "defaultValue": "./timezone",
+      "required": true
+    }
+  ]
+}

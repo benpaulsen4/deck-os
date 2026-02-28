@@ -1,0 +1,27 @@
+services:
+  sonarr:
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    image: linuxserver/sonarr:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    network_mode: bridge
+    ports:
+      - target: 8989
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_SONARR__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_SONARR__TV}}"
+        target: /tv
+      - type: bind
+        source: "{{VOLUME_SONARR__DOWNLOADS}}"
+        target: /downloads

@@ -1,0 +1,24 @@
+services:
+  filebrowser:
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    image: filebrowser/filebrowser:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 80
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_FILEBROWSER__DB}}"
+        target: /db
+      - type: bind
+        source: "{{VOLUME_FILEBROWSER__SRV}}"
+        target: /srv

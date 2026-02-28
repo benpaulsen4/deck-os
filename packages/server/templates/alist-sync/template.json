@@ -1,0 +1,24 @@
+{
+  "id": "alist-sync",
+  "title": "Alist-Sync",
+  "description": "An Alist storage synchronization tool based on the Web interface.",
+  "categories": ["Cloud"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "52441",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ALIST_SYNC__APP_DATA",
+      "label": "ALIST-SYNC /APP/DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+services:
+  unifi-controller:
+    environment:
+      MEM_LIMIT: "1024"
+      MEM_STARTUP: "1024"
+      PGID: "1000"
+      PUID: "1000"
+    image: linuxserver/unifi-controller:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 3478
+        published: "{{WEB_PORT}}"
+        protocol: udp
+      - target: 10001
+        published: "{{PORT_UNIFI_CONTROLLER_10001}}"
+        protocol: udp
+      - target: 8080
+        published: "{{PORT_UNIFI_CONTROLLER_8080}}"
+        protocol: tcp
+      - target: 8443
+        published: "{{PORT_UNIFI_CONTROLLER_8443}}"
+        protocol: tcp
+      - target: 1900
+        published: "{{PORT_UNIFI_CONTROLLER_1900}}"
+        protocol: udp
+      - target: 8843
+        published: "{{PORT_UNIFI_CONTROLLER_8843}}"
+        protocol: tcp
+      - target: 8880
+        published: "{{PORT_UNIFI_CONTROLLER_8880}}"
+        protocol: tcp
+      - target: 6789
+        published: "{{PORT_UNIFI_CONTROLLER_6789}}"
+        protocol: tcp
+      - target: 5514
+        published: "{{PORT_UNIFI_CONTROLLER_5514}}"
+        protocol: udp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_UNIFI_CONTROLLER__CONFIG}}"
+        target: /config

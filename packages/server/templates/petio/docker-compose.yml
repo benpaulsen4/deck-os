@@ -1,0 +1,36 @@
+services:
+  petio:
+    image: ghcr.io/petio-team/petio@sha256:1c5a9276a844f4284601cbe332905864950545ebdeaad74bacb9097ea4f4b333
+    restart: unless-stopped
+    networks:
+      - petio-network
+    depends_on:
+      - mongo
+    environment:
+      PUID: "{{PUID}}"
+      PGID: "{{PGID}}"
+      TZ: "{{TZ}}"
+    ports:
+      - target: 7777
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_PETIO__APP_API_CONFIG}}"
+        target: /app/api/config
+      - type: bind
+        source: "{{VOLUME_PETIO__APP_LOGS}}"
+        target: /app/logs
+  mongo:
+    image: mongo:latest
+    restart: unless-stopped
+    hostname: mongo
+    networks:
+      - petio-network
+    environment:
+      PUID: "{{PUID}}"
+      PGID: "{{PGID}}"
+      TZ: "{{TZ}}"
+networks:
+  petio-network:
+    driver: bridge

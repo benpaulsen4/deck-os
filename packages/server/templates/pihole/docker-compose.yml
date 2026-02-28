@@ -1,0 +1,32 @@
+services:
+  pihole:
+    environment:
+      TZ: "{{TZ}}"
+      FTLCONF_webserver_api_password: casaos
+      FTLCONF_dns_listeningMode: all
+    image: pihole/pihole:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 80
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 53
+        published: "{{PORT_PIHOLE_53}}"
+        protocol: tcp
+      - target: 53
+        published: "{{PORT_PIHOLE_53_2}}"
+        protocol: udp
+      - target: 443
+        published: "{{PORT_PIHOLE_443}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_PIHOLE__ETC_PIHOLE}}"
+        target: /etc/pihole
+    cap_add:
+      - NET_ADMIN

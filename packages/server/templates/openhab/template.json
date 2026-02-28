@@ -1,0 +1,59 @@
+{
+  "id": "openhab",
+  "title": "OpenHAB",
+  "description": "The open Home Automation Bus (openHAB, pronounced ˈəʊpənˈhæb) is an open source, technology agnostic home automation platform which runs as the center of your smart home! Its ability to integrate a multitude of other devices and systems. openHAB includes other home automation systems, (smart) devices and other technologies into a single solution. To provide a uniform user interface and a common approach to automation rules across the entire system, regardless of the number of manufacturers and sub-systems involved. Giving you the most flexible tool available to make almost any home automation wish come true; if you can think it, odds are that you can implement it with openHAB.",
+  "categories": ["Home Automation"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "",
+  "parameters": [
+    {
+      "key": "PGID",
+      "label": "PGID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "PUID",
+      "label": "PUID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "VOLUME_OPENHAB__ETC_LOCALTIME",
+      "label": "OPENHAB /ETC/LOCALTIME",
+      "type": "path",
+      "defaultValue": "./localtime",
+      "required": true
+    },
+    {
+      "key": "VOLUME_OPENHAB__ETC_TIMEZONE",
+      "label": "OPENHAB /ETC/TIMEZONE",
+      "type": "path",
+      "defaultValue": "./timezone",
+      "required": true
+    },
+    {
+      "key": "VOLUME_OPENHAB__OPENHAB_ADDONS",
+      "label": "OPENHAB /OPENHAB/ADDONS",
+      "type": "path",
+      "defaultValue": "./addons",
+      "required": true
+    },
+    {
+      "key": "VOLUME_OPENHAB__OPENHAB_CONF",
+      "label": "OPENHAB /OPENHAB/CONF",
+      "type": "path",
+      "defaultValue": "./conf",
+      "required": true
+    },
+    {
+      "key": "VOLUME_OPENHAB__OPENHAB_USERDATA",
+      "label": "OPENHAB /OPENHAB/USERDATA",
+      "type": "path",
+      "defaultValue": "./userdata",
+      "required": true
+    }
+  ]
+}

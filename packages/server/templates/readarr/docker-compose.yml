@@ -1,0 +1,27 @@
+services:
+  readarr:
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    image: linuxserver/readarr:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 8787
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_READARR__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_READARR__BOOKS}}"
+        target: /books
+      - type: bind
+        source: "{{VOLUME_READARR__DOWNLOADS}}"
+        target: /downloads

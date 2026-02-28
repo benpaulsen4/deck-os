@@ -14,12 +14,12 @@
 |                  Hono HTTP Server                 |
 |         tRPC Router + SSE/WS endpoints            |
 +--------------------------------------------------+
-            |                       |
-     +------+------+        +------+------+
-     |  Docker SDK |        |  System     |
-     | (dockerode) |        |  Metrics    |
-     +------+------+        | (systeminformation) |
-            |                +-------------+
+            |             |                 |
+     +------+------+ +----+-----+    +------+------+
+     |  Docker SDK | | Templates |    |  System     |
+     | (dockerode) | | Library   |    |  Metrics    |
+     +------+------+ +----+-----+    | (systeminformation) |
+            |             |          +-------------+
      +------+------+
      | Docker      |
      | Daemon      |
@@ -69,6 +69,7 @@ deckos/
 │       │   ├── routers/
 │       │   │   ├── system.ts       # System metrics procedures
 │       │   │   ├── apps.ts         # App CRUD procedures
+│       │   │   ├── templates.ts    # Templates storefront + deploy procedures
 │       │   │   ├── docker.ts       # Docker operations procedures
 │       │   │   └── logs.ts         # Log streaming procedures
 │       │   ├── services/
@@ -76,6 +77,7 @@ deckos/
 │       │   │   ├── compose.ts      # Compose file management
 │       │   │   ├── metrics.ts      # System metrics collection
 │       │   │   └── apps.ts         # App metadata persistence
+│       │   │   └── templates.ts    # Template loading + rendering + validation
 │       │   ├── lib/
 │       │   │   ├── schema.ts       # Zod schemas (shared types)
 │       │   │   └── errors.ts       # Custom error types
@@ -172,6 +174,64 @@ All CRUD operations (create app, list apps, update metadata, delete app) and Doc
 
 Container logs are streamed to the client via a dedicated SSE endpoint (one per container). The backend uses `dockerode`'s `container.logs({ follow: true, tail: 100 })` stream and pipes lines to the SSE response. The client renders logs in a virtual-scrolling terminal-style component.
 
+### AD7: Template Library is Bundled, Rendered Server-Side
+
+Templates are shipped with the DeckOS server as an immutable library (read-only at runtime). A template is not installed directly; it is rendered into a standard DeckOS app (compose + metadata) at deploy time. Rationale:
+
+- Offline-first storefront (no external registry required)
+- Deterministic behavior: the exact compose file that will be deployed is shown to the user
+- Security: server validates parameter values and ensures all placeholders are resolved before writing to disk
+
+## Templates
+
+### Template Library Layout (Conceptual)
+
+Templates are distributed as part of the server package (immutable) and are loaded from disk at runtime. Each template is a small directory containing a metadata file, a compose template, and optional static assets (icon/screenshots).
+
+```
+server/
+└── templates/
+    └── <template-id>/
+        ├── template.json          # TemplateDetail metadata + parameters schema
+        ├── docker-compose.yml     # Compose template with placeholders
+        └── assets/                # Optional: icon.png, screenshots, etc.
+```
+
+### Template Schema (Conceptual)
+
+Templates are defined as JSON files validated with Zod. Core fields:
+
+- `id`: stable template identifier (used in URLs and API)
+- `title`, `description`, `categories[]`, `icon` (URL or server-served asset path)
+- `webUrlTemplate`: optional; supports placeholders (e.g. `http://{{DECKOS_HOST}}:{{WEB_PORT}}`)
+- `composeTemplate`: the raw compose template contents (or loaded from `docker-compose.yml`)
+- `parameters[]`: ordered list of user-fillable parameter definitions used to render placeholders
+
+### Placeholder Rendering
+
+Compose templates use a simple placeholder format to avoid Docker Compose environment interpolation:
+
+- Placeholders: `{{PARAM_KEY}}`
+- Rendering: server replaces placeholders with validated user values during `templates.deploy`
+- Validation: deploy fails if any placeholder remains unresolved after rendering
+
+Parameter types include (at minimum): `string`, `number`, `boolean`, `port`, `path`, and `enum`.
+
+**Volume paths**
+
+- Default template volume host paths are expressed as relative paths (e.g. `./config`, `./data`) so they resolve under `<dataDir>/apps/<app-id>/` when the stack is deployed.
+- Users may override to absolute paths for advanced setups (e.g. `/mnt/media`).
+
+### CasaOS App Store Source (Initial Library)
+
+The initial DeckOS template library is sourced from the CasaOS App Store repository on disk (`D:/CasaOS-AppStore`). A conversion step is required to normalize CasaOS apps into DeckOS templates:
+
+- Read `Apps/<AppName>/appfile.json` for metadata (title, description/overview, categories, default WebUI port)
+- Read `Apps/<AppName>/docker-compose.yml` for the base compose
+- Remove CasaOS-only extensions (`x-casaos`) and references to CasaOS runtime variables (e.g. `$AppID`)
+- Convert CasaOS volume patterns like `/DATA/AppData/$AppID/...` to relative `./...` paths by default
+- Convert advanced CasaOS concepts (ports/envs/devices) into template parameters when needed
+
 ## API Surface
 
 ### tRPC Procedures
@@ -179,6 +239,10 @@ Container logs are streamed to the client via a dedicated SSE endpoint (one per 
 ```
 system.getInfo        -> { hostname, os, uptime, dockerVersion }
 system.getMetrics     -> { cpu, memory, disk, network } (one-shot)
+
+templates.list        -> { items: TemplateSummary[], total: number, categories: string[] }
+templates.get         -> TemplateDetail
+templates.deploy      -> App         (input: templateId + parameter values + optional compose override)
 
 apps.list             -> App[]
 apps.get              -> App
@@ -227,6 +291,25 @@ User pastes YAML ──> Client validates syntax
                                       ├── exec: docker compose -f <path> up -d
                                       ├── Monitor container status via dockerode
                                       └── Push status updates via Docker events SSE
+```
+
+### Template Deployment Flow
+
+```
+User selects template ──> tRPC templates.get
+                                │
+                                ├── Return TemplateDetail (metadata + parameters + compose template)
+                                ▼
+User fills parameter form ──> (optional) edit generated compose in UI
+                                │
+                                ▼
+                        tRPC templates.deploy
+                                │
+                                ├── Validate parameter values (required, ports, paths)
+                                ├── Render compose template -> final docker-compose.yml
+                                ├── Derive/validate metadata (name/icon/url/description)
+                                ├── Persist as normal app under <dataDir>/apps/<app-id>/
+                                └── Optionally start stack (internally calls docker.start)
 ```
 
 ### Metrics Flow
@@ -297,3 +380,4 @@ Updates are designed to be atomic and data-safe:
 - Access to the Docker socket (`/var/run/docker.sock`) gives root-equivalent access to the host. This is inherent to the product's purpose and matches CasaOS behavior.
 - No authentication at this stage -- the assumption is LAN-only access behind a firewall.
 - Compose YAML is validated but user-supplied; malicious YAML could mount host paths. This is acceptable for the single-user homelab context.
+- Templates are treated as user-supplied inputs at deploy time: rendered output is shown/editable before deploy, and server-side validation ensures all template placeholders are resolved and parameter types are enforced.

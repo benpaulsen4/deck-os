@@ -1,0 +1,31 @@
+{
+  "id": "threadfin",
+  "title": "Threadfin",
+  "description": "M3U proxy server",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "34400",
+      "required": true
+    },
+    {
+      "key": "VOLUME_THREADFIN__HOME_THREADFIN_CONF_DATA",
+      "label": "THREADFIN /HOME/THREADFIN/CONF/DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_THREADFIN__HOME_THREADFIN_CONF_BACKUP",
+      "label": "THREADFIN /HOME/THREADFIN/CONF/BACKUP",
+      "type": "path",
+      "defaultValue": "./backup",
+      "required": true
+    }
+  ]
+}

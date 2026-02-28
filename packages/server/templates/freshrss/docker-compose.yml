@@ -1,0 +1,19 @@
+services:
+  freshrss:
+    restart: unless-stopped
+    environment:
+      TZ: ""
+      CRON_MIN: 1,31
+    image: freshrss/freshrss:latest
+    network_mode: bridge
+    ports:
+      - target: 80
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_FRESHRSS__VAR_WWW_FRESHRSS_DATA}}"
+        target: /var/www/FreshRSS/data
+      - type: bind
+        source: "{{VOLUME_FRESHRSS__VAR_WWW_FRESHRSS_EXTENSIONS}}"
+        target: /var/www/FreshRSS/extensions

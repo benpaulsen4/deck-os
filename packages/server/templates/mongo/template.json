@@ -1,0 +1,52 @@
+{
+  "id": "mongo",
+  "title": "MongoDB",
+  "description": "A free and open-source cross-platform document-oriented database program. Classified as a NoSQL database program, MongoDB uses JSON-like documents with schemata.",
+  "categories": ["Developer"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "PUID",
+      "label": "PUID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "PGID",
+      "label": "PGID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "27017",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MONGO__DATA_CONFIGDB",
+      "label": "MONGO /DATA/CONFIGDB",
+      "type": "path",
+      "defaultValue": "./configdb",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MONGO__DATA_DB",
+      "label": "MONGO /DATA/DB",
+      "type": "path",
+      "defaultValue": "./db",
+      "required": true
+    }
+  ]
+}

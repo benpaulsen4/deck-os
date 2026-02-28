@@ -1,0 +1,12 @@
+services:
+  index-tts:
+    image: icewhaletech/index-tts:latest
+    restart: unless-stopped
+    ports:
+      - target: 7860
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    deploy:
+      resources:
+        reservations:
+          memory: 12G

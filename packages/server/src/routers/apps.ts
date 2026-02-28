@@ -2,7 +2,11 @@ import { router, publicProcedure } from "../trpc/trpc.js";
 import { z } from "zod";
 import * as appsService from "../services/apps.js";
 import * as dockerService from "../services/docker.js";
-import { OptionalUrlSchema, UrlOrEmptySchema } from "../lib/schema.js";
+import {
+  OptionalUrlOrPathSchema,
+  OptionalUrlSchema,
+  UrlOrEmptySchema,
+} from "../lib/schema.js";
 import { AppNotFoundError, getErrorMessage } from "../lib/errors.js";
 
 export const appsRouter = router({
@@ -42,7 +46,7 @@ export const appsRouter = router({
       z.object({
         name: z.string().min(1),
         description: z.string().optional().default(""),
-        icon: OptionalUrlSchema,
+        icon: OptionalUrlOrPathSchema,
         url: OptionalUrlSchema,
         composeYaml: z.string().min(1),
       })
@@ -63,7 +67,7 @@ export const appsRouter = router({
         id: z.string(),
         name: z.string().optional(),
         description: z.string().optional(),
-        icon: UrlOrEmptySchema.optional(),
+        icon: z.union([UrlOrEmptySchema, z.string().startsWith("/")]).optional(),
         url: UrlOrEmptySchema.optional(),
       })
     )

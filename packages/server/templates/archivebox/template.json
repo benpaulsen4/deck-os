@@ -1,0 +1,45 @@
+{
+  "id": "archivebox",
+  "title": "ArchiveBox",
+  "description": "Self-hosted internet archiving solution",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "18010",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ARCHIVEBOX__DATA",
+      "label": "ARCHIVEBOX /DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ARCHIVEBOX_SCHEDULER__DATA",
+      "label": "ARCHIVEBOX_SCHEDULER /DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ARCHIVEBOX_SONIC__VAR_LIB_SONIC_STORE",
+      "label": "ARCHIVEBOX_SONIC /VAR/LIB/SONIC/STORE",
+      "type": "path",
+      "defaultValue": "./data/sonic",
+      "required": true
+    },
+    {
+      "key": "PORT_ARCHIVEBOX_NOVNC_8080",
+      "label": "PORT ARCHIVEBOX NOVNC 8080",
+      "type": "port",
+      "defaultValue": "18082",
+      "required": false
+    }
+  ]
+}

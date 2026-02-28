@@ -1,0 +1,59 @@
+{
+  "id": "romm",
+  "title": "RomM",
+  "description": "RomM is a self-hosted ROM manager for managing and playing game collections.",
+  "categories": ["Games"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8285",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ROMM__ROMM_RESOURCES",
+      "label": "ROMM /ROMM/RESOURCES",
+      "type": "path",
+      "defaultValue": "./resources",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ROMM__REDIS_DATA",
+      "label": "ROMM /REDIS-DATA",
+      "type": "path",
+      "defaultValue": "./redis-data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ROMM__ROMM_LIBRARY",
+      "label": "ROMM /ROMM/LIBRARY",
+      "type": "path",
+      "defaultValue": "./library",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ROMM__ROMM_ASSETS",
+      "label": "ROMM /ROMM/ASSETS",
+      "type": "path",
+      "defaultValue": "./assets",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ROMM__ROMM_CONFIG",
+      "label": "ROMM /ROMM/CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ROMM_DB__VAR_LIB_MYSQL",
+      "label": "ROMM-DB /VAR/LIB/MYSQL",
+      "type": "path",
+      "defaultValue": "./mysql",
+      "required": true
+    }
+  ]
+}

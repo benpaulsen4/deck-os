@@ -1,0 +1,20 @@
+services:
+  chatgpt-next-web:
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+      CODE: ""
+      PROXY_URL: ""
+      BASE_URL: https://api.openai.com
+    image: yidadaa/chatgpt-next-web:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 3000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped

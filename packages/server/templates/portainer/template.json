@@ -1,0 +1,45 @@
+{
+  "id": "portainer",
+  "title": "Portainer",
+  "description": "Lightweight Docker management UI",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8000",
+      "required": true
+    },
+    {
+      "key": "PORT_PORTAINER_9000",
+      "label": "PORT PORTAINER 9000",
+      "type": "port",
+      "defaultValue": "9000",
+      "required": false
+    },
+    {
+      "key": "PORT_PORTAINER_9443",
+      "label": "PORT PORTAINER 9443",
+      "type": "port",
+      "defaultValue": "9443",
+      "required": false
+    },
+    {
+      "key": "VOLUME_PORTAINER__DATA",
+      "label": "PORTAINER /DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_PORTAINER__VAR_RUN_DOCKER_SOCK",
+      "label": "PORTAINER /VAR/RUN/DOCKER.SOCK",
+      "type": "path",
+      "defaultValue": "./docker-sock",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+version: "3"
+services:
+  crafty:
+    image: registry.gitlab.com/crafty-controller/crafty-4:latest
+    restart: always
+    environment:
+      - TZ=Etc/UTC
+    ports:
+      - "{{WEB_PORT}}:8443"
+      - "{{PORT_CRAFTY_8123}}:8123"
+      - "{{PORT_CRAFTY_19132_UDP}}:19132/udp"
+      - "{{PORT_CRAFTY_25500_25600}}:25500-25600"
+    volumes:
+      - "{{VOLUME_CRAFTY__CRAFTY_BACKUPS}}:/crafty/backups"
+      - "{{VOLUME_CRAFTY__CRAFTY_LOGS}}:/crafty/logs"
+      - "{{VOLUME_CRAFTY__CRAFTY_SERVERS}}:/crafty/servers"
+      - "{{VOLUME_CRAFTY__CRAFTY_APP_CONFIG}}:/crafty/app/config"
+      - "{{VOLUME_CRAFTY__CRAFTY_IMPORT}}:/crafty/import"

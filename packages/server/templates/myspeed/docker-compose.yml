@@ -1,0 +1,18 @@
+services:
+  myspeed:
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    image: germannewsmaker/myspeed:latest
+    ports:
+      - target: 5216
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_MYSPEED__MYSPEED_DATA}}"
+        target: /myspeed/data
+    network_mode: bridge
+    privileged: false

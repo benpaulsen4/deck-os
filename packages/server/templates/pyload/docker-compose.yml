@@ -1,0 +1,28 @@
+services:
+  pyload:
+    image: linuxserver/pyload-ng:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    restart: unless-stopped
+    network_mode: bridge
+    privileged: false
+    volumes:
+      - type: bind
+        source: "{{VOLUME_PYLOAD__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_PYLOAD__DOWNLOADS}}"
+        target: /downloads
+    ports:
+      - target: 8000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 9666
+        published: "{{PORT_PYLOAD_9666}}"
+        protocol: tcp

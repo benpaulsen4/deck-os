@@ -1,0 +1,31 @@
+{
+  "id": "gitea",
+  "title": "Gitea",
+  "description": "Gitea is a community managed lightweight code hosting solution written in Go.",
+  "categories": ["Developer"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3002",
+      "required": true
+    },
+    {
+      "key": "PORT_GITEA_22",
+      "label": "PORT GITEA 22",
+      "type": "port",
+      "defaultValue": "222",
+      "required": false
+    },
+    {
+      "key": "VOLUME_GITEA__DATA",
+      "label": "GITEA /DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    }
+  ]
+}

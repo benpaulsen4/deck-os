@@ -1,0 +1,27 @@
+services:
+  logseq:
+    environment:
+      PGID: "0"
+      PUID: "0"
+    image: correctroad/logseq:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 3000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 12315
+        published: "{{PORT_LOGSEQ_12315}}"
+        protocol: tcp
+    privileged: true
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_LOGSEQ__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_LOGSEQ__NOTES}}"
+        target: /notes

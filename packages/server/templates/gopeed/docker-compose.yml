@@ -1,0 +1,23 @@
+services:
+  gopeed:
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 256M
+    image: liwei2633/gopeed:latest
+    ports:
+      - target: 9999
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_GOPEED__APP_STORAGE}}"
+        target: /app/storage
+      - type: bind
+        source: "{{VOLUME_GOPEED__APP_DOWNLOADS}}"
+        target: /app/Downloads
+    network_mode: bridge
+    privileged: false

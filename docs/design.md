@@ -178,7 +178,7 @@ A table/list view of all managed apps with more detail than the dashboard tiles:
 
 ```
 +--[HEADER]------------------------------------------------------+
-| APPS                                           [+ NEW APP]     |
+| APPS                         [+ TEMPLATE STORE]  [+ NEW APP]   |
 +----------------------------------------------------------------+
 | NAME          STATUS    CONTAINERS   CREATED        ACTIONS    |
 |----------------------------------------------------------------|
@@ -193,6 +193,66 @@ A table/list view of all managed apps with more detail than the dashboard tiles:
 - Status uses the same dot + label pattern
 - Clicking a row name navigates to the App Detail page
 - "+ NEW APP" button in accent color, top right
+- "+ TEMPLATE STORE" opens the templates storefront (see below)
+
+### Templates Storefront
+
+A dedicated page (or full-screen modal) for browsing pre-made app templates.
+
+```
++--[TEMPLATE STORE]-----------------------------------------------+
+| SEARCH: [____________________]  CATEGORY: [ALL v]   PAGE 1/12   |
++-----------------------------------------------------------------+
+| ┌────────────────────────────┐ ┌────────────────────────────┐  |
+| | [icon]  JELLYFIN            | | [icon]  PI-HOLE            |  |
+| | MEDIA  STREAMING            | | NETWORK  DNS               |  |
+| | Puts you in control...      | | Network-wide ad blocking...|  |
+| |                 [DEPLOY]    | |                 [DEPLOY]   |  |
+| └────────────────────────────┘ └────────────────────────────┘  |
+|                     [PREV]  [NEXT]                               |
++-----------------------------------------------------------------+
+```
+
+- Layout: dense grid of template cards (2-4 columns depending on viewport)
+- Search: immediate filtering with debounce; keyboard focus on open
+- Categories: dropdown or segmented filter with an "ALL" state
+- Pagination: explicit prev/next controls (no infinite scroll)
+- Card contents: icon, title, category tags, one-line description, and a "DEPLOY" action
+- Loading: scanning line animation within the results panel; no spinners
+- Empty: `NO TEMPLATES FOUND` in muted text with guidance to clear filters
+
+### Template Detail + Deploy
+
+Selecting a template opens a deployment view with two columns: parameters on the left, compose preview on the right.
+
+```
++--[TEMPLATE: JELLYFIN]--------------------------------------------+
+| [icon]  JELLYFIN     MEDIA                                        |
+| Puts you in control of your media.                                |
++------------------------------------------------------------------+
+| PARAMETERS                       | GENERATED COMPOSE (READ/EDIT) |
+|------------------------------------------------------------------|
+| WEB PORT:     [8096]             | ┌───────────────────────────┐ |
+| CONFIG PATH:  [./config]         | | services:                  | |
+| MEDIA PATH:   [/mnt/media]       | |   jellyfin:                | |
+|                                  | |     image: ...             | |
+| [ADVANCED ▸ EDIT COMPOSE]        | |     volumes: ...           | |
+|                                  | └───────────────────────────┘ |
+| [DEPLOY]  [DEPLOY & START]       |                                |
++------------------------------------------------------------------+
+```
+
+- Parameters are rendered as a streamlined form:
+  - Inputs are full-width, sharp rectangles, with uppercase labels
+  - Invalid values render an error banner and red border treatment (same as compose validation)
+  - Volume host paths default to relative paths (e.g. `./config`) to land inside the app folder by default
+- Compose preview:
+  - Default is read-only preview of the rendered compose
+  - "EDIT COMPOSE" toggles the standard CodeMirror editor to allow last-mile edits prior to deployment
+- Deploy actions:
+  - "DEPLOY" creates the app (compose + metadata) without starting containers
+  - "DEPLOY & START" creates the app and starts the stack immediately
+  - Both actions return the user to the Apps list and highlight the newly created app
 
 ### App Detail Page
 

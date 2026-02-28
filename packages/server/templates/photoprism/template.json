@@ -1,0 +1,38 @@
+{
+  "id": "photoprism",
+  "title": "PhotoPrism",
+  "description": "PhotoPrism® is an AI-powered app for browsing, organizing & sharing your photo collection. It makes use of the latest technologies to tag and find pictures automatically without getting in your way. You can run it at home, on a private server, or in the cloud.",
+  "categories": ["Gallery"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "2342",
+      "required": true
+    },
+    {
+      "key": "VOLUME_PHOTOPRISM__PHOTOPRISM_STORAGE",
+      "label": "PHOTOPRISM /PHOTOPRISM/STORAGE",
+      "type": "path",
+      "defaultValue": "./photoprism/storage",
+      "required": true
+    },
+    {
+      "key": "VOLUME_PHOTOPRISM__PHOTOPRISM_ORIGINALS",
+      "label": "PHOTOPRISM /PHOTOPRISM/ORIGINALS",
+      "type": "path",
+      "defaultValue": "./originals",
+      "required": true
+    }
+  ]
+}

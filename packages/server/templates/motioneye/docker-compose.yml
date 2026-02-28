@@ -1,0 +1,17 @@
+services:
+  motioneye:
+    image: ccrisan/motioneye:master-amd64
+    ports:
+      - target: 8765
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_MOTIONEYE__ETC_MOTIONEYE}}"
+        target: /etc/motioneye
+      - type: bind
+        source: "{{VOLUME_MOTIONEYE__VAR_LIB_MOTIONEYE}}"
+        target: /var/lib/motioneye
+    network_mode: bridge
+    privileged: false

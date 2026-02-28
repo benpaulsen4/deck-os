@@ -1,0 +1,38 @@
+{
+  "id": "duplicati",
+  "title": "Duplicati",
+  "description": "Duplicati is a free, open source, backup client that securely stores encrypted, incremental, compressed backups on cloud storage services and remote file servers.",
+  "categories": ["Cloud"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8200",
+      "required": true
+    },
+    {
+      "key": "VOLUME_DUPLICATI__CONFIG",
+      "label": "DUPLICATI /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_DUPLICATI__BACKUPS",
+      "label": "DUPLICATI /BACKUPS",
+      "type": "path",
+      "defaultValue": "./backups",
+      "required": true
+    },
+    {
+      "key": "VOLUME_DUPLICATI__SOURCE",
+      "label": "DUPLICATI /SOURCE",
+      "type": "path",
+      "defaultValue": "./source",
+      "required": true
+    }
+  ]
+}

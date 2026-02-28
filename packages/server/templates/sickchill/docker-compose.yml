@@ -1,0 +1,27 @@
+services:
+  sickchill:
+    environment:
+      PGID: "1000"
+      PUID: "1000"
+      TZ: Europe/London
+    image: linuxserver/sickchill:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 8081
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_SICKCHILL__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_SICKCHILL__DOWNLOADS}}"
+        target: /downloads
+      - type: bind
+        source: "{{VOLUME_SICKCHILL__TV}}"
+        target: /tv

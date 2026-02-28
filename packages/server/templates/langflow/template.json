@@ -1,0 +1,31 @@
+{
+  "id": "langflow",
+  "title": "Langflow",
+  "description": "Open-source UI for building and debugging multi-agent and RAG applications",
+  "categories": ["AI"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "17860",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LANGFLOW__APP_LANGFLOW",
+      "label": "LANGFLOW /APP/LANGFLOW",
+      "type": "path",
+      "defaultValue": "./backend",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LANGFLOW_POSTGRES__VAR_LIB_POSTGRESQL_DATA",
+      "label": "LANGFLOW-POSTGRES /VAR/LIB/POSTGRESQL/DATA",
+      "type": "path",
+      "defaultValue": "./postgres",
+      "required": true
+    }
+  ]
+}

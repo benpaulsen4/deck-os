@@ -1,0 +1,17 @@
+{
+  "id": "ttydbridge",
+  "title": "ttydBridge",
+  "description": "Easy access to the host terminal in web",
+  "categories": ["Developer"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "",
+  "parameters": [
+    {
+      "key": "VOLUME_TTYDBRIDGE__OPT",
+      "label": "TTYDBRIDGE /OPT",
+      "type": "path",
+      "defaultValue": "./opt",
+      "required": true
+    }
+  ]
+}

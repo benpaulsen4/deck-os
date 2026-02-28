@@ -1,0 +1,27 @@
+services:
+  mylar3:
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    image: linuxserver/mylar3:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 8090
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_MYLAR3__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_MYLAR3__COMICS}}"
+        target: /comics
+      - type: bind
+        source: "{{VOLUME_MYLAR3__DOWNLOADS}}"
+        target: /downloads

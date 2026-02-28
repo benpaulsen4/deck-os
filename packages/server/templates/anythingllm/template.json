@@ -1,0 +1,24 @@
+{
+  "id": "anythingllm",
+  "title": "AnythingLLM",
+  "description": "The all-in-one AI application.",
+  "categories": ["Chat"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3051",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ANYTHINGLLM__APP_SERVER_STORAGE",
+      "label": "ANYTHINGLLM /APP/SERVER/STORAGE",
+      "type": "path",
+      "defaultValue": "./storage",
+      "required": true
+    }
+  ]
+}

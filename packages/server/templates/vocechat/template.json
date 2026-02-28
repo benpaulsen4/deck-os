@@ -1,0 +1,31 @@
+{
+  "id": "vocechat",
+  "title": "VoceChat",
+  "description": "As a top alternative to centralized chat services, Voce chat is a superlight Rust powered open-core chat app that prioritizes private hosting.",
+  "categories": ["Chat"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3009",
+      "required": true
+    },
+    {
+      "key": "VOLUME_VOCECHAT__HOME_VOCECHAT_SERVER_DATA",
+      "label": "VOCECHAT /HOME/VOCECHAT-SERVER/DATA",
+      "type": "path",
+      "defaultValue": "./home/vocechat-server/data",
+      "required": true
+    }
+  ]
+}

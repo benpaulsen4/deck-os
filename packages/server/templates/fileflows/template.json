@@ -1,0 +1,80 @@
+{
+  "id": "fileflows",
+  "title": "FileFlows",
+  "description": "File processing made easy!",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "PGID",
+      "label": "PGID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "PUID",
+      "label": "PUID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "19200",
+      "required": true
+    },
+    {
+      "key": "VOLUME_FILEFLOWS__APP_DATA",
+      "label": "FILEFLOWS /APP/DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_FILEFLOWS__APP_LOGS",
+      "label": "FILEFLOWS /APP/LOGS",
+      "type": "path",
+      "defaultValue": "./logs",
+      "required": true
+    },
+    {
+      "key": "VOLUME_FILEFLOWS__APP_COMMON",
+      "label": "FILEFLOWS /APP/COMMON",
+      "type": "path",
+      "defaultValue": "./common",
+      "required": true
+    },
+    {
+      "key": "VOLUME_FILEFLOWS__TEMP",
+      "label": "FILEFLOWS /TEMP",
+      "type": "path",
+      "defaultValue": "./temp",
+      "required": true
+    },
+    {
+      "key": "VOLUME_FILEFLOWS__MEDIA",
+      "label": "FILEFLOWS /MEDIA",
+      "type": "path",
+      "defaultValue": "./media",
+      "required": true
+    },
+    {
+      "key": "VOLUME_FILEFLOWS__VAR_RUN_DOCKER_SOCK",
+      "label": "FILEFLOWS /VAR/RUN/DOCKER.SOCK",
+      "type": "path",
+      "defaultValue": "./docker-sock",
+      "required": true
+    }
+  ]
+}

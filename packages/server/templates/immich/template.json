@@ -1,0 +1,52 @@
+{
+  "id": "immich",
+  "title": "Immich",
+  "description": "Self-hosted media management solution",
+  "categories": ["Gallery"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "2283",
+      "required": true
+    },
+    {
+      "key": "VOLUME_IMMICH_SERVER__USR_SRC_APP_UPLOAD",
+      "label": "IMMICH-SERVER /USR/SRC/APP/UPLOAD",
+      "type": "path",
+      "defaultValue": "./upload",
+      "required": true
+    },
+    {
+      "key": "VOLUME_IMMICH_SERVER__ETC_LOCALTIME",
+      "label": "IMMICH-SERVER /ETC/LOCALTIME",
+      "type": "path",
+      "defaultValue": "./localtime",
+      "required": true
+    },
+    {
+      "key": "VOLUME_IMMICH_MACHINE_LEARNING__CACHE",
+      "label": "IMMICH-MACHINE-LEARNING /CACHE",
+      "type": "path",
+      "defaultValue": "./cache",
+      "required": true
+    },
+    {
+      "key": "VOLUME_REDIS__DATA",
+      "label": "REDIS /DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_DATABASE__VAR_LIB_POSTGRESQL_DATA",
+      "label": "DATABASE /VAR/LIB/POSTGRESQL/DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    }
+  ]
+}

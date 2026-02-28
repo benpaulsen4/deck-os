@@ -1,0 +1,12 @@
+services:
+  alist-sync:
+    image: xjxjin/alist-sync:latest
+    restart: unless-stopped
+    ports:
+      - "{{WEB_PORT}}:52441"
+    volumes:
+      - type: bind
+        source: "{{VOLUME_ALIST_SYNC__APP_DATA}}"
+        target: /app/data
+    environment:
+      - TZ=Asia/Shanghai

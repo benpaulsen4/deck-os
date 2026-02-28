@@ -1,0 +1,26 @@
+services:
+  pdfding:
+    image: mrmn/pdfding:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+    network_mode: bridge
+    ports:
+      - target: 8000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_PDFDING__HOME_NONROOT_PDFDING_DB}}"
+        target: /home/nonroot/pdfding/db
+      - type: bind
+        source: "{{VOLUME_PDFDING__HOME_NONROOT_PDFDING_MEDIA}}"
+        target: /home/nonroot/pdfding/media
+    environment:
+      - HOST_NAME=*
+      - SECRET_KEY=your_secret_key_here
+      - CSRF_COOKIE_SECURE=FALSE
+      - SESSION_COOKIE_SECURE=FALSE
+      - DEBUG=FALSE

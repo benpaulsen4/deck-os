@@ -1,0 +1,23 @@
+services:
+  plex:
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/dvb:/dev/dvb
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      VERSION: docker
+    image: lscr.io/linuxserver/plex:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_PLEX__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_PLEX__MEDIA}}"
+        target: /Media

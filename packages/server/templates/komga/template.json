@@ -1,0 +1,38 @@
+{
+  "id": "komga",
+  "title": "Komga",
+  "description": "Komga is a media server for your comics, mangas, BDs, magazines and eBooks.",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "25600",
+      "required": true
+    },
+    {
+      "key": "VOLUME_KOMGA__CONFIG",
+      "label": "KOMGA /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_KOMGA__DATA",
+      "label": "KOMGA /DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_KOMGA__ETC_TIMEZONE",
+      "label": "KOMGA /ETC/TIMEZONE",
+      "type": "path",
+      "defaultValue": "./timezone",
+      "required": true
+    }
+  ]
+}

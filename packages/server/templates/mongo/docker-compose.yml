@@ -1,0 +1,19 @@
+services:
+  mongo:
+    image: mongo:latest
+    restart: unless-stopped
+    environment:
+      PUID: "{{PUID}}"
+      PGID: "{{PGID}}"
+      TZ: "{{TZ}}"
+    ports:
+      - target: 27017
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_MONGO__DATA_CONFIGDB}}"
+        target: /data/configdb
+      - type: bind
+        source: "{{VOLUME_MONGO__DATA_DB}}"
+        target: /data/db

@@ -1,0 +1,24 @@
+{
+  "id": "opodsync",
+  "title": "oPodSync",
+  "description": "Podcast synchronization service",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8086",
+      "required": true
+    },
+    {
+      "key": "VOLUME_OPODSYNC__VAR_WWW_SERVER_DATA",
+      "label": "OPODSYNC /VAR/WWW/SERVER/DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    }
+  ]
+}

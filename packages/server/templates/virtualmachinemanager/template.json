@@ -1,0 +1,38 @@
+{
+  "id": "virtualmachinemanager",
+  "title": "Virtual Machine Manager",
+  "description": "A GTK Broadway web UI for libvirt and virt-manager.",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8185",
+      "required": true
+    },
+    {
+      "key": "VOLUME_VIRT_MANAGER__VAR_RUN_LIBVIRT_LIBVIRT_SOCK",
+      "label": "VIRT-MANAGER /VAR/RUN/LIBVIRT/LIBVIRT-SOCK",
+      "type": "path",
+      "defaultValue": "./libvirt-sock",
+      "required": true
+    },
+    {
+      "key": "VOLUME_VIRT_MANAGER__VAR_LIB_LIBVIRT",
+      "label": "VIRT-MANAGER /VAR/LIB/LIBVIRT",
+      "type": "path",
+      "defaultValue": "./libvirt",
+      "required": true
+    },
+    {
+      "key": "VOLUME_VIRT_MANAGER__DATA_DOWNLOADS",
+      "label": "VIRT-MANAGER /DATA/DOWNLOADS",
+      "type": "path",
+      "defaultValue": "./downloads",
+      "required": true
+    }
+  ]
+}

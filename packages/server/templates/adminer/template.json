@@ -1,0 +1,17 @@
+{
+  "id": "adminer",
+  "title": "Adminer",
+  "description": "Database management in a single PHP file",
+  "categories": ["Database"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8080",
+      "required": true
+    }
+  ]
+}

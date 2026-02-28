@@ -1,0 +1,52 @@
+{
+  "id": "filebrowser",
+  "title": "FileBrowser",
+  "description": "File Browser - Webbased File Browser including sharing functions etc.",
+  "categories": ["Cloud", "Utilities", "Documents"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "PGID",
+      "label": "PGID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "PUID",
+      "label": "PUID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "10180",
+      "required": true
+    },
+    {
+      "key": "VOLUME_FILEBROWSER__DB",
+      "label": "FILEBROWSER /DB",
+      "type": "path",
+      "defaultValue": "./db",
+      "required": true
+    },
+    {
+      "key": "VOLUME_FILEBROWSER__SRV",
+      "label": "FILEBROWSER /SRV",
+      "type": "path",
+      "defaultValue": "./srv",
+      "required": true
+    }
+  ]
+}

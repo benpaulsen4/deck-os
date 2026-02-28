@@ -1,0 +1,26 @@
+services:
+  nzbget:
+    environment:
+      NZBGET_PASS: tegbzn6789
+      NZBGET_USER: nzbget
+      PGID: "1000"
+      PUID: "1000"
+      TZ: Europe/London
+    image: linuxserver/nzbget:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 6789
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_NZBGET__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_NZBGET__DOWNLOADS}}"
+        target: /downloads

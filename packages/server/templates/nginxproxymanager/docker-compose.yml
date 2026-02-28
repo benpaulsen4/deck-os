@@ -1,0 +1,26 @@
+services:
+  nginxproxymanager:
+    image: jc21/nginx-proxy-manager:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+    network_mode: bridge
+    ports:
+      - target: 80
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 443
+        published: "{{PORT_NGINXPROXYMANAGER_443}}"
+        protocol: tcp
+      - target: 81
+        published: "{{PORT_NGINXPROXYMANAGER_81}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_NGINXPROXYMANAGER__DATA}}"
+        target: /data
+      - type: bind
+        source: "{{VOLUME_NGINXPROXYMANAGER__ETC_LETSENCRYPT}}"
+        target: /etc/letsencrypt

@@ -1,0 +1,21 @@
+services:
+  snapdrop:
+    environment:
+      - PGID=$PGID
+      - PUID=$PUID
+      - TZ=$TZ
+    image: linuxserver/snapdrop:version-eac78009
+    network_mode: bridge
+    ports:
+      - target: 443
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 80
+        published: "{{PORT_SNAPDROP_80}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_SNAPDROP__CONFIG}}"
+        target: /config
+    privileged: false

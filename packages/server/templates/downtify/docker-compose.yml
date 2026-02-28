@@ -1,0 +1,20 @@
+services:
+  downtify:
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    image: ghcr.io/henriquesebastiao/downtify:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 2048M
+    ports:
+      - target: 8000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_DOWNTIFY__DOWNLOADS}}"
+        target: /downloads

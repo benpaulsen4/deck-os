@@ -1,0 +1,17 @@
+services:
+  uptimekuma:
+    image: louislam/uptime-kuma:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+    network_mode: bridge
+    ports:
+      - target: 3001
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_UPTIMEKUMA__APP_DATA}}"
+        target: /app/data

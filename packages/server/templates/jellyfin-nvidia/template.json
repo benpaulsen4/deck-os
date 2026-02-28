@@ -1,0 +1,80 @@
+{
+  "id": "jellyfin-nvidia",
+  "title": "Jellyfin(Nvidia GPU)",
+  "description": "The personal Media System",
+  "categories": ["Media"],
+  "icon": "https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/Jellyfin/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "PGID",
+      "label": "PGID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "PUID",
+      "label": "PUID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8097",
+      "required": true
+    },
+    {
+      "key": "PORT_JELLYFIN_8920",
+      "label": "PORT JELLYFIN 8920",
+      "type": "port",
+      "defaultValue": "8921",
+      "required": false
+    },
+    {
+      "key": "PORT_JELLYFIN_7359",
+      "label": "PORT JELLYFIN 7359",
+      "type": "port",
+      "defaultValue": "7359",
+      "required": false
+    },
+    {
+      "key": "PORT_JELLYFIN_1900",
+      "label": "PORT JELLYFIN 1900",
+      "type": "port",
+      "defaultValue": "1901",
+      "required": false
+    },
+    {
+      "key": "VOLUME_JELLYFIN__CONFIG",
+      "label": "JELLYFIN /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_JELLYFIN__MEDIA",
+      "label": "JELLYFIN /MEDIA",
+      "type": "path",
+      "defaultValue": "./media",
+      "required": true
+    },
+    {
+      "key": "VOLUME_JELLYFIN__OPT_VC_LIB",
+      "label": "JELLYFIN /OPT/VC/LIB",
+      "type": "path",
+      "defaultValue": "./lib",
+      "required": true
+    }
+  ]
+}

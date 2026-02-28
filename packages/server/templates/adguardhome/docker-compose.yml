@@ -1,0 +1,32 @@
+services:
+  adguard-home:
+    image: adguard/adguardhome:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 53
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 53
+        published: "{{PORT_ADGUARD_HOME_53}}"
+        protocol: udp
+      - target: 3000
+        published: "{{PORT_ADGUARD_HOME_3000}}"
+        protocol: tcp
+      - target: 853
+        published: "{{PORT_ADGUARD_HOME_853}}"
+        protocol: tcp
+      - target: 784
+        published: "{{PORT_ADGUARD_HOME_784}}"
+        protocol: udp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_ADGUARD_HOME__OPT_ADGUARDHOME_WORK}}"
+        target: /opt/adguardhome/work
+      - type: bind
+        source: "{{VOLUME_ADGUARD_HOME__OPT_ADGUARDHOME_CONF}}"
+        target: /opt/adguardhome/conf

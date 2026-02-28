@@ -1,0 +1,20 @@
+version: "3"
+services:
+  firefly:
+    image: uusec/firefly:latest
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    network_mode: host
+    volumes:
+      - "{{VOLUME_FIREFLY__LIB_MODULES}}:/lib/modules"
+      - "{{VOLUME_FIREFLY__FIREFLY_CONF}}:/firefly/conf"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    restart: unless-stopped
+    environment:
+      - FIREFLY_PASSWORD=firefly
+    deploy:
+      resources:
+        reservations:
+          memory: 32M

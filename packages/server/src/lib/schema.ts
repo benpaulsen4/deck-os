@@ -17,11 +17,17 @@ const HttpUrlSchema = z
 
 const UrlOrEmptySchema = z.union([HttpUrlSchema, z.literal("")]);
 const OptionalUrlSchema = UrlOrEmptySchema.optional().default("");
+const UrlOrPathOrEmptySchema = z.union([
+  HttpUrlSchema,
+  z.string().startsWith("/"),
+  z.literal(""),
+]);
+const OptionalUrlOrPathSchema = UrlOrPathOrEmptySchema.optional().default("");
 
 const AppMetadataSchema = z.object({
   id: z.string(),
   name: z.string(),
-  icon: OptionalUrlSchema,
+  icon: OptionalUrlOrPathSchema,
   url: OptionalUrlSchema,
   description: z.string().optional().default(""),
   order: z.number().int().default(0),
@@ -196,6 +202,7 @@ export {
   StackStatusSchema,
   UrlOrEmptySchema,
   OptionalUrlSchema,
+  OptionalUrlOrPathSchema,
 };
 
 export type {

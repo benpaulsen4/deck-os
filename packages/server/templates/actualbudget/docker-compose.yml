@@ -1,0 +1,16 @@
+services:
+  actualbudget:
+    image: actualbudget/actual-server:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_ACTUALBUDGET__DATA}}"
+        target: /data
+    ports:
+      - target: 5006
+        published: "{{WEB_PORT}}"
+        protocol: tcp

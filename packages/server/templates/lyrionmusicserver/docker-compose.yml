@@ -1,0 +1,43 @@
+services:
+  lyrionmusicserver:
+    image: lmscommunity/lyrionmusicserver:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    network_mode: bridge
+    restart: unless-stopped
+    ports:
+      - target: 9000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 9090
+        published: "{{PORT_LYRIONMUSICSERVER_9090}}"
+        protocol: tcp
+      - target: 3483
+        published: "{{PORT_LYRIONMUSICSERVER_3483}}"
+        protocol: tcp
+      - target: 3483
+        published: "{{PORT_LYRIONMUSICSERVER_3483_2}}"
+        protocol: udp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_LYRIONMUSICSERVER__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_LYRIONMUSICSERVER__MUSIC}}"
+        target: /music
+        read_only: true
+      - type: bind
+        source: "{{VOLUME_LYRIONMUSICSERVER__PLAYLIST}}"
+        target: /playlist
+      - type: bind
+        source: "{{VOLUME_LYRIONMUSICSERVER__ETC_LOCALTIME}}"
+        target: /etc/localtime
+        read_only: true
+      - type: bind
+        source: "{{VOLUME_LYRIONMUSICSERVER__ETC_TIMEZONE}}"
+        target: /etc/timezone
+        read_only: true
+    environment:
+      HTTP_PORT: "9000"

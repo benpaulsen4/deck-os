@@ -1,0 +1,24 @@
+{
+  "id": "ollama-nvidia",
+  "title": "Ollama(Nvidia GPU)",
+  "description": "Get up and running with large language models locally",
+  "categories": ["Chat"],
+  "icon": "https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/Ollama/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "11434",
+      "required": true
+    },
+    {
+      "key": "VOLUME_OLLAMA__ROOT__OLLAMA",
+      "label": "OLLAMA /ROOT/.OLLAMA",
+      "type": "path",
+      "defaultValue": "./",
+      "required": true
+    }
+  ]
+}

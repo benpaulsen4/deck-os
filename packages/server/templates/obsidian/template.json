@@ -1,0 +1,38 @@
+{
+  "id": "obsidian",
+  "title": "Obsidian",
+  "description": "Obsidian is a knowledge management app for creating, linking, and visually organizing Markdown notes.",
+  "categories": ["Notes"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "15323",
+      "required": true
+    },
+    {
+      "key": "PORT_OBSIDIAN_3001",
+      "label": "PORT OBSIDIAN 3001",
+      "type": "port",
+      "defaultValue": "15324",
+      "required": false
+    },
+    {
+      "key": "VOLUME_OBSIDIAN__CONFIG",
+      "label": "OBSIDIAN /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    }
+  ]
+}

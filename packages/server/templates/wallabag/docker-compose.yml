@@ -1,0 +1,30 @@
+services:
+  wallabag:
+    image: wallabag/wallabag:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 512M
+    network_mode: bridge
+    ports:
+      - target: 80
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_WALLABAG__VAR_WWW_WALLABAG_WEB_ASSETS_IMAGES}}"
+        target: /var/www/wallabag/web/assets/images
+    environment:
+      SYMFONY__ENV__DOMAIN_NAME: http://<IP>:25661
+      SYMFONY__ENV__SERVER_NAME: Wallabag
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --no-verbose
+        - --tries=1
+        - --spider
+        - http://localhost/api/info
+      interval: 1m
+      timeout: 3s

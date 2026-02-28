@@ -1,0 +1,20 @@
+services:
+  filedrop:
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    image: noecl/filedrop:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 2048M
+    restart: unless-stopped
+    ports:
+      - target: 8000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_FILEDROP__VAR_FILE_DROP_FILES}}"
+        target: /var/file_drop_files

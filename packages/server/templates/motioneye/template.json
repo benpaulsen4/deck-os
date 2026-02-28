@@ -1,0 +1,31 @@
+{
+  "id": "motioneye",
+  "title": "Motioneye",
+  "description": "A web frontend for the motion daemon.",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8765",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MOTIONEYE__ETC_MOTIONEYE",
+      "label": "MOTIONEYE /ETC/MOTIONEYE",
+      "type": "path",
+      "defaultValue": "./motioneye",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MOTIONEYE__VAR_LIB_MOTIONEYE",
+      "label": "MOTIONEYE /VAR/LIB/MOTIONEYE",
+      "type": "path",
+      "defaultValue": "./motioneye",
+      "required": true
+    }
+  ]
+}

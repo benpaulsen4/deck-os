@@ -1,0 +1,38 @@
+{
+  "id": "logseq",
+  "title": "Logseq",
+  "description": "A privacy-first, open-source platform for knowledge management and collaboration.",
+  "categories": ["Notes"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3325",
+      "required": true
+    },
+    {
+      "key": "PORT_LOGSEQ_12315",
+      "label": "PORT LOGSEQ 12315",
+      "type": "port",
+      "defaultValue": "12315",
+      "required": false
+    },
+    {
+      "key": "VOLUME_LOGSEQ__CONFIG",
+      "label": "LOGSEQ /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LOGSEQ__NOTES",
+      "label": "LOGSEQ /NOTES",
+      "type": "path",
+      "defaultValue": "./notes",
+      "required": true
+    }
+  ]
+}

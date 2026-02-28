@@ -1,0 +1,38 @@
+{
+  "id": "stablediffusionwebui",
+  "title": "Stable Diffusion",
+  "description": "An AI model used to generate images conditioned on text descriptions.",
+  "categories": ["Developer"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "7860",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ICEWHALE_STABLE_DIFFUSION_WEBUI__DATA_MODELS",
+      "label": "ICEWHALE-STABLE-DIFFUSION-WEBUI /DATA/MODELS",
+      "type": "path",
+      "defaultValue": "./models",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ICEWHALE_STABLE_DIFFUSION_WEBUI__DATA_OUTPUTS",
+      "label": "ICEWHALE-STABLE-DIFFUSION-WEBUI /DATA/OUTPUTS",
+      "type": "path",
+      "defaultValue": "./outputs",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ICEWHALE_STABLE_DIFFUSION_WEBUI__DATA_CONFIG",
+      "label": "ICEWHALE-STABLE-DIFFUSION-WEBUI /DATA/CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    }
+  ]
+}

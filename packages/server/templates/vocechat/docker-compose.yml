@@ -1,0 +1,19 @@
+services:
+  vocechat:
+    environment:
+      TZ: "{{TZ}}"
+    image: privoce/vocechat-server:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 3000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_VOCECHAT__HOME_VOCECHAT_SERVER_DATA}}"
+        target: /home/vocechat-server/data

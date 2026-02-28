@@ -1,0 +1,51 @@
+services:
+  ztnet:
+    image: sinamics/ztnet:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    restart: unless-stopped
+    working_dir: /app
+    ports:
+      - target: 3000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_ZTNET__VAR_LIB_ZEROTIER_ONE}}"
+        target: /var/lib/zerotier-one
+    environment:
+      ZT_ADDR: http://172.17.0.1:9993
+      POSTGRES_HOST: ztnet-postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ztnet
+      POSTGRES_PASSWORD: ztnetbl5hbv98wl89x9v
+      POSTGRES_DB: ztnet
+      NEXTAUTH_URL: http://0.0.0.0:3050
+      NEXTAUTH_SECRET: mn6vor005ncgnu9iuqxn8bg
+      NEXTAUTH_URL_INTERNAL: http://ztnet:3000
+    networks:
+      - ztnet-network
+    depends_on:
+      - ztnet-postgres
+  ztnet-postgres:
+    image: postgres:latest
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ztnet
+      POSTGRES_PASSWORD: ztnetbl5hbv98wl89x9v
+      POSTGRES_DB: ztnet
+    volumes:
+      - type: bind
+        source: "{{VOLUME_ZTNET_POSTGRES__VAR_LIB_POSTGRESQL_DATA}}"
+        target: /var/lib/postgresql/data
+    networks:
+      - ztnet-network
+networks:
+  ztnet-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.31.255.0/29

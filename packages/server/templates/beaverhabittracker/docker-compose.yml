@@ -1,0 +1,24 @@
+services:
+  beaverhabittracker:
+    image: daya0576/beaverhabits:latest
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 128M
+    restart: unless-stopped
+    user: 1000:1000
+    ports:
+      - target: 8080
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_BEAVERHABITTRACKER__APP__USER}}"
+        target: /app/.user
+    environment:
+      HABITS_STORAGE: USER_DISK
+      TRUSTED_LOCAL_EMAIL: your@email.com
+      INDEX_HABIT_DATE_COLUMNS: 5
+      ENABLE_IOS_STANDALONE: true

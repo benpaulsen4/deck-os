@@ -1,0 +1,25 @@
+services:
+  obsidian:
+    image: lscr.io/linuxserver/obsidian:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 512M
+    shm_size: 1gb
+    network_mode: bridge
+    ports:
+      - target: 3000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 3001
+        published: "{{PORT_OBSIDIAN_3001}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_OBSIDIAN__CONFIG}}"
+        target: /config
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: "{{TZ}}"

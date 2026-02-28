@@ -1,0 +1,43 @@
+services:
+  jellyfin:
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/vcsm:/dev/vcsm
+      - /dev/vchiq:/dev/vchiq
+      - /dev/video10:/dev/video10
+      - /dev/video11:/dev/video11
+      - /dev/video12:/dev/video12
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    image: linuxserver/jellyfin:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    network_mode: bridge
+    ports:
+      - target: 8096
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 8920
+        published: "{{PORT_JELLYFIN_8920}}"
+        protocol: tcp
+      - target: 7359
+        published: "{{PORT_JELLYFIN_7359}}"
+        protocol: tcp
+      - target: 1900
+        published: "{{PORT_JELLYFIN_1900}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_JELLYFIN__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_JELLYFIN__MEDIA}}"
+        target: /Media
+      - type: bind
+        source: "{{VOLUME_JELLYFIN__OPT_VC_LIB}}"
+        target: /opt/vc/lib

@@ -1,0 +1,31 @@
+{
+  "id": "freshrss",
+  "title": "FreshRSS",
+  "description": "A free, self-hostable news aggregator…",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8749",
+      "required": true
+    },
+    {
+      "key": "VOLUME_FRESHRSS__VAR_WWW_FRESHRSS_DATA",
+      "label": "FRESHRSS /VAR/WWW/FRESHRSS/DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_FRESHRSS__VAR_WWW_FRESHRSS_EXTENSIONS",
+      "label": "FRESHRSS /VAR/WWW/FRESHRSS/EXTENSIONS",
+      "type": "path",
+      "defaultValue": "./extensions",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "id": "dify",
+  "title": "Dify",
+  "description": "LLM App Development Platform",
+  "categories": ["Chat"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "VOLUME_CONFIG__CONFIGS_NGINX",
+      "label": "CONFIG /CONFIGS/NGINX",
+      "type": "path",
+      "defaultValue": "./data/nginx",
+      "required": true
+    },
+    {
+      "key": "VOLUME_CONFIG__CONFIGS_SSRF_PROXY",
+      "label": "CONFIG /CONFIGS/SSRF_PROXY",
+      "type": "path",
+      "defaultValue": "./data/ssrf_proxy",
+      "required": true
+    },
+    {
+      "key": "VOLUME_CONFIG__CONFIGS_SANDBOX",
+      "label": "CONFIG /CONFIGS/SANDBOX",
+      "type": "path",
+      "defaultValue": "./data/sandbox",
+      "required": true
+    },
+    {
+      "key": "VOLUME_API__APP_API_STORAGE",
+      "label": "API /APP/API/STORAGE",
+      "type": "path",
+      "defaultValue": "./data/app/api/storage",
+      "required": true
+    },
+    {
+      "key": "VOLUME_WORKER__APP_API_STORAGE",
+      "label": "WORKER /APP/API/STORAGE",
+      "type": "path",
+      "defaultValue": "./data/app/api/storage",
+      "required": true
+    },
+    {
+      "key": "VOLUME_DB__VAR_LIB_POSTGRESQL_DATA",
+      "label": "DB /VAR/LIB/POSTGRESQL/DATA",
+      "type": "path",
+      "defaultValue": "./data/db/data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_REDIS__DATA",
+      "label": "REDIS /DATA",
+      "type": "path",
+      "defaultValue": "./data/redis/data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_WEAVIATE__VAR_LIB_WEAVIATE",
+      "label": "WEAVIATE /VAR/LIB/WEAVIATE",
+      "type": "path",
+      "defaultValue": "./data/weaviate",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SANDBOX__DEPENDENCIES",
+      "label": "SANDBOX /DEPENDENCIES",
+      "type": "path",
+      "defaultValue": "./data/sandbox/dependencies",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SSRF_PROXY__ETC_SQUID",
+      "label": "SSRF_PROXY /ETC/SQUID",
+      "type": "path",
+      "defaultValue": "./data/ssrf_proxy",
+      "required": true
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3701",
+      "required": true
+    },
+    {
+      "key": "VOLUME_NGINX__ETC_NGINX",
+      "label": "NGINX /ETC/NGINX",
+      "type": "path",
+      "defaultValue": "./data/nginx",
+      "required": true
+    }
+  ]
+}

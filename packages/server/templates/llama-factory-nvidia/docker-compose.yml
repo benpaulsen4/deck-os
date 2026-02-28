@@ -1,0 +1,22 @@
+services:
+  llama-factory-nvidia:
+    image: hiyouga/llamafactory:latest
+    ports:
+      - target: 7860
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    tty: true
+    stdin_open: true
+    command:
+      - llamafactory-cli
+      - webui
+    deploy:
+      resources:
+        reservations:
+          memory: 6G
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                - gpu
+    restart: unless-stopped

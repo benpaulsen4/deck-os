@@ -1,0 +1,24 @@
+{
+  "id": "convertx",
+  "title": "ConvertX",
+  "description": "A versatile file conversion tool that supports multiple formats.",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3333",
+      "required": true
+    },
+    {
+      "key": "VOLUME_CONVERTX__APP_DATA",
+      "label": "CONVERTX /APP/DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    }
+  ]
+}

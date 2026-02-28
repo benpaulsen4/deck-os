@@ -1,0 +1,9 @@
+{
+  "id": "playit-agent",
+  "title": "Playit Agent",
+  "description": "A free reverse proxy for tunneling services (not self-hosted).",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "",
+  "parameters": []
+}

@@ -1,0 +1,31 @@
+services:
+  deluge:
+    environment:
+      DELUGE_LOGLEVEL: error
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    image: linuxserver/deluge:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    network_mode: bridge
+    ports:
+      - target: 8112
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 6881
+        published: "{{PORT_DELUGE_6881}}"
+        protocol: tcp
+      - target: 6881
+        published: "{{PORT_DELUGE_6881_2}}"
+        protocol: udp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_DELUGE__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_DELUGE__DATA}}"
+        target: /DATA

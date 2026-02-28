@@ -39,11 +39,20 @@ Homelab enthusiasts running headless Linux servers (Raspberry Pi, NUC, old lapto
 - **R3.8** Support `docker compose pull` to update images for a stack
 - **R3.9** Show per-container resource usage (CPU, memory) for running stacks
 
-### R4: App Store / Templates (Stretch)
+### R4: App Templates System
 
-- **R4.1** Provide a curated library of pre-built compose templates (Jellyfin, Syncthing, Pi-hole, Nextcloud, etc.)
-- **R4.2** Users can install a template which pre-fills the compose editor with sensible defaults
-- **R4.3** Templates are defined as JSON/YAML files and can be extended by the user
+- **R4.1** Provide a curated, offline-first library of pre-built app templates (metadata + compose template)
+- **R4.2** From the Apps list page, users can open the Templates storefront via a button next to "+ NEW APP"
+- **R4.3** Templates storefront supports search, pagination, and category filtering
+- **R4.4** Each template listing displays: icon, title, short description/tagline, and category tags
+- **R4.5** Selecting a template opens a detail view with full description and deployment actions
+- **R4.6** Templates include user-fillable parameters (e.g., ports, environment values, volume host paths) with a streamlined form UI
+- **R4.7** Volume host path parameters default to locations inside the app's data folder (e.g., relative paths under `<dataDir>/apps/<app-id>/`)
+- **R4.8** Users can override any parameter before deployment; validation errors are surfaced inline (required values, invalid ports, invalid paths)
+- **R4.9** Users can optionally edit the generated `docker-compose.yml` prior to deployment via the standard compose editor UI
+- **R4.10** Deploying a template creates a normal managed app (compose saved to disk + metadata saved separately) and optionally starts the stack immediately
+- **R4.11** Initial templates library is sourced from the CasaOS App Store repository (local path: `D:/CasaOS-AppStore`) and converted into DeckOS-compatible templates
+- **R4.12** Converted templates must not rely on CasaOS-specific runtime variables (e.g., `$AppID`, `$PUID`, `$PGID`, `$TZ`); required values are represented as template parameters instead
 
 ### R5: System
 
@@ -58,6 +67,7 @@ Homelab enthusiasts running headless Linux servers (Raspberry Pi, NUC, old lapto
 
 - User authentication and multi-user support
 - Remote/WAN access management
+- Online template marketplace or remote template registries
 - Reverse proxy configuration
 - Automated backups
 - Plugin/extension system
@@ -70,4 +80,5 @@ The platform is successful when a user can:
 1. Open the DeckOS dashboard and immediately see their server's health
 2. Paste a docker-compose.yml for any app (e.g., Jellyfin), deploy it, and see it appear as a launchable tile
 3. Click the tile to open the app's web UI
-4. View logs, restart, or tear down the stack -- all without touching a terminal
+4. Deploy a common app from a template, fill required parameters, and start it without writing YAML
+5. View logs, restart, or tear down the stack -- all without touching a terminal

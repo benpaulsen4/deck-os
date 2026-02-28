@@ -1,0 +1,24 @@
+{
+  "id": "cloudbeaver",
+  "title": "CloudBeaver",
+  "description": "Cloud Database Manager.",
+  "categories": ["Developer"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8978",
+      "required": true
+    },
+    {
+      "key": "VOLUME_CLOUDBEAVER__OPT_CLOUDBEAVER_WORKSPACE",
+      "label": "CLOUDBEAVER /OPT/CLOUDBEAVER/WORKSPACE",
+      "type": "path",
+      "defaultValue": "./workspace",
+      "required": true
+    }
+  ]
+}

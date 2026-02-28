@@ -1,0 +1,17 @@
+services:
+  grafana:
+    image: grafana/grafana:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 3000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: always
+    volumes:
+      - type: bind
+        source: "{{VOLUME_GRAFANA__VAR_LIB_GRAFANA}}"
+        target: /var/lib/grafana

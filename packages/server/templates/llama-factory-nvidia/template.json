@@ -1,0 +1,17 @@
+{
+  "id": "llama-factory-nvidia",
+  "title": "LLaMA Factory(Nvidia GPU)",
+  "description": "Unified LLM Fine-Tuning with 100+ Models",
+  "categories": ["AI"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "18877",
+      "required": true
+    }
+  ]
+}

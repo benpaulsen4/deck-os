@@ -1,0 +1,31 @@
+{
+  "id": "nextcloud",
+  "title": "Nextcloud",
+  "description": "Nextcloud puts your data at your fingertips, under your control. Store your documents, calendar, contacts and photos on a server at home, at one of our providers or in a data center you trust.",
+  "categories": ["Cloud"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "10081",
+      "required": true
+    },
+    {
+      "key": "PORT_NEXTCLOUD_443",
+      "label": "PORT NEXTCLOUD 443",
+      "type": "port",
+      "defaultValue": "10443",
+      "required": false
+    },
+    {
+      "key": "VOLUME_NEXTCLOUD__VAR_WWW_HTML",
+      "label": "NEXTCLOUD /VAR/WWW/HTML",
+      "type": "path",
+      "defaultValue": "./var/www/html",
+      "required": true
+    }
+  ]
+}

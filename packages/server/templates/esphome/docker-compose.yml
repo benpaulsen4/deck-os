@@ -1,0 +1,23 @@
+services:
+  esphome:
+    deploy:
+      resources:
+        reservations:
+          memory: 512M
+    image: ghcr.io/esphome/esphome:latest
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/ESPHome/icon.png
+    restart: always
+    ports:
+      - target: 6052
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_ESPHOME__CONFIG}}"
+        target: /config
+    environment:
+      ESPHOME_DASHBOARD_USE_PING: "false"
+      TZ: "{{TZ}}"
+    network_mode: host
+    privileged: false

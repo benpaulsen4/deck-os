@@ -1,0 +1,12 @@
+services:
+  excalidraw:
+    image: excalidraw/excalidraw:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    restart: unless-stopped
+    ports:
+      - target: 80
+        published: "{{WEB_PORT}}"
+        protocol: tcp

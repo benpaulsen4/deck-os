@@ -1,0 +1,73 @@
+{
+  "id": "crafty",
+  "title": "Crafty",
+  "description": "Crafty is an open source Minecraft control panel built using Tornado and AdminLTE, featuring server scheduling, a interactive console and the ability to run almost any type of Minecraft server",
+  "categories": ["Games"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8111",
+      "required": true
+    },
+    {
+      "key": "PORT_CRAFTY_8123",
+      "label": "PORT CRAFTY 8123",
+      "type": "port",
+      "defaultValue": "8112",
+      "required": false
+    },
+    {
+      "key": "PORT_CRAFTY_19132_UDP",
+      "label": "PORT CRAFTY 19132 UDP",
+      "type": "port",
+      "defaultValue": "19132",
+      "required": false
+    },
+    {
+      "key": "PORT_CRAFTY_25500_25600",
+      "label": "PORT CRAFTY 25500 25600",
+      "type": "port",
+      "defaultValue": "25500-25600",
+      "required": false
+    },
+    {
+      "key": "VOLUME_CRAFTY__CRAFTY_BACKUPS",
+      "label": "CRAFTY /CRAFTY/BACKUPS",
+      "type": "path",
+      "defaultValue": "./backups",
+      "required": true
+    },
+    {
+      "key": "VOLUME_CRAFTY__CRAFTY_LOGS",
+      "label": "CRAFTY /CRAFTY/LOGS",
+      "type": "path",
+      "defaultValue": "./logs",
+      "required": true
+    },
+    {
+      "key": "VOLUME_CRAFTY__CRAFTY_SERVERS",
+      "label": "CRAFTY /CRAFTY/SERVERS",
+      "type": "path",
+      "defaultValue": "./servers",
+      "required": true
+    },
+    {
+      "key": "VOLUME_CRAFTY__CRAFTY_APP_CONFIG",
+      "label": "CRAFTY /CRAFTY/APP/CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_CRAFTY__CRAFTY_IMPORT",
+      "label": "CRAFTY /CRAFTY/IMPORT",
+      "type": "path",
+      "defaultValue": "./import",
+      "required": true
+    }
+  ]
+}

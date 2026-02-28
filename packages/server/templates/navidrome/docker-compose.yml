@@ -1,0 +1,29 @@
+services:
+  navidrome:
+    deploy:
+      resources:
+        reservations:
+          memory: 1024M
+    image: deluan/navidrome:latest
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/IceWhaleTech/CasaOS-AppStore@main/Apps/Navidrome/icon.png
+    restart: unless-stopped
+    ports:
+      - target: 4533
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_NAVIDROME__DATA}}"
+        target: /data
+      - type: bind
+        source: "{{VOLUME_NAVIDROME__MUSIC}}"
+        target: /music
+    environment:
+      ND_SCANSCHEDULE: 1h
+      ND_LOGLEVEL: info
+      ND_SESSIONTIMEOUT: 24h
+      ND_BASEURL: ""
+      TZ: "{{TZ}}"
+    network_mode: bridge
+    privileged: false

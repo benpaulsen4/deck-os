@@ -1,0 +1,27 @@
+services:
+  glances:
+    image: nicolargo/glances:latest
+    pid: host
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    environment:
+      GLANCES_OPT: -w
+    restart: unless-stopped
+    network_mode: bridge
+    privileged: false
+    volumes:
+      - type: bind
+        source: "{{VOLUME_GLANCES__VAR_RUN_DOCKER_SOCK}}"
+        target: /var/run/docker.sock
+      - type: bind
+        source: "{{VOLUME_GLANCES__MNT}}"
+        target: /mnt
+    ports:
+      - target: 61208
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 61209
+        published: "{{PORT_GLANCES_61209}}"
+        protocol: tcp

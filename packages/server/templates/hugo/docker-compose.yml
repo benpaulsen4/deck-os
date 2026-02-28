@@ -1,0 +1,23 @@
+services:
+  hugo:
+    image: ghcr.io/gohugoio/hugo:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    restart: unless-stopped
+    user: 0:0
+    ports:
+      - target: 1313
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_HUGO__PROJECT}}"
+        target: /project
+      - type: bind
+        source: "{{VOLUME_HUGO__CACHE}}"
+        target: /cache
+    command:
+      - server
+      - --bind=0.0.0.0

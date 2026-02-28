@@ -1,0 +1,24 @@
+{
+  "id": "lucky",
+  "title": "Lucky",
+  "description": "Powerful networking tool",
+  "categories": ["Network"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "",
+  "parameters": [
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "VOLUME_LUCKY__GOODLUCK",
+      "label": "LUCKY /GOODLUCK",
+      "type": "path",
+      "defaultValue": "./goodluck",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+services:
+  handbrake:
+    image: jlesage/handbrake:latest
+    network_mode: bridge
+    ports:
+      - target: 5800
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    privileged: true
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_HANDBRAKE__STORAGE}}"
+        target: /storage
+      - type: bind
+        source: "{{VOLUME_HANDBRAKE__WATCH}}"
+        target: /watch
+      - type: bind
+        source: "{{VOLUME_HANDBRAKE__OUTPUT}}"
+        target: /output
+      - type: bind
+        source: "{{VOLUME_HANDBRAKE__CONFIG}}"
+        target: /config

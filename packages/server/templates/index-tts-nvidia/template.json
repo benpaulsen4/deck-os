@@ -1,0 +1,17 @@
+{
+  "id": "index-tts-nvidia",
+  "title": "Index-TTS(Nvidia GPU)",
+  "description": "An Industrial-Level Controllable and Efficient Zero-Shot Text-To-Speech System",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "7867",
+      "required": true
+    }
+  ]
+}

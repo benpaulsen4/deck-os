@@ -1,0 +1,24 @@
+{
+  "id": "uptimekuma",
+  "title": "Uptime Kuma",
+  "description": "It is a self-hosted monitoring tool like \"Uptime Robot\".",
+  "categories": ["Network"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3001",
+      "required": true
+    },
+    {
+      "key": "VOLUME_UPTIMEKUMA__APP_DATA",
+      "label": "UPTIMEKUMA /APP/DATA",
+      "type": "path",
+      "defaultValue": "./app/data",
+      "required": true
+    }
+  ]
+}

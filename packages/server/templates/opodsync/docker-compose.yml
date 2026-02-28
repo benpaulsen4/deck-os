@@ -1,0 +1,15 @@
+services:
+  opodsync:
+    image: ganeshlab/opodsync:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 512M
+    ports:
+      - target: 8080
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_OPODSYNC__VAR_WWW_SERVER_DATA}}"
+        target: /var/www/server/data

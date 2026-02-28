@@ -1,0 +1,16 @@
+services:
+  openhands:
+    image: docker.all-hands.dev/all-hands-ai/openhands:latest
+    environment:
+      - SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/all-hands-ai/runtime:0.49-nikolaik
+      - WORKSPACE_MOUNT_PATH=/DATA/AppData/$AppID/workspace
+    ports:
+      - "{{WEB_PORT}}:3000"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - "{{VOLUME_OPENHANDS__VAR_RUN_DOCKER_SOCK}}:/var/run/docker.sock"
+      - "{{VOLUME_OPENHANDS___OPENHANDS}}:/.openhands"
+      - "{{VOLUME_OPENHANDS__OPT_WORKSPACE_BASE}}:/opt/workspace_base"
+    stdin_open: true
+    tty: true

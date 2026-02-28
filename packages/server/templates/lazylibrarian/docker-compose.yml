@@ -1,0 +1,28 @@
+services:
+  lazylibrarian:
+    environment:
+      DOCKER_MODS: linuxserver/calibre-web:calibre|linuxserver/mods:lazylibrarian-ffmpeg
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    image: linuxserver/lazylibrarian:version-169e669f
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 5299
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_LAZYLIBRARIAN__DOWNLOADS}}"
+        target: /downloads
+      - type: bind
+        source: "{{VOLUME_LAZYLIBRARIAN__BOOKS}}"
+        target: /books
+      - type: bind
+        source: "{{VOLUME_LAZYLIBRARIAN__CONFIG}}"
+        target: /config

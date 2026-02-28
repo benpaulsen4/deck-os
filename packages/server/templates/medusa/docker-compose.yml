@@ -1,0 +1,26 @@
+services:
+  medusa:
+    deploy:
+      resources:
+        limits:
+          memory: 7848M
+    environment:
+      - TZ= $TZ
+    image: pymedusa/medusa:master
+    ports:
+      - target: 8081
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_MEDUSA__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_MEDUSA__DOWNLOADS}}"
+        target: /downloads
+      - type: bind
+        source: "{{VOLUME_MEDUSA__TV}}"
+        target: /tv
+    network_mode: bridge
+    privileged: false

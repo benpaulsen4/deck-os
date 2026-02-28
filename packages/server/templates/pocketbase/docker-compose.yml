@@ -1,0 +1,17 @@
+services:
+  pocketbase:
+    image: argonptg/pocketbase:latest
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    network_mode: bridge
+    ports:
+      - target: 8090
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: always
+    volumes:
+      - type: bind
+        source: "{{VOLUME_POCKETBASE__PB_DATA}}"
+        target: /pb_data

@@ -1,0 +1,20 @@
+services:
+  n8n:
+    environment:
+      TZ: "{{TZ}}"
+      N8N_SECURE_COOKIE: "false"
+    image: n8nio/n8n:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 320M
+    network_mode: bridge
+    ports:
+      - target: 5678
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_N8N__HOME_NODE__N8N}}"
+        target: /home/node/.n8n

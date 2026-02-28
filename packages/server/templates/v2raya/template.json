@@ -1,0 +1,31 @@
+{
+  "id": "v2raya",
+  "title": "V2rayA",
+  "description": "A web GUI client of Project V which supports VMess, VLESS, SS, SSR, Trojan, Tuic and Juicity protocols",
+  "categories": ["Network"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "",
+  "parameters": [
+    {
+      "key": "VOLUME_V2RAYA__LIB_MODULES",
+      "label": "V2RAYA /LIB/MODULES",
+      "type": "path",
+      "defaultValue": "./modules",
+      "required": true
+    },
+    {
+      "key": "VOLUME_V2RAYA__ETC_RESOLV_CONF",
+      "label": "V2RAYA /ETC/RESOLV.CONF",
+      "type": "path",
+      "defaultValue": "./resolv-conf",
+      "required": true
+    },
+    {
+      "key": "VOLUME_V2RAYA__ETC_V2RAYA",
+      "label": "V2RAYA /ETC/V2RAYA",
+      "type": "path",
+      "defaultValue": "./v2raya",
+      "required": true
+    }
+  ]
+}

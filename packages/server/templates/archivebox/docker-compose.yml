@@ -1,0 +1,103 @@
+services:
+  archivebox:
+    image: archivebox/archivebox:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+    restart: unless-stopped
+    networks:
+      - archivebox_network
+    depends_on:
+      - archivebox_sonic
+    ports:
+      - target: 8000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_ARCHIVEBOX__DATA}}"
+        target: /data
+    environment:
+      - ADMIN_USERNAME=casaos
+      - ADMIN_PASSWORD=casaos
+      - ALLOWED_HOSTS=*
+      - CSRF_TRUSTED_ORIGINS=*
+      - PUBLIC_INDEX=True
+      - PUBLIC_SNAPSHOTS=True
+      - PUBLIC_ADD_VIEW=False
+      - SEARCH_BACKEND_ENGINE=sonic
+      - SEARCH_BACKEND_HOST_NAME=archivebox_sonic
+      - SEARCH_BACKEND_PASSWORD=SomeSecretPassword
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --no-verbose
+        - --tries=1
+        - --spider
+        - http://localhost:8000
+      interval: 1m
+      timeout: 3s
+  archivebox_scheduler:
+    image: archivebox/archivebox:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+    restart: unless-stopped
+    networks:
+      - archivebox_network
+    depends_on:
+      - archivebox_sonic
+    command:
+      - schedule
+      - --foreground
+      - --update
+      - --every=day
+    environment:
+      - TIMEOUT=120
+      - SEARCH_BACKEND_ENGINE=sonic
+      - SEARCH_BACKEND_HOST_NAME=archivebox_sonic
+      - SEARCH_BACKEND_PASSWORD=SomeSecretPassword
+    volumes:
+      - type: bind
+        source: "{{VOLUME_ARCHIVEBOX_SCHEDULER__DATA}}"
+        target: /data
+  archivebox_sonic:
+    image: archivebox/sonic:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+    restart: unless-stopped
+    networks:
+      - archivebox_network
+    expose:
+      - 1491
+    environment:
+      - SEARCH_BACKEND_PASSWORD=SomeSecretPassword
+    volumes:
+      - type: bind
+        source: "{{VOLUME_ARCHIVEBOX_SONIC__VAR_LIB_SONIC_STORE}}"
+        target: /var/lib/sonic/store
+  archivebox_novnc:
+    image: theasp/novnc:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+    restart: unless-stopped
+    networks:
+      - archivebox_network
+    ports:
+      - target: 8080
+        published: "{{PORT_ARCHIVEBOX_NOVNC_8080}}"
+        protocol: tcp
+    environment:
+      - DISPLAY_WIDTH=1920
+      - DISPLAY_HEIGHT=1080
+      - RUN_XTERM=no
+networks:
+  archivebox_network:
+    driver: bridge

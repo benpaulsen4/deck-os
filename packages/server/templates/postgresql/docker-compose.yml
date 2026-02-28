@@ -1,0 +1,23 @@
+services:
+  postgresql:
+    environment:
+      PUID: "{{PUID}}"
+      PGID: "{{PGID}}"
+      TZ: "{{TZ}}"
+      POSTGRES_USER: casaos
+      POSTGRES_PASSWORD: casaos
+      POSTGRES_DB: casaos
+    image: postgres:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 2048M
+    restart: unless-stopped
+    ports:
+      - target: 5432
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_POSTGRESQL__VAR_LIB_POSTGRESQL_DATA}}"
+        target: /var/lib/postgresql/data

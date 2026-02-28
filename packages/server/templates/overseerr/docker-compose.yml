@@ -1,0 +1,16 @@
+services:
+  overseerr:
+    image: linuxserver/overseerr:latest
+    restart: unless-stopped
+    environment:
+      PUID: "{{PUID}}"
+      PGID: "{{PGID}}"
+      TZ: "{{TZ}}"
+    ports:
+      - target: 5055
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_OVERSEERR__CONFIG}}"
+        target: /config

@@ -1,0 +1,21 @@
+services:
+  mariadb:
+    image: linuxserver/mariadb:latest
+    restart: unless-stopped
+    environment:
+      PUID: "{{PUID}}"
+      PGID: "{{PGID}}"
+      TZ: "{{TZ}}"
+      MYSQL_ROOT_PASSWORD: casaos
+      MYSQL_DATABASE: casaos
+      MYSQL_USER: casaos
+      MYSQL_PASSWORD: casaos
+      REMOTE_SQL: ""
+    ports:
+      - target: 3306
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_MARIADB__CONFIG}}"
+        target: /config

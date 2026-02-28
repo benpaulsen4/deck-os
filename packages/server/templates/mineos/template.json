@@ -1,0 +1,38 @@
+{
+  "id": "mineos",
+  "title": "MineOS",
+  "description": "MineOS is a server front-end to ease managing Minecraft administrative tasks. This iteration using Node.js aims to enhance previous MineOS scripts (Python-based), by leveraging the event-triggering, asyncronous model of Node.JS and websockets.",
+  "categories": ["Games"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8444",
+      "required": true
+    },
+    {
+      "key": "PORT_MINEOS_25565_25570_TCP",
+      "label": "PORT MINEOS 25565 25570 TCP",
+      "type": "port",
+      "defaultValue": "25565-25570",
+      "required": false
+    },
+    {
+      "key": "PORT_MINEOS_25565_25570_UDP",
+      "label": "PORT MINEOS 25565 25570 UDP",
+      "type": "port",
+      "defaultValue": "25565-25570",
+      "required": false
+    },
+    {
+      "key": "VOLUME_MINEOS__VAR_GAMES_MINECRAFT",
+      "label": "MINEOS /VAR/GAMES/MINECRAFT",
+      "type": "path",
+      "defaultValue": "./minecraft",
+      "required": true
+    }
+  ]
+}

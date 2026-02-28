@@ -1,0 +1,33 @@
+services:
+  syncthing:
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    image: linuxserver/syncthing:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    network_mode: bridge
+    ports:
+      - target: 8384
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 22000
+        published: "{{PORT_SYNCTHING_22000}}"
+        protocol: tcp
+      - target: 22000
+        published: "{{PORT_SYNCTHING_22000_2}}"
+        protocol: udp
+      - target: 21027
+        published: "{{PORT_SYNCTHING_21027}}"
+        protocol: udp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_SYNCTHING__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_SYNCTHING__DATA}}"
+        target: /DATA

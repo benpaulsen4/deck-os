@@ -1,0 +1,48 @@
+services:
+  deepseek-ocr-backend:
+    image: icewhaletech/deepseek-ocr-backend:latest
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      FRONTEND_PORT: "3000"
+      MODEL_NAME: deepseek-ai/DeepSeek-OCR
+      HF_HOME: /models
+      MAX_UPLOAD_SIZE_MB: "100"
+      BASE_SIZE: "1024"
+      IMAGE_SIZE: "640"
+      CROP_MODE: "true"
+    volumes:
+      - "{{VOLUME_DEEPSEEK_OCR_BACKEND__MODELS}}:/models"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                - gpu
+          memory: 8G
+    shm_size: 4g
+    ports:
+      - target: 8000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    networks:
+      - deepseek-ocr-network
+  deepseek-ocr-frontend:
+    image: icewhaletech/deepseek-ocr-frontend:latest
+    ports:
+      - target: 80
+        published: "{{PORT_DEEPSEEK_OCR_FRONTEND_80}}"
+        protocol: tcp
+    deploy:
+      resources:
+        reservations:
+          memory: 512M
+    depends_on:
+      - deepseek-ocr-backend
+    networks:
+      - deepseek-ocr-network
+networks:
+  deepseek-ocr-network:
+    driver: bridge

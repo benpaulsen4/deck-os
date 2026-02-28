@@ -1,0 +1,24 @@
+{
+  "id": "trilium",
+  "title": "Trilium",
+  "description": "Build your personal knowledge base with TriliumNext Notes",
+  "categories": ["Notes"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8088",
+      "required": true
+    },
+    {
+      "key": "VOLUME_TRILIUM__HOME_NODE_TRILIUM_DATA",
+      "label": "TRILIUM /HOME/NODE/TRILIUM-DATA",
+      "type": "path",
+      "defaultValue": "./trilium-data",
+      "required": true
+    }
+  ]
+}

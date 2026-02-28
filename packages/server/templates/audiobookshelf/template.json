@@ -1,0 +1,45 @@
+{
+  "id": "audiobookshelf",
+  "title": "Audiobookshelf",
+  "description": "Audiobookshelf is a self-hosted audiobook and podcast server.",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "13378",
+      "required": true
+    },
+    {
+      "key": "VOLUME_AUDIOBOOKSHELF__AUDIOBOOKS",
+      "label": "AUDIOBOOKSHELF /AUDIOBOOKS",
+      "type": "path",
+      "defaultValue": "./audiobooks",
+      "required": true
+    },
+    {
+      "key": "VOLUME_AUDIOBOOKSHELF__PODCASTS",
+      "label": "AUDIOBOOKSHELF /PODCASTS",
+      "type": "path",
+      "defaultValue": "./podcasts",
+      "required": true
+    },
+    {
+      "key": "VOLUME_AUDIOBOOKSHELF__CONFIG",
+      "label": "AUDIOBOOKSHELF /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_AUDIOBOOKSHELF__METADATA",
+      "label": "AUDIOBOOKSHELF /METADATA",
+      "type": "path",
+      "defaultValue": "./metadata",
+      "required": true
+    }
+  ]
+}

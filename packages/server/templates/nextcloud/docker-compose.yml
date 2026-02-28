@@ -1,0 +1,20 @@
+services:
+  nextcloud:
+    image: nextcloud:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 512M
+    network_mode: bridge
+    ports:
+      - target: 80
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+      - target: 443
+        published: "{{PORT_NEXTCLOUD_443}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_NEXTCLOUD__VAR_WWW_HTML}}"
+        target: /var/www/html

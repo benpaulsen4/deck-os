@@ -32,6 +32,10 @@ pnpm-debug.log*
 # Vite
 vite.config.ts.timestamp-*
 
+# TanStack Router generator cache
+.tanstack/
+/packages/client/.tanstack/
+
 # Data directory (runtime)
 /data/
 /packages/server/data/

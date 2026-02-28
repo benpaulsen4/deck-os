@@ -1,0 +1,17 @@
+services:
+  node-red:
+    image: nodered/node-red:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: host
+    ports:
+      - target: 1880
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: always
+    volumes:
+      - type: bind
+        source: "{{VOLUME_NODE_RED__DATA}}"
+        target: /data

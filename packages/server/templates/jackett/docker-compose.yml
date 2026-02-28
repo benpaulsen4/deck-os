@@ -1,0 +1,25 @@
+services:
+  jackett:
+    environment:
+      AUTO_UPDATE: "true"
+      PGID: "1000"
+      PUID: "1000"
+      TZ: Europe/London
+    image: linuxserver/jackett:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 9117
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_JACKETT__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_JACKETT__DOWNLOADS}}"
+        target: /downloads

@@ -1,0 +1,21 @@
+services:
+  v2raya:
+    image: mzz2017/v2raya:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    volumes:
+      - type: bind
+        source: "{{VOLUME_V2RAYA__LIB_MODULES}}"
+        target: /lib/modules
+        read_only: true
+      - type: bind
+        source: "{{VOLUME_V2RAYA__ETC_RESOLV_CONF}}"
+        target: /etc/resolv.conf
+      - type: bind
+        source: "{{VOLUME_V2RAYA__ETC_V2RAYA}}"
+        target: /etc/v2raya

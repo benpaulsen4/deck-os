@@ -1,0 +1,38 @@
+{
+  "id": "glances",
+  "title": "Glances",
+  "description": "Cross-platform monitoring tool.",
+  "categories": ["Utility"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "61208",
+      "required": true
+    },
+    {
+      "key": "PORT_GLANCES_61209",
+      "label": "PORT GLANCES 61209",
+      "type": "port",
+      "defaultValue": "61209",
+      "required": false
+    },
+    {
+      "key": "VOLUME_GLANCES__VAR_RUN_DOCKER_SOCK",
+      "label": "GLANCES /VAR/RUN/DOCKER.SOCK",
+      "type": "path",
+      "defaultValue": "./docker-sock",
+      "required": true
+    },
+    {
+      "key": "VOLUME_GLANCES__MNT",
+      "label": "GLANCES /MNT",
+      "type": "path",
+      "defaultValue": "./mnt",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,185 @@
+{
+  "id": "ragflow",
+  "title": "RagFlow",
+  "description": "RagFlow is an open-source RAG engine based on deep document understanding.",
+  "categories": ["AI"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "9380",
+      "required": true
+    },
+    {
+      "key": "PORT_RAGFLOW_80",
+      "label": "PORT RAGFLOW 80",
+      "type": "port",
+      "defaultValue": "30080",
+      "required": false
+    },
+    {
+      "key": "PORT_RAGFLOW_443",
+      "label": "PORT RAGFLOW 443",
+      "type": "port",
+      "defaultValue": "10443",
+      "required": false
+    },
+    {
+      "key": "PORT_RAGFLOW_5678",
+      "label": "PORT RAGFLOW 5678",
+      "type": "port",
+      "defaultValue": "5678",
+      "required": false
+    },
+    {
+      "key": "PORT_RAGFLOW_5679",
+      "label": "PORT RAGFLOW 5679",
+      "type": "port",
+      "defaultValue": "5679",
+      "required": false
+    },
+    {
+      "key": "PORT_RAGFLOW_9382",
+      "label": "PORT RAGFLOW 9382",
+      "type": "port",
+      "defaultValue": "9382",
+      "required": false
+    },
+    {
+      "key": "VOLUME_RAGFLOW__RAGFLOW_LOGS",
+      "label": "RAGFLOW /RAGFLOW/LOGS",
+      "type": "path",
+      "defaultValue": "./ragflow-logs",
+      "required": true
+    },
+    {
+      "key": "VOLUME_RAGFLOW__RAGFLOW_HISTORY_DATA_AGENT",
+      "label": "RAGFLOW /RAGFLOW/HISTORY_DATA_AGENT",
+      "type": "path",
+      "defaultValue": "./history_data_agent",
+      "required": true
+    },
+    {
+      "key": "PORT_RAGFLOW_ES01_9200",
+      "label": "PORT RAGFLOW ES01 9200",
+      "type": "port",
+      "defaultValue": "9200",
+      "required": false
+    },
+    {
+      "key": "VOLUME_RAGFLOW_ES01__USR_SHARE_ELASTICSEARCH_DATA",
+      "label": "RAGFLOW-ES01 /USR/SHARE/ELASTICSEARCH/DATA",
+      "type": "path",
+      "defaultValue": "./es01",
+      "required": true
+    },
+    {
+      "key": "PORT_RAGFLOW_INFINITY_23817",
+      "label": "PORT RAGFLOW INFINITY 23817",
+      "type": "port",
+      "defaultValue": "23817",
+      "required": false
+    },
+    {
+      "key": "PORT_RAGFLOW_INFINITY_23820",
+      "label": "PORT RAGFLOW INFINITY 23820",
+      "type": "port",
+      "defaultValue": "23820",
+      "required": false
+    },
+    {
+      "key": "PORT_RAGFLOW_INFINITY_5432",
+      "label": "PORT RAGFLOW INFINITY 5432",
+      "type": "port",
+      "defaultValue": "15432",
+      "required": false
+    },
+    {
+      "key": "VOLUME_RAGFLOW_INFINITY__VAR_INFINITY",
+      "label": "RAGFLOW-INFINITY /VAR/INFINITY",
+      "type": "path",
+      "defaultValue": "./infinity",
+      "required": true
+    },
+    {
+      "key": "PORT_RAGFLOW_MINIO_9000",
+      "label": "PORT RAGFLOW MINIO 9000",
+      "type": "port",
+      "defaultValue": "9000",
+      "required": false
+    },
+    {
+      "key": "PORT_RAGFLOW_MINIO_9001",
+      "label": "PORT RAGFLOW MINIO 9001",
+      "type": "port",
+      "defaultValue": "9001",
+      "required": false
+    },
+    {
+      "key": "VOLUME_RAGFLOW_MINIO__DATA",
+      "label": "RAGFLOW-MINIO /DATA",
+      "type": "path",
+      "defaultValue": "./minio",
+      "required": true
+    },
+    {
+      "key": "PORT_RAGFLOW_MYSQL_3306",
+      "label": "PORT RAGFLOW MYSQL 3306",
+      "type": "port",
+      "defaultValue": "5455",
+      "required": false
+    },
+    {
+      "key": "VOLUME_RAGFLOW_MYSQL__VAR_LIB_MYSQL",
+      "label": "RAGFLOW-MYSQL /VAR/LIB/MYSQL",
+      "type": "path",
+      "defaultValue": "./mysql",
+      "required": true
+    },
+    {
+      "key": "PORT_RAGFLOW_OPENSEARCH01_9201",
+      "label": "PORT RAGFLOW OPENSEARCH01 9201",
+      "type": "port",
+      "defaultValue": "9201",
+      "required": false
+    },
+    {
+      "key": "VOLUME_RAGFLOW_OPENSEARCH01__USR_SHARE_OPENSEARCH_DATA",
+      "label": "RAGFLOW-OPENSEARCH01 /USR/SHARE/OPENSEARCH/DATA",
+      "type": "path",
+      "defaultValue": "./opensearch01",
+      "required": true
+    },
+    {
+      "key": "PORT_RAGFLOW_REDIS_6379",
+      "label": "PORT RAGFLOW REDIS 6379",
+      "type": "port",
+      "defaultValue": "6379",
+      "required": false
+    },
+    {
+      "key": "VOLUME_RAGFLOW_REDIS__DATA",
+      "label": "RAGFLOW-REDIS /DATA",
+      "type": "path",
+      "defaultValue": "./redis",
+      "required": true
+    },
+    {
+      "key": "PORT_RAGFLOW_SANDBOX_EXECUTOR_MANAGER_9385",
+      "label": "PORT RAGFLOW SANDBOX EXECUTOR MANAGER 9385",
+      "type": "port",
+      "defaultValue": "9385",
+      "required": false
+    },
+    {
+      "key": "VOLUME_RAGFLOW_SANDBOX_EXECUTOR_MANAGER__VAR_RUN_DOCKER_SOCK",
+      "label": "RAGFLOW-SANDBOX-EXECUTOR-MANAGER /VAR/RUN/DOCKER.SOCK",
+      "type": "path",
+      "defaultValue": "./docker-sock",
+      "required": true
+    }
+  ]
+}

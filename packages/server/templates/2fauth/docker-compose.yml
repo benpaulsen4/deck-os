@@ -1,0 +1,17 @@
+services:
+  2fauth:
+    image: 2fauth/2fauth:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: bridge
+    ports:
+      - target: 8000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: always
+    volumes:
+      - type: bind
+        source: "{{VOLUME_2FAUTH__2FAUTH}}"
+        target: /2fauth

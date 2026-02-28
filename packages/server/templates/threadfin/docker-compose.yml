@@ -1,0 +1,18 @@
+services:
+  threadfin:
+    image: fyb3roptik/threadfin:latest
+    restart: unless-stopped
+    environment:
+      - THREADFIN_BRANCH=main
+      - THREADFIN_DEBUG=0
+    ports:
+      - target: 34400
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_THREADFIN__HOME_THREADFIN_CONF_DATA}}"
+        target: /home/threadfin/conf/data
+      - type: bind
+        source: "{{VOLUME_THREADFIN__HOME_THREADFIN_CONF_BACKUP}}"
+        target: /home/threadfin/conf/backup

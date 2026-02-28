@@ -1,0 +1,24 @@
+{
+  "id": "firefly",
+  "title": "Firefly",
+  "description": "Firefly, the easiest using of WireGuard VPN server, plus version of wg-easy.",
+  "categories": ["VPN"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "",
+  "parameters": [
+    {
+      "key": "VOLUME_FIREFLY__LIB_MODULES",
+      "label": "FIREFLY /LIB/MODULES",
+      "type": "path",
+      "defaultValue": "./modules",
+      "required": true
+    },
+    {
+      "key": "VOLUME_FIREFLY__FIREFLY_CONF",
+      "label": "FIREFLY /FIREFLY/CONF",
+      "type": "path",
+      "defaultValue": "./conf",
+      "required": true
+    }
+  ]
+}

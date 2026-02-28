@@ -1,0 +1,24 @@
+{
+  "id": "databag",
+  "title": "Databag",
+  "description": "Messenger for the Decentralized Web",
+  "categories": ["Chat"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "7000",
+      "required": true
+    },
+    {
+      "key": "VOLUME_DATABAG__VAR_LIB_DATABAG",
+      "label": "DATABAG /VAR/LIB/DATABAG",
+      "type": "path",
+      "defaultValue": "./databag",
+      "required": true
+    }
+  ]
+}

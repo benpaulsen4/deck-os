@@ -1,0 +1,38 @@
+{
+  "id": "lidarr",
+  "title": "Lidarr",
+  "description": "Lidarr is a music collection manager for Usenet and BitTorrent users. It can monitor multiple RSS feeds for new albums from your favorite artists and will interface with clients and indexers to grab, sort, and rename them. It can also be configured to automatically upgrade the quality of existing files in the library when a better quality format becomes available.",
+  "categories": ["Downloader"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8686",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LIDARR__CONFIG",
+      "label": "LIDARR /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LIDARR__MUSIC",
+      "label": "LIDARR /MUSIC",
+      "type": "path",
+      "defaultValue": "./music",
+      "required": true
+    },
+    {
+      "key": "VOLUME_LIDARR__DOWNLOADS",
+      "label": "LIDARR /DOWNLOADS",
+      "type": "path",
+      "defaultValue": "./downloads",
+      "required": true
+    }
+  ]
+}

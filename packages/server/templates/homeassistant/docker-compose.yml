@@ -1,0 +1,26 @@
+services:
+  homeassistant:
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    image: homeassistant/home-assistant:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_HOMEASSISTANT__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_HOMEASSISTANT__ETC_LOCALTIME}}"
+        target: /etc/localtime
+        read_only: true
+      - type: bind
+        source: "{{VOLUME_HOMEASSISTANT__RUN_DBUS}}"
+        target: /run/dbus
+        read_only: true
+    privileged: true

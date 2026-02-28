@@ -1,0 +1,24 @@
+{
+  "id": "2fauth",
+  "title": "2FAuth",
+  "description": "2FAuth is a web based self-hosted alternative to One Time Passcode (OTP) generators like Google Authenticator, designed for both mobile and desktop.",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8000",
+      "required": true
+    },
+    {
+      "key": "VOLUME_2FAUTH__2FAUTH",
+      "label": "2FAUTH /2FAUTH",
+      "type": "path",
+      "defaultValue": "./2fauth",
+      "required": true
+    }
+  ]
+}

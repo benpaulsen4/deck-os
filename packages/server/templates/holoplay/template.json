@@ -1,0 +1,17 @@
+{
+  "id": "holoplay",
+  "title": "HoloPlay",
+  "description": "A web app to listen Youtube audio source.",
+  "categories": ["WEB"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3000",
+      "required": true
+    }
+  ]
+}

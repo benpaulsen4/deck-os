@@ -1,0 +1,45 @@
+{
+  "id": "nginxproxymanager",
+  "title": "Nginx Proxy Manager",
+  "description": "Managing Nginx proxy hosts with a simple, powerful interface.",
+  "categories": ["Network"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "80",
+      "required": true
+    },
+    {
+      "key": "PORT_NGINXPROXYMANAGER_443",
+      "label": "PORT NGINXPROXYMANAGER 443",
+      "type": "port",
+      "defaultValue": "443",
+      "required": false
+    },
+    {
+      "key": "PORT_NGINXPROXYMANAGER_81",
+      "label": "PORT NGINXPROXYMANAGER 81",
+      "type": "port",
+      "defaultValue": "81",
+      "required": false
+    },
+    {
+      "key": "VOLUME_NGINXPROXYMANAGER__DATA",
+      "label": "NGINXPROXYMANAGER /DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_NGINXPROXYMANAGER__ETC_LETSENCRYPT",
+      "label": "NGINXPROXYMANAGER /ETC/LETSENCRYPT",
+      "type": "path",
+      "defaultValue": "./etc/letsencrypt",
+      "required": true
+    }
+  ]
+}

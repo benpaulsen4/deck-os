@@ -1,0 +1,31 @@
+{
+  "id": "gopeed",
+  "title": "Gopeed",
+  "description": "Open source, lightweight, native, supports (HTTP, BitTorrent, Magnet, etc.) for downloading.",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "9999",
+      "required": true
+    },
+    {
+      "key": "VOLUME_GOPEED__APP_STORAGE",
+      "label": "GOPEED /APP/STORAGE",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "VOLUME_GOPEED__APP_DOWNLOADS",
+      "label": "GOPEED /APP/DOWNLOADS",
+      "type": "path",
+      "defaultValue": "./downloads",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+services:
+  pingvin-share:
+    image: stonith404/pingvin-share
+    restart: unless-stopped
+    ports:
+      - target: 3000
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    environment:
+      TRUST_PROXY: false
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    volumes:
+      - type: bind
+        source: "{{VOLUME_PINGVIN_SHARE__OPT_APP_BACKEND_DATA}}"
+        target: /opt/app/backend/data
+      - type: bind
+        source: "{{VOLUME_PINGVIN_SHARE__OPT_APP_FRONTEND_PUBLIC_IMG}}"
+        target: /opt/app/frontend/public/img

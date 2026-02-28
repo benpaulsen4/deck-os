@@ -1,0 +1,31 @@
+services:
+  openhab:
+    environment:
+      CRYPTO_POLICY: unlimited
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+    image: openhab/openhab:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_OPENHAB__ETC_LOCALTIME}}"
+        target: /etc/localtime
+        read_only: true
+      - type: bind
+        source: "{{VOLUME_OPENHAB__ETC_TIMEZONE}}"
+        target: /etc/timezone
+        read_only: true
+      - type: bind
+        source: "{{VOLUME_OPENHAB__OPENHAB_ADDONS}}"
+        target: /openhab/addons
+      - type: bind
+        source: "{{VOLUME_OPENHAB__OPENHAB_CONF}}"
+        target: /openhab/conf
+      - type: bind
+        source: "{{VOLUME_OPENHAB__OPENHAB_USERDATA}}"
+        target: /openhab/userdata

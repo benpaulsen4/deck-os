@@ -1,0 +1,24 @@
+{
+  "id": "flowiseai",
+  "title": "Flowise",
+  "description": "An open source generative AI development platform for building AI Agents and LLM workflows",
+  "categories": ["Developer"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "3025",
+      "required": true
+    },
+    {
+      "key": "VOLUME_FLOWISE__ROOT__FLOWISE",
+      "label": "FLOWISE /ROOT/.FLOWISE",
+      "type": "path",
+      "defaultValue": "./-flowise",
+      "required": true
+    }
+  ]
+}

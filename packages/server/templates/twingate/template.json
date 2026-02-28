@@ -1,0 +1,9 @@
+{
+  "id": "twingate",
+  "title": "Twingate",
+  "description": "It's a connector for Twingate",
+  "categories": ["Network"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "",
+  "parameters": []
+}

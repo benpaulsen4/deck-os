@@ -1,0 +1,24 @@
+{
+  "id": "siyuan-note",
+  "title": "SiYuan Note",
+  "description": "SiYuan is a privacy-first personal knowledge management system, support fine-grained block-level reference and Markdown WYSIWYG.",
+  "categories": ["Note"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "6806",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SIYUAN_NOTE__SIYUAN_WORKSPACE",
+      "label": "SIYUAN-NOTE /SIYUAN/WORKSPACE",
+      "type": "path",
+      "defaultValue": "./workspace",
+      "required": true
+    }
+  ]
+}

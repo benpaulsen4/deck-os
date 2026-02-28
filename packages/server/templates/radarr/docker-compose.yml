@@ -1,0 +1,27 @@
+services:
+  radarr:
+    environment:
+      PGID: "{{PGID}}"
+      PUID: "{{PUID}}"
+      TZ: "{{TZ}}"
+    image: linuxserver/radarr:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 256M
+    network_mode: bridge
+    ports:
+      - target: 7878
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_RADARR__CONFIG}}"
+        target: /config
+      - type: bind
+        source: "{{VOLUME_RADARR__MOVIES}}"
+        target: /movies
+      - type: bind
+        source: "{{VOLUME_RADARR__DOWNLOADS}}"
+        target: /downloads

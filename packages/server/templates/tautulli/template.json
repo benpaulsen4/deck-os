@@ -1,0 +1,24 @@
+{
+  "id": "tautulli",
+  "title": "Tautulli",
+  "description": "Tautulli is a 3rd party application that you can run alongside your Plex Media Server to monitor activity and track various statistics.",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8181",
+      "required": true
+    },
+    {
+      "key": "VOLUME_TAUTULLI__CONFIG",
+      "label": "TAUTULLI /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+services:
+  netbird:
+    image: netbirdio/netbird:latest
+    network_mode: host
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_RESOURCE
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+    environment:
+      NB_SETUP_KEY: ""
+      NB_MANAGEMENT_URL: ""
+      NB_HOSTNAME: Zima
+      NB_ENABLE_SSH_ROOT: "true"
+      NB_ALLOW_SERVER_SSH: "true"
+    volumes:
+      - type: bind
+        source: "{{VOLUME_NETBIRD__VAR_LIB_NETBIRD}}"
+        target: /var/lib/netbird

@@ -1,0 +1,24 @@
+services:
+  photoprism:
+    environment:
+      PHOTOPRISM_ADMIN_PASSWORD: casaos
+      PHOTOPRISM_UPLOAD_NSFW: "true"
+      TZ: "{{TZ}}"
+    image: photoprism/photoprism:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 512M
+    network_mode: bridge
+    ports:
+      - target: 2342
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_PHOTOPRISM__PHOTOPRISM_STORAGE}}"
+        target: /photoprism/storage
+      - type: bind
+        source: "{{VOLUME_PHOTOPRISM__PHOTOPRISM_ORIGINALS}}"
+        target: /photoprism/originals

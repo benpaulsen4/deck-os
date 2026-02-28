@@ -1,0 +1,45 @@
+{
+  "id": "handbrake",
+  "title": "handbrake",
+  "description": "Liberate your videos and unleash infinite possibilities.",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "5800",
+      "required": true
+    },
+    {
+      "key": "VOLUME_HANDBRAKE__STORAGE",
+      "label": "HANDBRAKE /STORAGE",
+      "type": "path",
+      "defaultValue": "./storage",
+      "required": true
+    },
+    {
+      "key": "VOLUME_HANDBRAKE__WATCH",
+      "label": "HANDBRAKE /WATCH",
+      "type": "path",
+      "defaultValue": "./watch",
+      "required": true
+    },
+    {
+      "key": "VOLUME_HANDBRAKE__OUTPUT",
+      "label": "HANDBRAKE /OUTPUT",
+      "type": "path",
+      "defaultValue": "./output",
+      "required": true
+    },
+    {
+      "key": "VOLUME_HANDBRAKE__CONFIG",
+      "label": "HANDBRAKE /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    }
+  ]
+}

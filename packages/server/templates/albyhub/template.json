@@ -1,0 +1,45 @@
+{
+  "id": "albyhub",
+  "title": "Alby Hub ✨",
+  "description": "Self-custodial Bitcoin Lightning wallet with integrated node and app connections.",
+  "categories": ["Finance"],
+  "icon": "https://cdn.jsdelivr.net/gh/getAlby/hub@master/frontend/public/icon-512.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "PGID",
+      "label": "PGID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "PUID",
+      "label": "PUID",
+      "type": "number",
+      "defaultValue": "1000",
+      "required": false
+    },
+    {
+      "key": "TZ",
+      "label": "TZ",
+      "type": "string",
+      "defaultValue": "UTC",
+      "required": false
+    },
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "58000",
+      "required": true
+    },
+    {
+      "key": "VOLUME_ALBYHUB__DATA",
+      "label": "ALBYHUB /DATA",
+      "type": "path",
+      "defaultValue": "./data",
+      "required": true
+    }
+  ]
+}

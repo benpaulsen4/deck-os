@@ -1,0 +1,17 @@
+{
+  "id": "homebridge",
+  "title": "Homebridge",
+  "description": "HomeKit support for the impatient.",
+  "categories": ["Home Automation"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "",
+  "parameters": [
+    {
+      "key": "VOLUME_HOMEBRIDGE__HOMEBRIDGE",
+      "label": "HOMEBRIDGE /HOMEBRIDGE",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    }
+  ]
+}

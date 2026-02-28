@@ -1,0 +1,24 @@
+services:
+  virt-manager:
+    restart: always
+    devices:
+      - /dev/kvm:/dev/kvm
+    environment:
+      DARK_MODE: "false"
+      HOSTS: "['qemu:///system']"
+    image: mber5/virt-manager:latest
+    network_mode: bridge
+    ports:
+      - target: 80
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_VIRT_MANAGER__VAR_RUN_LIBVIRT_LIBVIRT_SOCK}}"
+        target: /var/run/libvirt/libvirt-sock
+      - type: bind
+        source: "{{VOLUME_VIRT_MANAGER__VAR_LIB_LIBVIRT}}"
+        target: /var/lib/libvirt
+      - type: bind
+        source: "{{VOLUME_VIRT_MANAGER__DATA_DOWNLOADS}}"
+        target: /DATA/Downloads

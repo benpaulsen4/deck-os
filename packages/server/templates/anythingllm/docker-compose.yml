@@ -1,0 +1,17 @@
+version: "3.8"
+services:
+  anythingllm:
+    image: mintplexlabs/anythingllm
+    ports:
+      - target: 3001
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    cap_add:
+      - SYS_ADMIN
+    volumes:
+      - type: bind
+        source: "{{VOLUME_ANYTHINGLLM__APP_SERVER_STORAGE}}"
+        target: /app/server/storage
+    restart: always
+    extra_hosts:
+      - host.docker.internal:host-gateway

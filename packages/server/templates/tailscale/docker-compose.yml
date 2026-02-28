@@ -1,0 +1,23 @@
+services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    deploy:
+      resources:
+        reservations:
+          memory: 128M
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_TAILSCALE__VAR_LIB_TAILSCALE}}"
+        target: /var/lib/tailscale
+      - type: bind
+        source: "{{VOLUME_TAILSCALE__DEV_NET_TUN}}"
+        target: /dev/net/tun
+    environment:
+      TS_STATE_DIR: /var/lib/tailscale
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    entrypoint: /bin/sh -c "tailscaled --state=/var/lib/tailscale/tailscaled.state &
+      sleep 10; tailscale web --listen 0.0.0.0:5252"

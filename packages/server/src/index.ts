@@ -8,7 +8,9 @@ import { createContext } from "./trpc/context.js";
 import * as metricsService from "./services/metrics.js";
 import * as dockerService from "./services/docker.js";
 import * as pullJobsService from "./services/pullJobs.js";
+import * as templatesService from "./services/templates.js";
 import { readFileSync, existsSync } from "fs";
+import { readFile } from "node:fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import type { Readable } from "node:stream";
@@ -65,6 +67,43 @@ app.get("/api/docker/status", (c) => {
   }
 
   return c.json(dockerStatus);
+});
+
+app.get("/api/templates/assets/:templateId/*", async (c) => {
+  const { templateId } = c.req.param();
+  const reqPath = c.req.path;
+  const prefixEncoded = `/api/templates/assets/${encodeURIComponent(templateId)}/`;
+  const prefixDecoded = `/api/templates/assets/${templateId}/`;
+  const rawRel = reqPath.startsWith(prefixEncoded)
+    ? reqPath.slice(prefixEncoded.length)
+    : reqPath.startsWith(prefixDecoded)
+      ? reqPath.slice(prefixDecoded.length)
+      : "";
+  const assetRel = rawRel ? decodeURIComponent(rawRel) : "";
+  if (!assetRel) return c.json({ error: "Not found" }, 404);
+
+  const assetPath = await templatesService.getTemplateAssetPath(templateId, assetRel);
+  if (!assetPath) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  const ext = assetPath.split(".").pop()?.toLowerCase();
+  const contentType =
+    ext === "png"
+      ? "image/png"
+      : ext === "jpg" || ext === "jpeg"
+        ? "image/jpeg"
+        : ext === "webp"
+          ? "image/webp"
+          : ext === "gif"
+            ? "image/gif"
+            : ext === "svg"
+              ? "image/svg+xml"
+              : "application/octet-stream";
+
+  const buf = await readFile(assetPath);
+  c.header("Content-Type", contentType);
+  return c.body(buf);
 });
 
 // SSE endpoint for streaming metrics

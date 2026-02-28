@@ -1,0 +1,31 @@
+{
+  "id": "monica",
+  "title": "Monica",
+  "description": "A Personal Relationship Management tool to help you document your social life.",
+  "categories": ["Utilities"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "18930",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MONICA__VAR_WWW_HTML_STORAGE",
+      "label": "MONICA /VAR/WWW/HTML/STORAGE",
+      "type": "path",
+      "defaultValue": "./storage",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MONICA_DB__VAR_LIB_MYSQL",
+      "label": "MONICA-DB /VAR/LIB/MYSQL",
+      "type": "path",
+      "defaultValue": "./mysql",
+      "required": true
+    }
+  ]
+}

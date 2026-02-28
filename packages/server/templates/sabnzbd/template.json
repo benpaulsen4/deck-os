@@ -1,0 +1,38 @@
+{
+  "id": "sabnzbd",
+  "title": "Sabnzbd",
+  "description": "SABnzbd is an Open Source Binary Newsreader written in Python. It's totally free, easy to use, and works practically everywhere. SABnzbd makes Usenet as simple and streamlined as possible by automating everything we can. All you have to do is add an .nzb. SABnzbd takes over from there, where it will be automatically downloaded, verified, repaired, extracted and filed away with zero human interaction. SABnzbd offers an easy setup wizard and has self-analysis tools to verify your setup.",
+  "categories": ["Media"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "8282",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SABNZBD__INCOMPLETE_DOWNLOADS",
+      "label": "SABNZBD /INCOMPLETE-DOWNLOADS",
+      "type": "path",
+      "defaultValue": "./incomplete-downloads",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SABNZBD__CONFIG",
+      "label": "SABNZBD /CONFIG",
+      "type": "path",
+      "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "VOLUME_SABNZBD__DOWNLOADS",
+      "label": "SABNZBD /DOWNLOADS",
+      "type": "path",
+      "defaultValue": "./downloads",
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+services:
+  peanut:
+    image: brandawg93/peanut:latest
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_PEANUT__CONFIG}}"
+        target: /config
+    ports:
+      - target: 8080
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    environment:
+      WEB_PORT: 8080
+    deploy:
+      resources:
+        reservations:
+          memory: 256M

@@ -1,0 +1,25 @@
+services:
+  anaconda3:
+    image: continuumio/anaconda3:latest
+    network_mode: bridge
+    restart: unless-stopped
+    environment:
+      - LANG=C.UTF-8
+      - LC_ALL=C.UTF-8
+      - PATH=/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    ports:
+      - target: 8888
+        published: "{{WEB_PORT}}"
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: "{{VOLUME_ANACONDA3__OPT_NOTEBOOKS}}"
+        target: /opt/notebooks
+    command:
+      - /bin/bash
+      - -c
+      - conda install -c conda-forge jupyterlab -y --quiet && jupyter lab
+        --notebook-dir=/opt/notebooks --ip='*' --port=8888 --no-browser
+        --allow-root
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/LisonEvf/CasaOS-AppStore@main/Apps/Anaconda3/icon.png

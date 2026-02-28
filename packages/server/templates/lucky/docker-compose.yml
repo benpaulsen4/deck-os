@@ -1,0 +1,16 @@
+services:
+  lucky:
+    deploy:
+      resources:
+        reservations:
+          memory: 64M
+    image: gdy666/lucky:latest
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: "{{VOLUME_LUCKY__GOODLUCK}}"
+        target: /goodluck
+    environment:
+      TZ: "{{TZ}}"
+    network_mode: host
+    privileged: false

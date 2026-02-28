@@ -1,0 +1,38 @@
+{
+  "id": "maybe",
+  "title": "Maybe",
+  "description": "Personal finance management application",
+  "categories": ["Finance"],
+  "icon": "assets/icon.png",
+  "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
+  "parameters": [
+    {
+      "key": "WEB_PORT",
+      "label": "WEB PORT",
+      "type": "port",
+      "defaultValue": "23000",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MAYBE_WEB__RAILS_STORAGE",
+      "label": "MAYBE-WEB /RAILS/STORAGE",
+      "type": "path",
+      "defaultValue": "./app/storage",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MAYBE_DB__VAR_LIB_POSTGRESQL_DATA",
+      "label": "MAYBE-DB /VAR/LIB/POSTGRESQL/DATA",
+      "type": "path",
+      "defaultValue": "./pgdata",
+      "required": true
+    },
+    {
+      "key": "VOLUME_MAYBE_REDIS__DATA",
+      "label": "MAYBE-REDIS /DATA",
+      "type": "path",
+      "defaultValue": "./redis/data",
+      "required": true
+    }
+  ]
+}
