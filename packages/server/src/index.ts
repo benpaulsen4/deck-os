@@ -11,6 +11,8 @@ import * as pullJobsService from "./services/pullJobs.js";
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import type { Readable } from "node:stream";
+import type Dockerode from "dockerode";
 
 dockerService.getDocker();
 
@@ -137,7 +139,7 @@ app.get("/api/docker/events", async (c) => {
   }
 
   return streamSSE(c, async (stream) => {
-    const eventStream = (await docker.getEvents({})) as NodeJS.ReadableStream;
+    const eventStream = (await docker.getEvents({})) as unknown as Readable;
 
     let buffer = "";
     eventStream.on("data", (chunk: Buffer) => {
@@ -168,8 +170,7 @@ app.get("/api/docker/events", async (c) => {
     });
 
     stream.onAbort(() => {
-      const s = eventStream as any;
-      if (s.destroy) s.destroy();
+      eventStream.destroy();
     });
 
     await stream.sleep(1000000);
@@ -227,7 +228,7 @@ app.get("/api/logs/:containerId", async (c) => {
         ? parseInt(sinceQuery, 10)
         : undefined;
 
-    const logOptions: any = {
+    const logOptions: Dockerode.ContainerLogsOptions & { follow: true } = {
       follow: true,
       stdout: true,
       stderr: true,
@@ -242,9 +243,7 @@ app.get("/api/logs/:containerId", async (c) => {
       logOptions.since = since;
     }
 
-    const logStream = (await container.logs(
-      logOptions as any
-    )) as any as NodeJS.ReadableStream;
+    const logStream = (await container.logs(logOptions)) as unknown as Readable;
 
     let lineBuffer = "";
     let binaryBuffer = Buffer.alloc(0);
@@ -314,8 +313,7 @@ app.get("/api/logs/:containerId", async (c) => {
     });
 
     stream.onAbort(() => {
-      const s = logStream as any;
-      if (s.destroy) s.destroy();
+      logStream.destroy();
     });
 
     await stream.sleep(1000000);
@@ -351,7 +349,7 @@ if (isProduction) {
     if (!existsSync(indexPath)) {
       throw new Error("File not found");
     }
-  } catch (err) {
+  } catch {
     console.error(`[ERROR] Client build not found at: ${clientDistPath}`);
     console.error('Run "npm run build" before starting in production mode.');
     process.exit(1);

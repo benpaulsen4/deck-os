@@ -44,13 +44,14 @@ function NewAppPage() {
       return await trpcClient.apps.create.mutate(input);
     },
 
-    onSuccess: async (result: any) => {
+    onSuccess: async (result) => {
       setDeployAppId(result.id);
       setIsPulling(true);
     },
 
-    onError: (err: any) => {
-      addToast(`Failed to create app: ${err.message}`, "error");
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      addToast(`Failed to create app: ${message}`, "error");
     },
   });
 
@@ -63,12 +64,14 @@ function NewAppPage() {
       addToast("App created & deployed successfully", "success");
       navigate({ to: "/apps/$appId", params: { appId } });
     },
-    onError: async (err: any, appId: string) => {
+    onError: async (err: unknown, appId: string) => {
       let rollbackOk = false;
       try {
         await trpcClient.apps.delete.mutate({ id: appId });
         rollbackOk = true;
-      } catch {}
+      } catch {
+        rollbackOk = false;
+      }
       const reason = err instanceof Error ? err.message : "Deploy failed";
       addToast(
         rollbackOk
@@ -91,8 +94,8 @@ function NewAppPage() {
         addToast("Compose YAML is valid", "success");
       }
     } catch (err: unknown) {
-      const error = err as { message?: string };
-      setValidationError(error.message || "Invalid compose YAML");
+      const message = err instanceof Error ? err.message : "Invalid compose YAML";
+      setValidationError(message);
       addToast("Validation failed", "error");
     }
   };
@@ -241,7 +244,9 @@ function NewAppPage() {
             try {
               await trpcClient.apps.delete.mutate({ id: deployAppId });
               rollbackOk = true;
-            } catch {}
+            } catch {
+              rollbackOk = false;
+            }
             addToast(
               rollbackOk
                 ? `Failed to pull images: ${result.error || "Pull failed"} (rolled back)`

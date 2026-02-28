@@ -259,7 +259,6 @@ export async function pullImagesWithProgress(
     let totalBytes = 0;
     let hasTotals = false;
     let completedImages = 0;
-    let imagesWithTotals = 0;
     let sumImagePercents = 0;
 
     for (const image of uniqueImages) {
@@ -288,7 +287,6 @@ export async function pullImagesWithProgress(
 
       if (imgTotal > 0) {
         hasTotals = true;
-        imagesWithTotals++;
         totalBytes += imgTotal;
         currentBytes += imgCurrent;
         sumImagePercents += imgCurrent / imgTotal;

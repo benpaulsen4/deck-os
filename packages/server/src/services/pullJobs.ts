@@ -29,9 +29,7 @@ function pruneJobs(now: number = Date.now()) {
   for (const [jobId, job] of jobs) {
     if (job.status === "running") {
       if (now - job.createdAt > RUNNING_TTL_MS) {
-        try {
-          job.controller.abort();
-        } catch {}
+        job.controller.abort();
         job.status = "error";
         job.error = "Pull timed out";
         job.finishedAt = now;
@@ -53,11 +51,16 @@ function pruneJobs(now: number = Date.now()) {
 }
 
 function getImagesFromCompose(composeYaml: string): string[] {
-  const parsed = parse(composeYaml) as any;
-  const services =
-    parsed?.services && typeof parsed.services === "object" ? parsed.services : {};
-  return Object.values(services)
-    .map((svc: any) => (typeof svc?.image === "string" ? svc.image : ""))
+  const parsed: unknown = parse(composeYaml);
+  if (!parsed || typeof parsed !== "object") return [];
+  const services = (parsed as Record<string, unknown>).services;
+  if (!services || typeof services !== "object") return [];
+  return Object.values(services as Record<string, unknown>)
+    .map((svc) => {
+      if (!svc || typeof svc !== "object") return "";
+      const image = (svc as Record<string, unknown>).image;
+      return typeof image === "string" ? image : "";
+    })
     .map((s: string) => s.trim())
     .filter(Boolean);
 }
@@ -149,14 +152,12 @@ export async function startPullJob(appId: string): Promise<PullJobSnapshot> {
       }
     });
 
-  return getPullJob(jobId)!;
+  return { jobId, appId, status: "running", progress: initialProgress };
 }
 
 export function cancelPullJob(jobId: string): boolean {
   const job = jobs.get(jobId);
   if (!job) return false;
-  try {
-    job.controller.abort();
-  } catch {}
+  job.controller.abort();
   return true;
 }

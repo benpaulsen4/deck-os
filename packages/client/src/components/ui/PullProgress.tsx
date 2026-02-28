@@ -30,6 +30,20 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(digits)} ${units[idx]}`;
 }
 
+function getErrorFromBody(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") return undefined;
+  const record = body as Record<string, unknown>;
+  return typeof record.error === "string" ? record.error : undefined;
+}
+
+async function safeJson(res: Response): Promise<unknown | null> {
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressProps) {
   const [error, setError] = useState<string | null>(null);
   const [isPulling, setIsPulling] = useState(false);
@@ -55,9 +69,7 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
     const completeOk = () => {
       if (finished) return;
       finished = true;
-      try {
-        controller.abort();
-      } catch {}
+      controller.abort();
       if (interval !== undefined) {
         window.clearInterval(interval);
       }
@@ -68,9 +80,7 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
     const completeErr = (message: string) => {
       if (finished) return;
       finished = true;
-      try {
-        controller.abort();
-      } catch {}
+      controller.abort();
       if (interval !== undefined) {
         window.clearInterval(interval);
       }
@@ -86,8 +96,8 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
           { method: "POST", signal: controller.signal }
         );
         if (!startRes.ok) {
-          const body = (await startRes.json().catch(() => null)) as any;
-          completeErr(body?.error || "Failed to start pull");
+          const body = await safeJson(startRes);
+          completeErr(getErrorFromBody(body) ?? "Failed to start pull");
           return;
         }
 
@@ -111,8 +121,8 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
                 return;
               }
               if (consecutiveFailures >= 10) {
-                const body = (await res.json().catch(() => null)) as any;
-                completeErr(body?.error || "Lost connection to pull job");
+                const body = await safeJson(res);
+                completeErr(getErrorFromBody(body) ?? "Lost connection to pull job");
               }
               return;
             }
@@ -148,9 +158,7 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
     start();
 
     return () => {
-      try {
-        controller.abort();
-      } catch {}
+      controller.abort();
       if (interval !== undefined) {
         window.clearInterval(interval);
       }

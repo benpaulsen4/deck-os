@@ -10,7 +10,7 @@ import { AppLauncherGrid } from "../components/layout/AppLauncherGrid";
 import { useToastStore } from "../stores/toast";
 import { trpcClient } from "../trpc";
 import { Button } from "../components/ui/Button";
-import type { SystemMetrics } from "../../../server/src/lib/schema.js";
+import type { App, SystemMetrics } from "../../../server/src/lib/schema.js";
 
 export const Route = createFileRoute("/")({
   component: DashboardPage,
@@ -26,7 +26,14 @@ function DashboardPage() {
 
   useAppStatus();
 
-  const reorderMutation = useMutation({
+  type AppsList = App[];
+
+  const reorderMutation = useMutation<
+    unknown,
+    unknown,
+    string[],
+    { previous?: AppsList }
+  >({
     mutationFn: async (orderedIds: string[]) =>
       await trpcClient.apps.reorder.mutate({ orderedIds }),
     onMutate: async (orderedIds: string[]) => {
@@ -35,21 +42,24 @@ function DashboardPage() {
       });
       const previous = queryClient.getQueryData(
         trpc.apps.list.queryOptions().queryKey
-      ) as any[] | undefined;
+      ) as AppsList | undefined;
 
       if (previous && Array.isArray(previous)) {
-        const byId = new Map(previous.map((a: any) => [a.id, a]));
-        const next = orderedIds.map((id) => byId.get(id)).filter(Boolean) as any[];
+        const byId = new Map(previous.map((a) => [a.id, a] as const));
+        const next = orderedIds
+          .map((id) => byId.get(id))
+          .filter((a): a is App => Boolean(a));
         queryClient.setQueryData(trpc.apps.list.queryOptions().queryKey, next);
       }
 
       return { previous };
     },
-    onError: (err: any, _orderedIds, ctx) => {
+    onError: (err: unknown, _orderedIds, ctx) => {
       if (ctx?.previous) {
         queryClient.setQueryData(trpc.apps.list.queryOptions().queryKey, ctx.previous);
       }
-      addToast(`Failed to reorder: ${err.message}`, "error");
+      const message = err instanceof Error ? err.message : "Unknown error";
+      addToast(`Failed to reorder: ${message}`, "error");
     },
     onSettled: async () => {
       await queryClient.invalidateQueries({

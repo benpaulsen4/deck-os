@@ -46,8 +46,9 @@ function AppsPage() {
     onSuccess: () => {
       addToast("App started", "success");
     },
-    onError: (err: any) => {
-      addToast(`Failed to start: ${err.message}`, "error");
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      addToast(`Failed to start: ${message}`, "error");
     },
   });
 
@@ -56,8 +57,9 @@ function AppsPage() {
     onSuccess: () => {
       addToast("App stopped", "success");
     },
-    onError: (err: any) => {
-      addToast(`Failed to stop: ${err.message}`, "error");
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      addToast(`Failed to stop: ${message}`, "error");
     },
   });
 
@@ -67,8 +69,9 @@ function AppsPage() {
     onSuccess: () => {
       addToast("App restarted", "success");
     },
-    onError: (err: any) => {
-      addToast(`Failed to restart: ${err.message}`, "error");
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      addToast(`Failed to restart: ${message}`, "error");
     },
   });
 
@@ -81,8 +84,9 @@ function AppsPage() {
         queryKey: trpc.apps.list.queryOptions().queryKey,
       });
     },
-    onError: (err: any) => {
-      addToast(`Failed to delete: ${err.message}`, "error");
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      addToast(`Failed to delete: ${message}`, "error");
     },
   });
 
