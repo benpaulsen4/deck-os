@@ -100,7 +100,7 @@ function AppDetailPage() {
 
   if (appLoading) {
     return (
-      <div className="page-container loading-scan">
+      <div className="page-container page-container--viewport loading-scan">
         <div className="panel" style={{ padding: "var(--space-6)" }}>
           <span className="label">LOADING APP...</span>
         </div>
@@ -110,7 +110,7 @@ function AppDetailPage() {
 
   if (!app) {
     return (
-      <div className="page-container">
+      <div className="page-container page-container--viewport">
         <div className="panel" style={{ padding: "var(--space-6)" }}>
           <span className="text-muted">App not found</span>
         </div>
@@ -119,116 +119,131 @@ function AppDetailPage() {
   }
 
   return (
-    <div className="page-container">
-      <div className="app-detail-header">
-        <div className="flex-row gap-2">
-          <div className="app-detail-icon-box">
-            <AppIcon
-              name={app.metadata.name}
-              src={app.metadata.icon}
-              imgStyle={{ width: "64px", height: "64px", objectFit: "contain" }}
-            />
-          </div>
-          <div>
-            <h1 className="app-detail-title">{app.metadata.name}</h1>
-            <div className="flex-row gap-2" style={{ marginTop: "4px" }}>
-              <span
-                className="app-detail-status"
-                style={{
-                  color: isRunning ? "var(--status-running)" : "var(--status-stopped)",
-                }}
-              >
-                {isRunning ? "\u25cf RUNNING" : "\u25cb STOPPED"}
-              </span>
-              {safeUrl && (
-                <a
-                  href={safeUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="app-detail-link"
+    <div className="page-container page-container--viewport app-detail-layout">
+      <div className="page-body">
+        <div className="page-grid-2col">
+          <div className="page-col">
+            <div className="app-detail-header">
+              <div className="flex-row gap-2">
+                <div className="app-detail-icon-box">
+                  <AppIcon
+                    name={app.metadata.name}
+                    src={app.metadata.icon}
+                    imgStyle={{ width: "64px", height: "64px", objectFit: "contain" }}
+                  />
+                </div>
+                <div>
+                  <h1 className="app-detail-title">{app.metadata.name}</h1>
+                  <div className="flex-row gap-2" style={{ marginTop: "4px" }}>
+                    <span
+                      className="app-detail-status"
+                      style={{
+                        color: isRunning
+                          ? "var(--status-running)"
+                          : "var(--status-stopped)",
+                      }}
+                    >
+                      {isRunning ? "\u25cf RUNNING" : "\u25cb STOPPED"}
+                    </span>
+                    {safeUrl && (
+                      <a
+                        href={safeUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="app-detail-link"
+                      >
+                        <ExternalLink size={12} /> OPEN
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <Button variant="secondary" onClick={() => setIsMetadataEditOpen(true)}>
+                EDIT METADATA
+              </Button>
+            </div>
+
+            <p className="app-detail-description">
+              {app.metadata.description || "No description"}
+            </p>
+
+            <div className="panel app-detail-actions-bar">
+              <div className="app-detail-button-group">
+                <Button
+                  variant="primary"
+                  onClick={() => startMutation.mutate()}
+                  disabled={startMutation.isPending || isRunning}
                 >
-                  <ExternalLink size={12} /> OPEN
-                </a>
-              )}
+                  <Play size={16} style={{ marginRight: "8px" }} /> START
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={() => handleConfirmAction("stop")}
+                  disabled={stopMutation.isPending || !isRunning}
+                >
+                  <Square size={16} style={{ marginRight: "8px" }} /> STOP
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => restartMutation.mutate()}
+                  disabled={restartMutation.isPending}
+                >
+                  <RotateCcw size={16} style={{ marginRight: "8px" }} /> RESTART
+                </Button>
+                <Button variant="secondary" onClick={() => setIsPulling(true)}>
+                  <Download size={16} style={{ marginRight: "8px" }} /> PULL IMAGES
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={() => handleConfirmAction("delete")}
+                  disabled={deleteMutation.isPending}
+                >
+                  <Trash2 size={16} style={{ marginRight: "8px" }} /> DELETE
+                </Button>
+              </div>
+            </div>
+
+            <div className="app-detail-section app-detail-containers">
+              <div className="app-detail-section-label">CONTAINERS</div>
+              <div className="panel app-detail-containers-panel">
+                <ContainerTable containers={stackStatus?.containers || []} />
+              </div>
+            </div>
+          </div>
+
+          <div className="page-col">
+            <div className="page-col-scroll app-detail-right-col">
+              <ComposeEditor app={app} />
+
+              <div className="app-detail-section">
+                <div className="app-detail-section-header">
+                  <div className="app-detail-section-label" style={{ marginBottom: 0 }}>
+                    LOGS
+                  </div>
+                  <Button variant="secondary" onClick={() => setShowLogs(!showLogs)}>
+                    {showLogs ? "HIDE" : "SHOW"}
+                  </Button>
+                </div>
+                {showLogs ? (
+                  <div className="panel" style={{ padding: 0 }}>
+                    <LogViewer
+                      containers={
+                        stackStatus?.containers.map((c) => ({
+                          id: c.id,
+                          name: c.names[0]?.replace(/^\//, "") || c.id.slice(0, 12),
+                        })) || []
+                      }
+                    />
+                  </div>
+                ) : (
+                  <div className="panel" style={{ padding: "var(--space-3)" }}>
+                    <span className="text-muted">LOGS HIDDEN</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
-        <Button variant="secondary" onClick={() => setIsMetadataEditOpen(true)}>
-          EDIT METADATA
-        </Button>
-      </div>
-
-      <p className="app-detail-description">
-        {app.metadata.description || "No description"}
-      </p>
-
-      <div className="panel app-detail-actions-bar">
-        <div className="app-detail-button-group">
-          <Button
-            variant="primary"
-            onClick={() => startMutation.mutate()}
-            disabled={startMutation.isPending || isRunning}
-          >
-            <Play size={16} style={{ marginRight: "8px" }} /> START
-          </Button>
-          <Button
-            variant="danger"
-            onClick={() => handleConfirmAction("stop")}
-            disabled={stopMutation.isPending || !isRunning}
-          >
-            <Square size={16} style={{ marginRight: "8px" }} /> STOP
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => restartMutation.mutate()}
-            disabled={restartMutation.isPending}
-          >
-            <RotateCcw size={16} style={{ marginRight: "8px" }} /> RESTART
-          </Button>
-          <Button variant="secondary" onClick={() => setIsPulling(true)}>
-            <Download size={16} style={{ marginRight: "8px" }} /> PULL IMAGES
-          </Button>
-          <Button
-            variant="danger"
-            onClick={() => handleConfirmAction("delete")}
-            disabled={deleteMutation.isPending}
-          >
-            <Trash2 size={16} style={{ marginRight: "8px" }} /> DELETE
-          </Button>
-        </div>
-      </div>
-
-      <div className="app-detail-section">
-        <div className="app-detail-section-label">CONTAINERS</div>
-        <div className="panel">
-          <ContainerTable containers={stackStatus?.containers || []} />
-        </div>
-      </div>
-
-      <ComposeEditor app={app} />
-
-      {showLogs && (
-        <div className="app-detail-section">
-          <div className="app-detail-section-header">
-            <div className="app-detail-section-label">LOGS</div>
-          </div>
-          <div className="panel" style={{ padding: 0 }}>
-            <LogViewer
-              containers={
-                stackStatus?.containers.map((c) => ({
-                  id: c.id,
-                  name: c.names[0]?.replace(/^\//, "") || c.id.slice(0, 12),
-                })) || []
-              }
-            />
-          </div>
-        </div>
-      )}
-
-      <div className="app-detail-center-actions">
-        <Button variant="secondary" onClick={() => setShowLogs(!showLogs)}>
-          {showLogs ? "HIDE LOGS" : "SHOW LOGS"}
-        </Button>
       </div>
 
       <MetadataEditModal

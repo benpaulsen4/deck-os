@@ -108,138 +108,124 @@ function NewAppPage() {
     });
   };
 
-  const pageContainerStyle: React.CSSProperties = {
-    maxWidth: "1440px",
-    margin: "0 auto",
-    padding: "var(--space-3)",
-    width: "100%",
-  };
-
-  const formStyle: React.CSSProperties = {
-    display: "flex",
-    flexDirection: "column",
-    gap: "var(--space-2)",
-  };
-
-  const composeSectionStyle: React.CSSProperties = {
-    marginBottom: "var(--space-2)",
-  };
-
-  const errorBannerStyle: React.CSSProperties = {
-    border: "1px solid var(--status-stopped)",
-    padding: "12px",
-    fontSize: "var(--text-sm)",
-    color: "var(--status-stopped)",
-  };
-
-  const buttonContainerStyle: React.CSSProperties = {
-    display: "flex",
-    gap: "8px",
-    justifyContent: "flex-end",
-    marginTop: "var(--space-3)",
-  };
-
-  const labelStyle: React.CSSProperties = {
-    display: "block",
-    marginBottom: "4px",
-    fontSize: "var(--text-xs)",
-    fontWeight: "500",
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
-    color: "var(--text-secondary)",
-  };
-
   return (
-    <div style={pageContainerStyle}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: "var(--space-3)",
-        }}
-      >
-        <h1
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: "var(--text-xl)",
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-          }}
-        >
-          New App
-        </h1>
+    <div className="page-container page-container--viewport">
+      <div className="page-header">
+        <h1 className="page-title">New App</h1>
       </div>
 
-      <div className="panel" style={{ padding: "var(--space-3)" }}>
-        <form className="new-app-form" style={formStyle}>
-          <Input
-            label="APP NAME"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="my-app"
-            required
-          />
+      <div className="page-body">
+        <div className="page-grid-2col">
+          <div className="page-col">
+            <div className="panel" style={{ padding: "var(--space-3)" }}>
+              <div className="label" style={{ marginBottom: "var(--space-2)" }}>
+                METADATA
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "var(--space-2)",
+                }}
+              >
+                <Input
+                  label="APP NAME"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="my-app"
+                  required
+                />
 
-          <Input
-            label="DESCRIPTION"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="My awesome app"
-          />
+                <Input
+                  label="DESCRIPTION"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="My awesome app"
+                />
 
-          <Input
-            label="ICON URL"
-            value={icon}
-            onChange={(e) => setIcon(e.target.value)}
-            placeholder="https://example.com/icon.png"
-          />
+                <Input
+                  label="ICON URL"
+                  value={icon}
+                  onChange={(e) => setIcon(e.target.value)}
+                  placeholder="https://example.com/icon.png"
+                />
 
-          <Input
-            label="WEB URL"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="http://localhost:8080"
-          />
+                <Input
+                  label="WEB URL"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="http://localhost:8080"
+                />
+              </div>
 
-          <div style={composeSectionStyle}>
-            <label style={labelStyle}>COMPOSE FILE</label>
-            <CodeEditor value={composeYaml} onChange={setComposeYaml} minHeight="400px" />
+              {validationError && (
+                <div
+                  style={{
+                    border: "1px solid var(--status-stopped)",
+                    padding: "12px",
+                    fontSize: "var(--text-sm)",
+                    color: "var(--status-stopped)",
+                    marginTop: "var(--space-2)",
+                  }}
+                >
+                  {validationError}
+                </div>
+              )}
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  justifyContent: "flex-end",
+                  marginTop: "var(--space-3)",
+                }}
+              >
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleValidate}
+                  disabled={
+                    createAppMutation.isPending || isPulling || deployMutation.isPending
+                  }
+                >
+                  VALIDATE
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleCreateAndDeploy}
+                  disabled={
+                    createAppMutation.isPending ||
+                    isPulling ||
+                    deployMutation.isPending ||
+                    !name ||
+                    !composeYaml
+                  }
+                >
+                  {createAppMutation.isPending
+                    ? "CREATING..."
+                    : deployMutation.isPending
+                      ? "DEPLOYING..."
+                      : "CREATE & DEPLOY"}
+                </Button>
+              </div>
+            </div>
           </div>
 
-          {validationError && <div style={errorBannerStyle}>{validationError}</div>}
-
-          <div style={buttonContainerStyle}>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={handleValidate}
-              disabled={
-                createAppMutation.isPending || isPulling || deployMutation.isPending
-              }
-            >
-              VALIDATE
-            </Button>
-            <Button
-              type="button"
-              onClick={handleCreateAndDeploy}
-              disabled={
-                createAppMutation.isPending ||
-                isPulling ||
-                deployMutation.isPending ||
-                !name ||
-                !composeYaml
-              }
-            >
-              {createAppMutation.isPending
-                ? "CREATING..."
-                : deployMutation.isPending
-                  ? "DEPLOYING..."
-                  : "CREATE & DEPLOY"}
-            </Button>
+          <div className="page-col">
+            <div className="panel compose-editor-panel">
+              <div className="label" style={{ marginBottom: "var(--space-2)" }}>
+                COMPOSE FILE
+              </div>
+              <div className="compose-editor-body">
+                <CodeEditor
+                  value={composeYaml}
+                  onChange={setComposeYaml}
+                  minHeight="520px"
+                />
+              </div>
+            </div>
           </div>
-        </form>
+        </div>
       </div>
 
       <PullProgress

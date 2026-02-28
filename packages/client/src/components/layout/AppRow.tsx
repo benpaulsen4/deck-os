@@ -122,7 +122,7 @@ export function AppRow({ app, stackStatus, onAction, isActionPending }: AppRowPr
             style={{
               width: "26px",
               height: "26px",
-              borderRadius: "6px",
+              borderRadius: 0,
               overflow: "hidden",
               display: "inline-flex",
               alignItems: "center",
@@ -151,7 +151,7 @@ export function AppRow({ app, stackStatus, onAction, isActionPending }: AppRowPr
               height: "8px",
               backgroundColor: getStatusColor(),
               display: "inline-block",
-              borderRadius: "50%",
+              borderRadius: 0,
             }}
           />
           <span

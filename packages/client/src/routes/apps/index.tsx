@@ -147,47 +147,49 @@ function AppsPage() {
   };
 
   return (
-    <div className="page-container">
+    <div className="page-container page-container--viewport">
       <div className="page-header">
         <h1 className="page-title">Apps</h1>
-        <Link to="/apps/new" className="topbar-link">
+        <Link to="/apps/new" className="page-header-action">
           + NEW APP
         </Link>
       </div>
-      {apps && apps.length > 0 ? (
-        <div className="panel" style={{ padding: 0 }}>
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                <th style={thStyle}>Name</th>
-                <th style={thStyle}>Status</th>
-                <th style={thStyle}>Containers</th>
-                <th style={thStyle}>Created</th>
-                <th style={thStyle}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {apps.map((app) => (
-                <AppRow
-                  key={app.id}
-                  app={app}
-                  stackStatus={batchStatuses?.statuses[app.id] ?? null}
-                  onAction={handleAction}
-                  isActionPending={isActionPending}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div className="panel" style={{ padding: "var(--space-6)" }}>
-          <div className="app-launcher-empty">
-            NO APPS INSTALLED
-            <br />
-            <Link to="/apps/new">CREATE YOUR FIRST APP</Link>
+      <div className="page-body">
+        {apps && apps.length > 0 ? (
+          <div className="panel apps-table-scroll">
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>Name</th>
+                  <th style={thStyle}>Status</th>
+                  <th style={thStyle}>Containers</th>
+                  <th style={thStyle}>Created</th>
+                  <th style={thStyle}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {apps.map((app) => (
+                  <AppRow
+                    key={app.id}
+                    app={app}
+                    stackStatus={batchStatuses?.statuses[app.id] ?? null}
+                    onAction={handleAction}
+                    isActionPending={isActionPending}
+                  />
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="panel" style={{ padding: "var(--space-6)" }}>
+            <div className="app-launcher-empty">
+              NO APPS INSTALLED
+              <br />
+              <Link to="/apps/new">CREATE YOUR FIRST APP</Link>
+            </div>
+          </div>
+        )}
+      </div>
 
       <ConfirmDialog
         isOpen={confirmDialog.isOpen}

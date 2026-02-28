@@ -44,7 +44,7 @@ export function ComposeEditor({ app }: ComposeEditorProps) {
   };
 
   return (
-    <div className="app-detail-section">
+    <div className="app-detail-section compose-section">
       <div className="app-detail-section-header">
         <div className="app-detail-section-label">COMPOSE FILE</div>
         <Button variant="secondary" onClick={() => setIsOpen(!isOpen)}>
@@ -52,15 +52,17 @@ export function ComposeEditor({ app }: ComposeEditorProps) {
         </Button>
       </div>
       {isOpen ? (
-        <div className="panel" style={{ padding: "var(--space-2)" }}>
-          <CodeEditor
-            value={editedComposeYaml}
-            onChange={(value) => {
-              setEditedComposeYaml(value);
-              setComposeModified(value !== app.composeYaml);
-            }}
-            minHeight="400px"
-          />
+        <div className="panel compose-editor-panel">
+          <div className="compose-editor-body">
+            <CodeEditor
+              value={editedComposeYaml}
+              onChange={(value) => {
+                setEditedComposeYaml(value);
+                setComposeModified(value !== app.composeYaml);
+              }}
+              minHeight="320px"
+            />
+          </div>
           {composeModified && (
             <div className="modal-actions">
               <Button variant="secondary" onClick={handleCancel}>
@@ -82,8 +84,10 @@ export function ComposeEditor({ app }: ComposeEditorProps) {
           )}
         </div>
       ) : (
-        <div className="panel" style={{ padding: "var(--space-4)" }}>
-          <pre className="app-detail-compose-pre">{app.composeYaml}</pre>
+        <div className="panel compose-editor-panel">
+          <div className="compose-editor-body">
+            <pre className="app-detail-compose-pre">{app.composeYaml}</pre>
+          </div>
         </div>
       )}
     </div>

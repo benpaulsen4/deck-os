@@ -21,104 +21,84 @@ function SettingsPage() {
   };
 
   return (
-    <div className="page-container">
+    <div className="page-container page-container--viewport">
       <div className="page-header">
         <h1 className="page-title">Settings</h1>
       </div>
 
-      <div className="panel" style={{ padding: "var(--space-3)" }}>
-        <div className="label" style={{ marginBottom: "var(--space-2)" }}>
-          SYSTEM INFORMATION
-        </div>
-        {isLoading ? (
-          <div className="loading-scan" style={{ padding: "var(--space-2)" }}>
-            <span className="label">LOADING...</span>
-          </div>
-        ) : systemInfo ? (
-          <div style={{ display: "grid", gap: "var(--space-2)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-              <span className="system-info-label" style={{ width: "120px" }}>
-                HOSTNAME
-              </span>
-              <span className="system-info-value">{systemInfo.hostname}</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-              <span className="system-info-label" style={{ width: "120px" }}>
-                OS
-              </span>
-              <span className="system-info-value">{systemInfo.os}</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-              <span className="system-info-label" style={{ width: "120px" }}>
-                DISTRO
-              </span>
-              <span className="system-info-value">{systemInfo.osDistro || "N/A"}</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-              <span className="system-info-label" style={{ width: "120px" }}>
-                RELEASE
-              </span>
-              <span className="system-info-value">{systemInfo.osRelease || "N/A"}</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-              <span className="system-info-label" style={{ width: "120px" }}>
-                ARCHITECTURE
-              </span>
-              <span className="system-info-value">{systemInfo.osArch || "N/A"}</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-              <span className="system-info-label" style={{ width: "120px" }}>
-                NODE VERSION
-              </span>
-              <span className="system-info-value">{systemInfo.nodeVersion}</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-              <span className="system-info-label" style={{ width: "120px" }}>
-                UPTIME
-              </span>
-              <span className="system-info-value">{formatUptime(systemInfo.uptime)}</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-              <span className="system-info-label" style={{ width: "120px" }}>
-                DOCKER VERSION
-              </span>
-              <span className="system-info-value">
-                {systemInfo.dockerVersion || "NOT INSTALLED"}
-              </span>
+      <div className="page-body">
+        <div className="page-grid-2col">
+          <div className="page-col">
+            <div className="panel" style={{ padding: "var(--space-3)" }}>
+              <div className="label" style={{ marginBottom: "var(--space-2)" }}>
+                SYSTEM INFORMATION
+              </div>
+              {isLoading ? (
+                <div className="loading-scan" style={{ padding: "var(--space-2)" }}>
+                  <span className="label">LOADING...</span>
+                </div>
+              ) : systemInfo ? (
+                <div className="settings-kv">
+                  <span className="system-info-label">HOSTNAME</span>
+                  <span className="system-info-value">{systemInfo.hostname}</span>
+                  <span className="system-info-label">OS</span>
+                  <span className="system-info-value">{systemInfo.os}</span>
+                  <span className="system-info-label">DISTRO</span>
+                  <span className="system-info-value">
+                    {systemInfo.osDistro || "N/A"}
+                  </span>
+                  <span className="system-info-label">RELEASE</span>
+                  <span className="system-info-value">
+                    {systemInfo.osRelease || "N/A"}
+                  </span>
+                  <span className="system-info-label">ARCHITECTURE</span>
+                  <span className="system-info-value">{systemInfo.osArch || "N/A"}</span>
+                  <span className="system-info-label">NODE VERSION</span>
+                  <span className="system-info-value">{systemInfo.nodeVersion}</span>
+                  <span className="system-info-label">UPTIME</span>
+                  <span className="system-info-value">
+                    {formatUptime(systemInfo.uptime)}
+                  </span>
+                  <span className="system-info-label">DOCKER VERSION</span>
+                  <span className="system-info-value">
+                    {systemInfo.dockerVersion || "NOT INSTALLED"}
+                  </span>
+                </div>
+              ) : null}
             </div>
           </div>
-        ) : null}
-      </div>
 
-      <div
-        className="panel"
-        style={{ padding: "var(--space-3)", marginTop: "var(--space-2)" }}
-      >
-        <div className="label" style={{ marginBottom: "var(--space-2)" }}>
-          DATA DIRECTORY
-        </div>
-        {dataDirLoading ? (
-          <div className="loading-scan" style={{ padding: "var(--space-2)" }}>
-            <span className="label">LOADING...</span>
-          </div>
-        ) : dataDirInfo ? (
-          <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-            <span style={{ fontFamily: "var(--font-mono)" }}>{dataDirInfo.dataDir}</span>
-          </div>
-        ) : null}
-      </div>
+          <div className="page-col">
+            <div className="panel" style={{ padding: "var(--space-3)" }}>
+              <div className="label" style={{ marginBottom: "var(--space-2)" }}>
+                DATA DIRECTORY
+              </div>
+              {dataDirLoading ? (
+                <div className="loading-scan" style={{ padding: "var(--space-2)" }}>
+                  <span className="label">LOADING...</span>
+                </div>
+              ) : dataDirInfo ? (
+                <div
+                  style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}
+                >
+                  <span style={{ fontFamily: "var(--font-mono)" }}>
+                    {dataDirInfo.dataDir}
+                  </span>
+                </div>
+              ) : null}
+            </div>
 
-      <div
-        className="panel"
-        style={{ padding: "var(--space-3)", marginTop: "var(--space-2)" }}
-      >
-        <div className="label" style={{ marginBottom: "var(--space-2)" }}>
-          ABOUT
-        </div>
-        <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-          <div>DeckOS v0.1.0</div>
-          <div style={{ marginTop: "var(--space-1)", color: "var(--text-muted)" }}>
-            Self-hosted homelab management platform
+            <div className="panel" style={{ padding: "var(--space-3)" }}>
+              <div className="label" style={{ marginBottom: "var(--space-2)" }}>
+                ABOUT
+              </div>
+              <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
+                <div>DeckOS v0.1.0</div>
+                <div style={{ marginTop: "var(--space-1)", color: "var(--text-muted)" }}>
+                  Self-hosted homelab management platform
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
