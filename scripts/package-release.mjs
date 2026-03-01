@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile, access } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -36,10 +36,13 @@ const copy = async (srcRel, destRel) => {
 await copy("packages/server/dist", "packages/server/dist");
 await copy("packages/server/package.json", "packages/server/package.json");
 await copy("packages/server/templates", "packages/server/templates");
+await copy("packages/server/node_modules", "packages/server/node_modules");
 await copy("packages/client/dist", "packages/client/dist");
 await copy("node_modules", "node_modules");
 
 await writeFile(join(stagingDir, "VERSION"), `${version}\n`, "utf-8");
+
+await access(join(stagingDir, "packages/server/node_modules/hono"));
 
 await execFile("tar", ["-czf", tarPath, "-C", outDir, `deckos-${version}`]);
 

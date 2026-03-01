@@ -4,18 +4,30 @@ set -euo pipefail
 OWNER="${DECKOS_GITHUB_OWNER:-}"
 REPO="${DECKOS_GITHUB_REPO:-}"
 TOKEN="${DECKOS_GITHUB_TOKEN:-}"
-VERSION="${DECKOS_VERSION:-latest}"
+REQUESTED_VERSION="${DECKOS_VERSION:-latest}"
 INSTALL_ROOT="${DECKOS_INSTALL_ROOT:-/opt/deckos}"
 DATA_DIR="${DECKOS_DATA_DIR:-/var/lib/deckos}"
 PORT="${PORT:-3000}"
 SERVICE_NAME="${DECKOS_SERVICE_NAME:-deckos}"
+DEBUG="${DECKOS_INSTALL_DEBUG:-0}"
+GITHUB_API_BASE="${DECKOS_GITHUB_API_BASE:-https://api.github.com}"
+
+step() {
+  echo "==> $*"
+}
+
+debug() {
+  if [[ "$DEBUG" == "1" ]]; then
+    echo "DEBUG: $*"
+  fi
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --owner) OWNER="${2:-}"; shift 2;;
     --repo) REPO="${2:-}"; shift 2;;
     --token) TOKEN="${2:-}"; shift 2;;
-    --version) VERSION="${2:-}"; shift 2;;
+    --version) REQUESTED_VERSION="${2:-}"; shift 2;;
     --install-root) INSTALL_ROOT="${2:-}"; shift 2;;
     --data-dir) DATA_DIR="${2:-}"; shift 2;;
     --port) PORT="${2:-}"; shift 2;;
@@ -24,8 +36,22 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+OWNER="${OWNER//$'\r'/}"
+REPO="${REPO//$'\r'/}"
+TOKEN="${TOKEN//$'\r'/}"
+
+OWNER="$(echo -n "$OWNER" | xargs)"
+REPO="$(echo -n "$REPO" | xargs)"
+TOKEN="$(echo -n "$TOKEN" | tr -d ' \t\n\r')"
+REQUESTED_VERSION="$(echo -n "$REQUESTED_VERSION" | xargs)"
+
 if [[ -z "$OWNER" || -z "$REPO" || -z "$TOKEN" ]]; then
   echo "Missing required: --owner, --repo, --token (or DECKOS_GITHUB_OWNER/REPO/TOKEN env vars)" >&2
+  exit 1
+fi
+
+if [[ ! "$OWNER" =~ ^[A-Za-z0-9_.-]+$ || ! "$REPO" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  echo "Invalid --owner/--repo. Expected GitHub owner/repo names (no spaces)." >&2
   exit 1
 fi
 
@@ -47,6 +73,11 @@ fi
 
 if [[ "${VERSION_ID:-}" != "24.04" && "${VERSION_ID:-}" != "25.10" ]]; then
   echo "Unsupported Ubuntu version: ${VERSION_ID:-unknown} (supported: 24.04, 25.10)" >&2
+  exit 1
+fi
+
+if [[ "$REQUESTED_VERSION" != "latest" && ! "$REQUESTED_VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Invalid --version: ${REQUESTED_VERSION} (use 'latest' or a semver like 0.1.0 / v0.1.0)" >&2
   exit 1
 fi
 
@@ -73,13 +104,16 @@ fi
 usermod -aG docker deckos
 
 if [[ ! -s /home/deckos/.nvm/nvm.sh ]]; then
+  step "Installing NVM (latest release)"
   NVM_TAG="$(curl -fsSL https://api.github.com/repos/nvm-sh/nvm/releases/latest | jq -r '.tag_name' 2>/dev/null || true)"
   if [[ -z "${NVM_TAG}" || "${NVM_TAG}" == "null" ]]; then
     NVM_TAG="v0.39.7"
   fi
+  debug "NVM tag: ${NVM_TAG}"
   su - deckos -s /bin/bash -c "curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_TAG}/install.sh | bash"
 fi
 
+step "Installing Node.js 24 for deckos via NVM"
 su - deckos -s /bin/bash -c "export NVM_DIR=\"\$HOME/.nvm\"; . \"\$NVM_DIR/nvm.sh\"; nvm install 24; nvm alias default 24"
 
 cat > /usr/local/bin/deckos-node <<'EOF'
@@ -112,15 +146,22 @@ DECKOS_GITHUB_TOKEN=${TOKEN}
 EOF
 chmod 600 "$ENV_FILE"
 
-API="https://api.github.com/repos/${OWNER}/${REPO}"
-AUTH=(-H "Authorization: Bearer ${TOKEN}" -H "Accept: application/vnd.github+json" -H "User-Agent: deckos-installer")
+step "Fetching release metadata from GitHub"
+API="${GITHUB_API_BASE%/}/repos/${OWNER}/${REPO}"
+AUTH_BASE=(-H "Authorization: Bearer ${TOKEN}" -H "User-Agent: deckos-installer")
+AUTH_JSON=("${AUTH_BASE[@]}" -H "Accept: application/vnd.github+json")
+AUTH_BIN=("${AUTH_BASE[@]}" -H "Accept: application/octet-stream")
 
-if [[ "$VERSION" == "latest" ]]; then
-  RELEASE_JSON="$(curl -fsSL "${AUTH[@]}" "${API}/releases/latest")"
+if [[ "$REQUESTED_VERSION" == "latest" ]]; then
+  RELEASE_URL="${API}/releases/latest"
 else
-  TAG="v${VERSION#v}"
-  RELEASE_JSON="$(curl -fsSL "${AUTH[@]}" "${API}/releases/tags/${TAG}")"
+  TAG="v${REQUESTED_VERSION#v}"
+  RELEASE_URL="${API}/releases/tags/${TAG}"
 fi
+
+step "GET ${RELEASE_URL}"
+debug "GET (shell-escaped) $(printf '%q' "$RELEASE_URL")"
+RELEASE_JSON="$(curl -fsSL "${AUTH_JSON[@]}" "${RELEASE_URL}")"
 
 TAG_NAME="$(echo "$RELEASE_JSON" | jq -r '.tag_name')"
 VER="${TAG_NAME#v}"
@@ -134,11 +175,28 @@ if [[ -z "$ASSET_ID" || "$ASSET_ID" == "null" ]]; then
 fi
 
 TAR_PATH="${INSTALL_ROOT}/tmp/deckos-${VER}.tar.gz"
-curl -fL "${AUTH[@]}" -H "Accept: application/octet-stream" "${API}/releases/assets/${ASSET_ID}" -o "$TAR_PATH"
+ASSET_URL="${API}/releases/assets/${ASSET_ID}"
+step "Downloading release asset"
+step "GET ${ASSET_URL}"
+debug "GET (shell-escaped) $(printf '%q' "$ASSET_URL")"
+curl -fL "${AUTH_BIN[@]}" "${ASSET_URL}" -o "$TAR_PATH"
 
 TARGET_DIR="${INSTALL_ROOT}/releases/${VER}"
 rm -rf "${TARGET_DIR}.tmp"
 mkdir -p "${TARGET_DIR}.tmp"
+step "Extracting release to ${TARGET_DIR}"
+step "Validating downloaded archive"
+if ! gzip -t "$TAR_PATH" >/dev/null 2>&1; then
+  FILE_SIZE="$(stat -c%s "$TAR_PATH" 2>/dev/null || echo "unknown")"
+  echo "Downloaded asset is not a valid .tar.gz (size: ${FILE_SIZE})." >&2
+  echo "This usually means the GitHub API returned JSON/HTML instead of the tarball (auth/permissions or wrong asset)." >&2
+  if [[ "$DEBUG" == "1" ]]; then
+    echo "DEBUG: First bytes (printable):" >&2
+    head -c 600 "$TAR_PATH" | tr -cd '\11\12\15\40-\176' >&2 || true
+    echo >&2
+  fi
+  exit 1
+fi
 tar -xzf "$TAR_PATH" -C "${TARGET_DIR}.tmp" --strip-components=1
 test -f "${TARGET_DIR}.tmp/packages/server/dist/index.js"
 rm -rf "$TARGET_DIR"
@@ -146,6 +204,7 @@ mv "${TARGET_DIR}.tmp" "$TARGET_DIR"
 ln -sfn "$TARGET_DIR" "${INSTALL_ROOT}/current"
 chown -R deckos:deckos "$TARGET_DIR"
 
+step "Installing systemd service ${SERVICE_NAME}"
 UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 cat > "$UNIT_PATH" <<EOF
 [Unit]
