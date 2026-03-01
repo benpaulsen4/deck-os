@@ -1,9 +1,11 @@
 import * as path from "node:path";
 
-export const DATA_DIR =
-  process.env.DECKOS_DATA_DIR || path.join(process.cwd(), "data", "apps");
+const DEFAULT_DATA_DIR =
+  process.platform === "linux" ? "/var/lib/deckos" : path.join(process.cwd(), "data");
 
-export const APPS_DIR = DATA_DIR;
+export const DATA_DIR = process.env.DECKOS_DATA_DIR || DEFAULT_DATA_DIR;
+
+export const APPS_DIR = path.join(DATA_DIR, "apps");
 
 export const METADATA_FILE = "metadata.json";
 export const COMPOSE_FILE = "docker-compose.yml";

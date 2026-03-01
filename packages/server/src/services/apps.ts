@@ -3,15 +3,15 @@ import * as crypto from "node:crypto";
 import { parse } from "yaml";
 import type { App, AppMetadata } from "../lib/schema.js";
 import { AppMetadataSchema, ComposeFileSchema } from "../lib/schema.js";
-import { DATA_DIR, getAppDir, getMetadataPath, getComposePath } from "../lib/config.js";
+import { APPS_DIR, getAppDir, getMetadataPath, getComposePath } from "../lib/config.js";
 
 async function ensureDataDir(): Promise<void> {
-  await fs.ensureDir(DATA_DIR);
+  await fs.ensureDir(APPS_DIR);
 }
 
 export async function listApps(): Promise<App[]> {
   await ensureDataDir();
-  const appDirs = await fs.readdir(DATA_DIR, { withFileTypes: true });
+  const appDirs = await fs.readdir(APPS_DIR, { withFileTypes: true });
   const apps: App[] = [];
 
   for (const dir of appDirs) {

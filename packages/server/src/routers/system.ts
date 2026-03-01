@@ -1,8 +1,12 @@
 import { router, publicProcedure } from "../trpc/trpc.js";
 import si from "systeminformation";
+import { z } from "zod";
 import * as metricsService from "../services/metrics.js";
 import { getDockerAsync } from "../services/docker.js";
 import { DATA_DIR } from "../lib/config.js";
+import { getCurrentVersion } from "../lib/version.js";
+import { getUpdateStatus } from "../services/updates.js";
+import { applyUpdate } from "../services/selfUpdate.js";
 
 export const systemRouter = router({
   getDataDir: publicProcedure.query(async () => {
@@ -32,6 +36,7 @@ export const systemRouter = router({
     }
 
     return {
+      appVersion: getCurrentVersion(),
       hostname: osInfo.hostname,
       os: osInfo.platform,
       osDistro: osInfo.distro,
@@ -46,4 +51,14 @@ export const systemRouter = router({
   getMetrics: publicProcedure.query(async () => {
     return await metricsService.getOneShotMetrics();
   }),
+
+  getUpdateStatus: publicProcedure.query(async () => {
+    return await getUpdateStatus();
+  }),
+
+  applyUpdate: publicProcedure
+    .input(z.object({ version: z.string().optional() }))
+    .mutation(async ({ input }) => {
+      return await applyUpdate(input.version);
+    }),
 });

@@ -122,6 +122,25 @@
   color: var(--text-muted);
 }
 
+.topbar-update {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--status-warning);
+  border: 1px solid var(--status-warning);
+  background: transparent;
+  text-decoration: none;
+}
+
+.topbar-update:hover {
+  background: rgba(255, 196, 0, 0.08);
+}
+
 /* ---- Responsive ---- */
 
 /* Mobile Hamburger Menu */

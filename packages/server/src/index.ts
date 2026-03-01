@@ -380,7 +380,8 @@ if (isProduction) {
   });
 }
 
-const port = isProduction ? 3000 : 3001;
+const portEnv = process.env.PORT ? parseInt(process.env.PORT, 10) : NaN;
+const port = Number.isFinite(portEnv) ? portEnv : isProduction ? 3000 : 3001;
 
 if (isProduction) {
   const indexPath = join(clientDistPath, "index.html");

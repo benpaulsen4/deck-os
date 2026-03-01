@@ -61,7 +61,7 @@ Homelab enthusiasts running headless Linux servers (Raspberry Pi, NUC, old lapto
 - **R5.3** No authentication required at this stage (single-user, LAN-only assumption)
 - **R5.4** The backend communicates with the host Docker daemon via the Docker socket (`/var/run/docker.sock`)
 - **R5.5** All API communication between frontend and backend uses tRPC for end-to-end type safety
-- **R5.6** Production installs support an idempotent host-native install flow and an update flow that preserves the data directory across upgrades
+- **R5.6** Production installs support an idempotent host-native install flow and an update flow that preserves the data directory across upgrades (using GitHub Releases; private repo access via credentials is supported temporarily)
 
 ## Non-Requirements (Explicitly Out of Scope)
 

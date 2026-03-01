@@ -27,6 +27,11 @@ function RootLayout() {
 function TopBar() {
   const trpc = useTRPC();
   const { data: systemInfo } = useQuery(trpc.system.getInfo.queryOptions());
+  const { data: updateStatus } = useQuery(
+    trpc.system.getUpdateStatus.queryOptions(undefined, {
+      refetchInterval: 10 * 60 * 1000,
+    })
+  );
   const { getAnyConnected, getAllConnected } = useConnectionStore();
   const scanlineApplied = useRef(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -91,6 +96,11 @@ function TopBar() {
             </Link>
           </nav>
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+            {updateStatus?.updateAvailable && (
+              <Link to="/settings" className="topbar-update">
+                UPDATE
+              </Link>
+            )}
             {isAnyConnected && (
               <div style={connectionStyle}>
                 <div

@@ -338,13 +338,15 @@ DeckOS runs directly on the host OS as a long-running service (no containerizati
 
 ### Release Artifact
 
-DeckOS is released as a prebuilt, OS/arch-specific tarball produced by CI (users should not need a compiler toolchain on their server).
+DeckOS is released as a prebuilt, OS/arch-specific tarball produced by CI (users should not need a compiler toolchain on their server). CI publishes the tarball to GitHub Releases on version tags.
 
 **Artifact contents (conceptual):**
 
-- `server/` - compiled backend JS (`dist/`) plus production-only dependencies
-- `client/` - built SPA static assets (`dist/`)
-- `VERSION` / `manifest.json` - version + checksums/metadata for troubleshooting
+- `packages/server/dist/` - compiled backend JS
+- `packages/server/templates/` - bundled template library
+- `packages/client/dist/` - built SPA static assets
+- `node_modules/` - production-only dependencies
+- `VERSION` - release version
 
 ### Host Install Layout
 
@@ -359,12 +361,12 @@ The production install separates immutable binaries from mutable data:
 
 DeckOS is managed by `systemd` on Linux. The service runs as a dedicated user and is granted access to Docker via the `docker` group (or equivalent), so it can talk to `/var/run/docker.sock`.
 
-**Planned service characteristics:**
+**Service characteristics:**
 
 - `User=deckos` with `SupplementaryGroups=docker`
 - `EnvironmentFile=/etc/deckos/deckos.env`
 - `WorkingDirectory=/opt/deckos/current`
-- `Restart=on-failure`
+- `Restart=always` (used to restart after self-update)
 
 ### Updates and Rollback
 
@@ -372,8 +374,15 @@ Updates are designed to be atomic and data-safe:
 
 1. Download the new release tarball and verify checksum/signature (when provided).
 2. Extract to `/opt/deckos/releases/<new-version>/` without touching `/var/lib/deckos/`.
-3. Stop the service, switch `/opt/deckos/current` symlink to the new version, start the service.
+3. Switch `/opt/deckos/current` symlink to the new version and restart the `deckos` service (or exit cleanly under `Restart=always`).
 4. Keep at least one previous release directory for instant rollback (flip symlink back and restart).
+
+### Private Repo Access (Temporary)
+
+While the GitHub repo is private, both install and update flows require GitHub credentials:
+
+- `DECKOS_GITHUB_OWNER`, `DECKOS_GITHUB_REPO`
+- `DECKOS_GITHUB_TOKEN` (a token with access to the private repo)
 
 ## Security Considerations
 
