@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, rm, writeFile, access } from "node:fs/promises";
+import { access, cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -33,16 +33,18 @@ const copy = async (srcRel, destRel) => {
   await cp(src, dest, { recursive: true });
 };
 
-await copy("packages/server/dist", "packages/server/dist");
-await copy("packages/server/package.json", "packages/server/package.json");
-await copy("packages/server/templates", "packages/server/templates");
-await copy("packages/server/node_modules", "packages/server/node_modules");
+const serverDeploySrc = join(repoRoot, "dist", "server-deploy");
+await access(join(serverDeploySrc, "dist", "index.js"));
+await access(join(serverDeploySrc, "node_modules", "hono"));
+
+const serverDeployDest = join(stagingDir, "packages", "server");
+await rm(serverDeployDest, { recursive: true, force: true });
+await mkdir(dirname(serverDeployDest), { recursive: true });
+await rename(serverDeploySrc, serverDeployDest);
+
 await copy("packages/client/dist", "packages/client/dist");
-await copy("node_modules", "node_modules");
 
 await writeFile(join(stagingDir, "VERSION"), `${version}\n`, "utf-8");
-
-await access(join(stagingDir, "packages/server/node_modules/hono"));
 
 await execFile("tar", ["-czf", tarPath, "-C", outDir, `deckos-${version}`]);
 

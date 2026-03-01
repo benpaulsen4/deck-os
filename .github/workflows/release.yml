@@ -49,11 +49,21 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Prune to production dependencies
-        run: pnpm prune --prod
+      - name: Deploy server (prod)
+        shell: bash
+        run: |
+          rm -rf dist/server-deploy
+          pnpm --filter @deckos/server deploy dist/server-deploy --prod
 
       - name: Package release
         run: node scripts/package-release.mjs
+
+      - name: Verify release tarball contents
+        shell: bash
+        run: |
+          TAR="$(ls -1 dist/release/*.tar.gz | head -n 1)"
+          tar -tzf "$TAR" | grep -qE '^deckos-[0-9]+\.[0-9]+\.[0-9]+/packages/server/dist/index\.js$'
+          tar -tzf "$TAR" | grep -qE '^deckos-[0-9]+\.[0-9]+\.[0-9]+/packages/server/node_modules/hono(/|$)'
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
