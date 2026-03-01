@@ -62,8 +62,9 @@ jobs:
         shell: bash
         run: |
           TAR="$(ls -1 dist/release/*.tar.gz | head -n 1)"
-          tar -tzf "$TAR" | grep -qE '^deckos-[0-9]+\.[0-9]+\.[0-9]+/packages/server/dist/index\.js$'
-          tar -tzf "$TAR" | grep -qE '^deckos-[0-9]+\.[0-9]+\.[0-9]+/packages/server/node_modules/hono(/|$)'
+          tar -tzf "$TAR" > dist/release/tar-contents.txt
+          grep -qE '^deckos-[0-9]+\.[0-9]+\.[0-9]+/packages/server/dist/index\.js$' dist/release/tar-contents.txt
+          grep -qE '^deckos-[0-9]+\.[0-9]+\.[0-9]+/packages/server/node_modules/hono(/|$)' dist/release/tar-contents.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
