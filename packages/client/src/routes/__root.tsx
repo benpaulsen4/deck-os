@@ -6,6 +6,7 @@ import { useConnectionStore } from "../stores/connection";
 import { useLayoutEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { RouteErrorComponent } from "../components/ui/RouteErrorComponent";
+import { useApiHealth } from "../hooks/useApiHealth";
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -32,11 +33,12 @@ function TopBar() {
       refetchInterval: 10 * 60 * 1000,
     })
   );
-  const { getAnyConnected, getAllConnected } = useConnectionStore();
+  const { getConnectionStatus, getAnyConnected } = useConnectionStore();
   const scanlineApplied = useRef(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const hostname = systemInfo?.hostname || "DECKOS";
+  useApiHealth();
 
   useLayoutEffect(() => {
     if (!scanlineApplied.current) {
@@ -45,7 +47,7 @@ function TopBar() {
   }, []);
 
   const isAnyConnected = getAnyConnected();
-  const isAllConnected = getAllConnected();
+  const apiStatus = getConnectionStatus("api");
   const currentPath = window.location.pathname;
 
   const connectionStyle: React.CSSProperties = {
@@ -101,18 +103,25 @@ function TopBar() {
                 UPDATE
               </Link>
             )}
-            {isAnyConnected && (
-              <div style={connectionStyle}>
-                <div
-                  style={{
-                    ...dotStyle,
-                    background: isAllConnected
-                      ? "var(--status-running)"
-                      : "var(--status-warning)",
-                  }}
-                />
-              </div>
-            )}
+            <div style={connectionStyle}>
+              <div
+                title={
+                  apiStatus.connected
+                    ? "Connected"
+                    : apiStatus.attemptCount > 0
+                      ? "Disconnected"
+                      : "Connecting"
+                }
+                style={{
+                  ...dotStyle,
+                  background: apiStatus.connected
+                    ? "var(--status-running)"
+                    : apiStatus.attemptCount > 0 || isAnyConnected
+                      ? "var(--status-stopped)"
+                      : "var(--status-neutral)",
+                }}
+              />
+            </div>
             <button
               className="topbar-hamburger"
               onClick={() => setMobileMenuOpen(true)}

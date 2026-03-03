@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type ConnectionType = "metrics" | "events" | "logs" | "trpc";
+export type ConnectionType = "api" | "metrics" | "events" | "logs";
 
 export interface ConnectionState {
   connected: boolean;
@@ -12,7 +12,6 @@ interface ConnectionsState {
   connections: Record<ConnectionType, ConnectionState>;
   setConnected: (type: ConnectionType, connected: boolean) => void;
   getConnectionStatus: (type: ConnectionType) => ConnectionState;
-  getAllConnected: () => boolean;
   getAnyConnected: () => boolean;
 }
 
@@ -24,10 +23,10 @@ const initialState: ConnectionState = {
 
 export const useConnectionStore = create<ConnectionsState>((set, get) => ({
   connections: {
+    api: { ...initialState },
     metrics: { ...initialState },
     events: { ...initialState },
     logs: { ...initialState },
-    trpc: { ...initialState },
   },
 
   setConnected: (type, connected) => {
@@ -46,11 +45,6 @@ export const useConnectionStore = create<ConnectionsState>((set, get) => ({
   },
 
   getConnectionStatus: (type) => get().connections[type],
-
-  getAllConnected: () => {
-    const connections = get().connections;
-    return Object.values(connections).every((c) => c.connected);
-  },
 
   getAnyConnected: () => {
     const connections = get().connections;

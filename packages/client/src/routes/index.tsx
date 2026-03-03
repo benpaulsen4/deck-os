@@ -381,7 +381,7 @@ function DashboardPage() {
                   <div className="app-launcher-empty">
                     NO APPS INSTALLED
                     <br />
-                    <Link to="/apps/new">CREATE YOUR FIRST APP</Link>
+                    <Link to="/apps/templates">BROWSE TEMPLATES</Link>
                   </div>
                 </div>
               )}
