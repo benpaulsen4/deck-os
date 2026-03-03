@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useTRPC } from "../trpc";
 import { trpcClient } from "../trpc";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToastStore } from "../stores/toast";
 import { Button } from "../components/ui/Button";
 
@@ -11,16 +11,22 @@ export const Route = createFileRoute("/settings")({
 
 function SettingsPage() {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const { addToast } = useToastStore();
   const { data: systemInfo, isLoading } = useQuery(trpc.system.getInfo.queryOptions());
   const { data: dataDirInfo, isLoading: dataDirLoading } = useQuery(
     trpc.system.getDataDir.queryOptions()
   );
-  const { data: updateStatus, isLoading: updateLoading } = useQuery(
+  const updateStatusQuery = useQuery(
     trpc.system.getUpdateStatus.queryOptions(undefined, {
       refetchInterval: 10 * 60 * 1000,
     })
   );
+  const {
+    data: updateStatus,
+    isLoading: updateLoading,
+    isFetching: updateFetching,
+  } = updateStatusQuery;
 
   const applyUpdateMutation = useMutation({
     mutationFn: async () => await trpcClient.system.applyUpdate.mutate({}),
@@ -34,6 +40,24 @@ function SettingsPage() {
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : "Unknown error";
       addToast(`Update failed: ${message}`, "error");
+    },
+  });
+
+  const checkForUpdatesMutation = useMutation({
+    mutationFn: async () => await trpcClient.system.checkForUpdates.mutate({}),
+    onSuccess: (res) => {
+      queryClient.setQueryData(trpc.system.getUpdateStatus.queryOptions().queryKey, res);
+      if (res.error) {
+        addToast(`Update check failed: ${res.error}`, "error");
+      } else if (res.updateAvailable && res.latestVersion) {
+        addToast(`Update available: v${res.latestVersion}`, "success");
+      } else {
+        addToast("No updates available", "info");
+      }
+    },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      addToast(`Update check failed: ${message}`, "error");
     },
   });
 
@@ -113,8 +137,25 @@ function SettingsPage() {
             </div>
 
             <div className="panel" style={{ padding: "var(--space-3)" }}>
-              <div className="label" style={{ marginBottom: "var(--space-2)" }}>
-                UPDATES
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "var(--space-2)",
+                  marginBottom: "var(--space-2)",
+                }}
+              >
+                <div className="label">UPDATES</div>
+                <Button
+                  variant="secondary"
+                  onClick={() => checkForUpdatesMutation.mutate()}
+                  disabled={checkForUpdatesMutation.isPending || updateFetching}
+                >
+                  {checkForUpdatesMutation.isPending || updateFetching
+                    ? "CHECKING..."
+                    : "CHECK NOW"}
+                </Button>
               </div>
               {updateLoading ? (
                 <div className="loading-scan" style={{ padding: "var(--space-2)" }}>

@@ -90,6 +90,11 @@ let cached: UpdateStatus | null = null;
 let cachedAt = 0;
 let inflight: Promise<UpdateStatus> | null = null;
 
+export function clearUpdateStatusCache() {
+  cached = null;
+  cachedAt = 0;
+}
+
 export async function getUpdateStatus(): Promise<UpdateStatus> {
   const currentVersion = getCurrentVersion();
   const { owner, repo } = getGithubConfig();
@@ -166,5 +171,10 @@ export async function getUpdateStatus(): Promise<UpdateStatus> {
   })();
 
   return inflight;
+}
+
+export async function checkForUpdatesNow(): Promise<UpdateStatus> {
+  clearUpdateStatusCache();
+  return await getUpdateStatus();
 }
 

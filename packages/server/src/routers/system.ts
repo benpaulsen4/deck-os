@@ -5,7 +5,7 @@ import * as metricsService from "../services/metrics.js";
 import { getDockerAsync } from "../services/docker.js";
 import { DATA_DIR } from "../lib/config.js";
 import { getCurrentVersion } from "../lib/version.js";
-import { getUpdateStatus } from "../services/updates.js";
+import { checkForUpdatesNow, getUpdateStatus } from "../services/updates.js";
 import { applyUpdate } from "../services/selfUpdate.js";
 
 export const systemRouter = router({
@@ -54,6 +54,10 @@ export const systemRouter = router({
 
   getUpdateStatus: publicProcedure.query(async () => {
     return await getUpdateStatus();
+  }),
+
+  checkForUpdates: publicProcedure.input(z.object({})).mutation(async () => {
+    return await checkForUpdatesNow();
   }),
 
   applyUpdate: publicProcedure
