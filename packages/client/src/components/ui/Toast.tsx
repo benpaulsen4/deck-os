@@ -1,5 +1,5 @@
 import { Check, X, AlertCircle } from "lucide-react";
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 export type ToastType = "success" | "error" | "info";
 
@@ -11,10 +11,42 @@ interface ToastProps {
 }
 
 export function Toast({ message, type = "info", duration = 3000, onClose }: ToastProps) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startTimeRef = useRef<number>(0);
+  const remainingRef = useRef<number>(duration);
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const startTimer = useCallback(() => {
+    clearTimer();
+    startTimeRef.current = Date.now();
+    timerRef.current = setTimeout(onClose, remainingRef.current);
+  }, [clearTimer, onClose]);
+
   useEffect(() => {
-    const timer = setTimeout(onClose, duration);
-    return () => clearTimeout(timer);
-  }, [duration, onClose]);
+    remainingRef.current = duration;
+    startTimer();
+    return clearTimer;
+  }, [clearTimer, duration, startTimer]);
+
+  const handleMouseEnter = useCallback(() => {
+    const elapsed = Date.now() - startTimeRef.current;
+    remainingRef.current = Math.max(0, remainingRef.current - elapsed);
+    clearTimer();
+  }, [clearTimer]);
+
+  const handleMouseLeave = useCallback(() => {
+    if (remainingRef.current <= 0) {
+      onClose();
+      return;
+    }
+    startTimer();
+  }, [onClose, startTimer]);
 
   const icons = {
     success: <Check size={16} style={{ color: "var(--status-running)" }} />,
@@ -44,7 +76,11 @@ export function Toast({ message, type = "info", duration = 3000, onClose }: Toas
   };
 
   return (
-    <div style={{ ...toastStyle, borderLeftColor: borderColor[type] }}>
+    <div
+      style={{ ...toastStyle, borderLeftColor: borderColor[type] }}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
       {icons[type]}
       <span style={messageStyle}>{message}</span>
     </div>

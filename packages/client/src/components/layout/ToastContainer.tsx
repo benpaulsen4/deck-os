@@ -4,6 +4,12 @@ import { Toast } from "../ui/Toast";
 export function ToastContainer() {
   const { toasts, removeToast } = useToastStore();
 
+  const durations = {
+    success: 3500,
+    info: 5000,
+    error: 12000,
+  } as const;
+
   const containerStyle: React.CSSProperties = {
     position: "fixed",
     bottom: "24px",
@@ -22,6 +28,7 @@ export function ToastContainer() {
             key={toast.id}
             message={toast.message}
             type={toast.type}
+            duration={durations[toast.type]}
             onClose={() => removeToast(toast.id)}
           />
         )
