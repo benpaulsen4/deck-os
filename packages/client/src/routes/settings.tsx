@@ -17,6 +17,11 @@ function SettingsPage() {
   const { data: dataDirInfo, isLoading: dataDirLoading } = useQuery(
     trpc.system.getDataDir.queryOptions()
   );
+  const { data: diskMetrics, isLoading: diskMetricsLoading } = useQuery(
+    trpc.system.getMetrics.queryOptions(undefined, {
+      refetchInterval: 10_000,
+    })
+  );
   const updateStatusQuery = useQuery(
     trpc.system.getUpdateStatus.queryOptions(undefined, {
       refetchInterval: 10 * 60 * 1000,
@@ -68,6 +73,15 @@ function SettingsPage() {
     return `${days}d ${hours}h ${minutes}m`;
   };
 
+  const formatBytes = (bytes: number): string => {
+    if (!Number.isFinite(bytes)) return "0 B";
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB", "TB"];
+    const unit = Math.min(sizes.length - 1, Math.floor(Math.log(bytes) / Math.log(k)));
+    return `${(bytes / Math.pow(k, unit)).toFixed(1)} ${sizes[unit]}`;
+  };
+
   return (
     <div className="page-container page-container--viewport">
       <div className="page-header">
@@ -111,6 +125,88 @@ function SettingsPage() {
                   <span className="system-info-value">
                     {systemInfo.dockerVersion || "NOT INSTALLED"}
                   </span>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="panel" style={{ padding: "var(--space-3)" }}>
+              <div className="label" style={{ marginBottom: "var(--space-2)" }}>
+                DISK INFORMATION
+              </div>
+              {diskMetricsLoading ? (
+                <div className="loading-scan" style={{ padding: "var(--space-2)" }}>
+                  <span className="label">LOADING...</span>
+                </div>
+              ) : diskMetrics ? (
+                <div className="settings-kv">
+                  {diskMetrics.disk.fs.length > 0 ? (
+                    diskMetrics.disk.fs.map((disk) => (
+                      <div
+                        key={`${disk.fs}:${disk.mount}`}
+                        style={{
+                          gridColumn: "1 / -1",
+                          borderTop: "1px solid var(--border-subtle)",
+                          paddingTop: "var(--space-2)",
+                          marginTop: "var(--space-2)",
+                          fontSize: "var(--text-sm)",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: "var(--space-2)",
+                          }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div
+                              className="system-info-label"
+                              style={{ marginBottom: "var(--space-1)" }}
+                            >
+                              {disk.mount}
+                            </div>
+                            <div
+                              style={{
+                                color: "var(--text-muted)",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {disk.fs}
+                            </div>
+                          </div>
+                          <div
+                            style={{
+                              textAlign: "right",
+                              whiteSpace: "nowrap",
+                              color: "var(--text-secondary)",
+                            }}
+                          >
+                            {formatBytes(disk.used)} / {formatBytes(disk.size)} (
+                            {Math.round(disk.usePercent)}%)
+                          </div>
+                        </div>
+                        <div
+                          className="metric-card-bar-container"
+                          style={{
+                            marginTop: "var(--space-1)",
+                          }}
+                        >
+                          <div
+                            className="metric-card-bar-fill"
+                            style={{
+                              width: `${Math.min(100, Math.max(0, disk.usePercent))}%`,
+                              background: "var(--meter-disk)",
+                              transition: "width var(--transition-meter) linear",
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <span className="system-info-value">NO DISKS DETECTED</span>
+                  )}
                 </div>
               ) : null}
             </div>

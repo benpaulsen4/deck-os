@@ -128,6 +128,26 @@ function DashboardPage() {
     return `${Math.round(value)}%`;
   };
 
+  const getDiskEntries = (m: SystemMetrics): SystemMetrics["disk"]["fs"] => {
+    return m.disk.fs.filter((disk) => {
+      const name = disk.fs.toLowerCase();
+      return !name.includes("tmpfs") && !name.includes("swap");
+    });
+  };
+
+  const getDiskTotals = (
+    m: SystemMetrics
+  ): { used: number; total: number; usage: number } => {
+    const entries = getDiskEntries(m);
+    const total = entries.reduce((sum, disk) => sum + (disk.size || 0), 0);
+    const used = entries.reduce((sum, disk) => sum + (disk.used || 0), 0);
+    return {
+      used,
+      total,
+      usage: total > 0 ? (used / total) * 100 : 0,
+    };
+  };
+
   const getCpuUsageBarWidth = (m: SystemMetrics): number => {
     return m.cpu.usage || 0;
   };
@@ -137,8 +157,7 @@ function DashboardPage() {
   };
 
   const getDiskUsageBarWidth = (m: SystemMetrics): number => {
-    if (m.disk.fs.length === 0) return 0;
-    return m.disk.fs[0].usePercent || 0;
+    return getDiskTotals(m).usage;
   };
 
   const getNetworkRxSpeed = (m: SystemMetrics): number => {
@@ -201,8 +220,9 @@ function DashboardPage() {
                       label="DISK"
                       color="var(--meter-disk)"
                       value={(() => {
-                        const used = metrics.metrics.disk.fs[0]?.used || 0;
-                        const total = metrics.metrics.disk.fs[0]?.size || 0;
+                        const totals = getDiskTotals(metrics.metrics);
+                        const used = totals.used;
+                        const total = totals.total;
                         const p = formatBytesPair(used, total);
                         return (
                           <>
@@ -214,7 +234,7 @@ function DashboardPage() {
                         );
                       })()}
                       usage={getDiskUsageBarWidth(metrics.metrics)}
-                      historyValues={(m) => m.disk.fs[0]?.usePercent || 0}
+                      historyValues={(m) => getDiskTotals(m).usage}
                       formatSparkValue={formatPercent}
                       sparkMin={0}
                       sparkMax={100}

@@ -146,8 +146,13 @@ async function collectProcessMetrics(): Promise<ProcessMetrics> {
 
 async function collectDiskMetrics(): Promise<DiskMetrics> {
   const fsSize = await si.fsSize();
+  const realFileSystems = fsSize.filter((fs) => {
+    const fsType = (fs.type || "").toLowerCase();
+    if (fsType === "tmpfs" || fsType === "swap") return false;
+    return true;
+  });
   return {
-    fs: fsSize.map((fs) => ({
+    fs: realFileSystems.map((fs) => ({
       fs: fs.fs,
       mount: fs.mount,
       size: fs.size,
