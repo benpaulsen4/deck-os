@@ -1,12 +1,14 @@
 import { createRootRoute, Link, Outlet } from "@tanstack/react-router";
-import { useTRPC } from "../trpc";
-import { useQuery } from "@tanstack/react-query";
+import { trpcClient, useTRPC } from "../trpc";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { ToastContainer } from "../components/layout/ToastContainer";
 import { useConnectionStore } from "../stores/connection";
-import { useLayoutEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Power, X } from "lucide-react";
 import { RouteErrorComponent } from "../components/ui/RouteErrorComponent";
 import { useApiHealth } from "../hooks/useApiHealth";
+import { useToastStore } from "../stores/toast";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -27,6 +29,7 @@ function RootLayout() {
 
 function TopBar() {
   const trpc = useTRPC();
+  const { addToast } = useToastStore();
   const { data: systemInfo } = useQuery(trpc.system.getInfo.queryOptions());
   const { data: updateStatus } = useQuery(
     trpc.system.getUpdateStatus.queryOptions(undefined, {
@@ -35,7 +38,29 @@ function TopBar() {
   );
   const { getConnectionStatus, getAnyConnected } = useConnectionStore();
   const scanlineApplied = useRef(false);
+  const powerMenuRef = useRef<HTMLDivElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [powerMenuOpen, setPowerMenuOpen] = useState(false);
+  const [pendingPowerAction, setPendingPowerAction] = useState<"shutdown" | "restart" | null>(
+    null
+  );
+
+  const powerActionMutation = useMutation({
+    mutationFn: async (action: "shutdown" | "restart") =>
+      await trpcClient.system.powerAction.mutate({ action }),
+    onSuccess: (result) => {
+      addToast(
+        result.action === "restart"
+          ? "System restart requested"
+          : "System shutdown requested",
+        "info"
+      );
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      addToast(`Power action failed: ${message}`, "error");
+    },
+  });
 
   const hostname = systemInfo?.hostname || "DECKOS";
   useApiHealth();
@@ -44,6 +69,32 @@ function TopBar() {
     if (!scanlineApplied.current) {
       scanlineApplied.current = true;
     }
+  }, []);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      if (!powerMenuRef.current) return;
+      const target = event.target as Node | null;
+      if (target && !powerMenuRef.current.contains(target)) {
+        setPowerMenuOpen(false);
+      }
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPowerMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }, []);
 
   const isAnyConnected = getAnyConnected();
@@ -64,6 +115,14 @@ function TopBar() {
     height: "6px",
     borderRadius: "50%",
   };
+
+  const confirmTitle =
+    pendingPowerAction === "restart" ? "Confirm Restart" : "Confirm Shutdown";
+  const confirmMessage =
+    pendingPowerAction === "restart"
+      ? "Restart the host system now?"
+      : "Shut down the host system now?";
+  const confirmText = pendingPowerAction === "restart" ? "RESTART" : "SHUTDOWN";
 
   return (
     <>
@@ -130,6 +189,41 @@ function TopBar() {
               ☰
             </button>
             <div className="topbar-host">{hostname}</div>
+            <div className="topbar-power-menu" ref={powerMenuRef}>
+              <button
+                className="topbar-power-trigger"
+                onClick={() => setPowerMenuOpen((open) => !open)}
+                aria-haspopup="menu"
+                aria-expanded={powerMenuOpen}
+                aria-label="Power menu"
+              >
+                <Power size={14} />
+              </button>
+              {powerMenuOpen && (
+                <div className="topbar-power-dropdown" role="menu" aria-label="Power actions">
+                  <button
+                    className="topbar-power-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setPowerMenuOpen(false);
+                      setPendingPowerAction("restart");
+                    }}
+                  >
+                    RESTART
+                  </button>
+                  <button
+                    className="topbar-power-item topbar-power-item--danger"
+                    role="menuitem"
+                    onClick={() => {
+                      setPowerMenuOpen(false);
+                      setPendingPowerAction("shutdown");
+                    }}
+                  >
+                    SHUTDOWN
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -198,6 +292,20 @@ function TopBar() {
           </Link>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={pendingPowerAction !== null}
+        title={confirmTitle}
+        message={confirmMessage}
+        confirmText={confirmText}
+        onCancel={() => setPendingPowerAction(null)}
+        onConfirm={() => {
+          if (!pendingPowerAction) return;
+          powerActionMutation.mutate(pendingPowerAction);
+          setPendingPowerAction(null);
+        }}
+        variant="danger"
+      />
     </>
   );
 }
