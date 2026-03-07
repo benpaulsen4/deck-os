@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { trpcClient } from "../../trpc";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { trpcClient, useTRPC } from "../../trpc";
 import { Button } from "../ui/Button";
 import { CodeEditor } from "../ui/CodeEditor";
 import { useToastStore } from "../../stores/toast";
@@ -12,6 +12,8 @@ interface ComposeEditorProps {
 
 export function ComposeEditor({ app }: ComposeEditorProps) {
   const { addToast } = useToastStore();
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const [isOpen, setIsOpen] = useState(false);
   const [editedComposeYaml, setEditedComposeYaml] = useState("");
   const [composeModified, setComposeModified] = useState(false);
@@ -27,10 +29,16 @@ export function ComposeEditor({ app }: ComposeEditorProps) {
         id: app.id,
         composeYaml: editedComposeYaml,
       }),
-    onSuccess: () => {
+    onSuccess: async () => {
       addToast("Compose file updated", "success");
       setComposeModified(false);
       setIsOpen(false);
+      await queryClient.invalidateQueries({
+        queryKey: trpc.apps.list.queryOptions().queryKey,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: trpc.apps.get.queryOptions({ id: app.id }).queryKey,
+      });
     },
     onError: (err) => {
       const message = err instanceof Error ? err.message : String(err);

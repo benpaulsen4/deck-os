@@ -675,6 +675,25 @@
   flex: 1;
 }
 
+.compose-section .compose-editor-body .code-editor {
+  height: min(56vh, 680px);
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.compose-section .compose-editor-body .code-editor .cm-editor {
+  height: 100%;
+}
+
+.compose-section .compose-editor-body .code-editor .cm-scroller {
+  overflow: auto;
+}
+
+.compose-section .compose-editor-panel .modal-actions,
+.compose-section .compose-editor-panel .app-detail-modifier-note {
+  flex-shrink: 0;
+}
+
 .apps-table-scroll {
   overflow: auto;
   max-height: 100%;
