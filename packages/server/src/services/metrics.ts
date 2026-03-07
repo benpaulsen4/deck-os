@@ -1,6 +1,6 @@
 import si from "systeminformation";
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type {
   SystemMetrics,
   CPUMetrics,
@@ -17,8 +17,11 @@ let pollInterval: NodeJS.Timeout | null = null;
 const metricsHistory: SystemMetrics[] = [];
 
 let raplEnergyPath: string | null | undefined = undefined;
+let raplMaxEnergyRangeUj: number | null = null;
+let lastRaplDiscoveryAtMs = 0;
 let lastCpuEnergyUj: number | null = null;
 let lastCpuEnergyAtMs: number | null = null;
+const RAPL_REDISCOVERY_INTERVAL_MS = 60_000;
 
 async function readNumberFromFile(path: string): Promise<number | null> {
   try {
@@ -64,14 +67,34 @@ async function findRaplEnergyPath(): Promise<string | null> {
   }
 }
 
+async function discoverRaplEnergyPath(nowMs: number): Promise<void> {
+  lastRaplDiscoveryAtMs = nowMs;
+  raplEnergyPath = await findRaplEnergyPath();
+  raplMaxEnergyRangeUj = null;
+  if (!raplEnergyPath) return;
+  const maxRangePath = join(dirname(raplEnergyPath), "max_energy_range_uj");
+  raplMaxEnergyRangeUj = await readNumberFromFile(maxRangePath);
+}
+
 async function readCpuPowerWatts(nowMs: number): Promise<number | null> {
-  if (raplEnergyPath === undefined) {
-    raplEnergyPath = await findRaplEnergyPath();
+  if (process.platform !== "linux") return null;
+
+  if (
+    raplEnergyPath === undefined ||
+    (raplEnergyPath === null && nowMs - lastRaplDiscoveryAtMs >= RAPL_REDISCOVERY_INTERVAL_MS)
+  ) {
+    await discoverRaplEnergyPath(nowMs);
   }
   if (!raplEnergyPath) return null;
 
   const energyUj = await readNumberFromFile(raplEnergyPath);
-  if (energyUj === null) return null;
+  if (energyUj === null) {
+    raplEnergyPath = null;
+    raplMaxEnergyRangeUj = null;
+    lastCpuEnergyUj = null;
+    lastCpuEnergyAtMs = null;
+    return null;
+  }
 
   if (lastCpuEnergyUj === null || lastCpuEnergyAtMs === null) {
     lastCpuEnergyUj = energyUj;
@@ -79,15 +102,27 @@ async function readCpuPowerWatts(nowMs: number): Promise<number | null> {
     return null;
   }
 
-  const deltaUj = energyUj - lastCpuEnergyUj;
-  const deltaS = (nowMs - lastCpuEnergyAtMs) / 1000;
+  const previousEnergyUj = lastCpuEnergyUj;
+  const previousEnergyAtMs = lastCpuEnergyAtMs;
+  let deltaUj = energyUj - previousEnergyUj;
+  const deltaS = (nowMs - previousEnergyAtMs) / 1000;
+
+  if (deltaUj < 0) {
+    if (raplMaxEnergyRangeUj && raplMaxEnergyRangeUj > 0) {
+      deltaUj = raplMaxEnergyRangeUj - previousEnergyUj + energyUj;
+    } else {
+      lastCpuEnergyUj = energyUj;
+      lastCpuEnergyAtMs = nowMs;
+      return null;
+    }
+  }
 
   lastCpuEnergyUj = energyUj;
   lastCpuEnergyAtMs = nowMs;
 
-  if (deltaUj <= 0 || deltaS <= 0) return null;
+  if (deltaUj < 0 || deltaS <= 0) return null;
   const watts = deltaUj / 1_000_000 / deltaS;
-  return Number.isFinite(watts) ? watts : null;
+  return Number.isFinite(watts) && watts >= 0 ? watts : null;
 }
 
 async function collectCPUMetrics(): Promise<CPUMetrics> {
