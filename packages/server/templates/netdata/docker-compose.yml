@@ -1,16 +1,13 @@
 services:
-  app:
+  netdata:
     cap_add:
       - SYS_PTRACE
       - SYS_ADMIN
-    cpu_shares: 90
     deploy:
       resources:
         limits:
           memory: 1794M
     image: netdata/netdata:latest
-    labels:
-      icon: https://icon.casaos.io/main/all/netdata.png
     pid: host
     ports:
       - target: 19999
@@ -21,31 +18,31 @@ services:
       - apparmor:unconfined
     volumes:
       - type: bind
-        source: "{{VOLUME_APP__ETC_NETDATA}}"
+        source: "{{VOLUME_NETDATA__ETC_NETDATA}}"
         target: /etc/netdata
       - type: bind
-        source: "{{VOLUME_APP__VAR_LIB_NETDATA}}"
+        source: "{{VOLUME_NETDATA__VAR_LIB_NETDATA}}"
         target: /var/lib/netdata
       - type: bind
-        source: "{{VOLUME_APP__VAR_CACHE_NETDATA}}"
+        source: "{{VOLUME_NETDATA__VAR_CACHE_NETDATA}}"
         target: /var/cache/netdata
       - type: bind
-        source: "{{VOLUME_APP__HOST_ETC_PASSWD}}"
+        source: /etc/passwd
         target: /host/etc/passwd
       - type: bind
-        source: "{{VOLUME_APP__HOST_ETC_GROUP}}"
+        source: /etc/group
         target: /host/etc/group
       - type: bind
-        source: "{{VOLUME_APP__HOST_PROC}}"
+        source: /proc
         target: /host/proc
       - type: bind
-        source: "{{VOLUME_APP__HOST_SYS}}"
+        source: /sys
         target: /host/sys
       - type: bind
-        source: "{{VOLUME_APP__HOST_ETC_OS_RELEASE}}"
+        source: /etc/os-release
         target: /host/etc/os-release
       - type: bind
-        source: "{{VOLUME_APP__VAR_RUN_DOCKER_SOCK}}"
+        source: /var/run/docker.sock
         target: /var/run/docker.sock
     network_mode: bridge
     privileged: false

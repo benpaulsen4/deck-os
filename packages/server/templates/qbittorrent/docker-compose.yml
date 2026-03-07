@@ -5,7 +5,7 @@ services:
       PUID: "{{PUID}}"
       TZ: "{{TZ}}"
       UMASK: "002"
-    image: ghcr.io/hotio/qbittorrent:release-5.0.4
+    image: ghcr.io/hotio/qbittorrent:latest
     deploy:
       resources:
         reservations:
@@ -21,5 +21,5 @@ services:
         source: "{{VOLUME_QBITTORRENT__CONFIG}}"
         target: /config
       - type: bind
-        source: "{{VOLUME_QBITTORRENT__DATA}}"
-        target: /DATA
+        source: "{{VOLUME_QBITTORRENT__DOWNLOADS}}"
+        target: /downloads

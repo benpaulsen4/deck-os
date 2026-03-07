@@ -31,7 +31,7 @@
       "key": "WEB_PORT",
       "label": "WEB PORT",
       "type": "port",
-      "defaultValue": "8181",
+      "defaultValue": "8080",
       "required": true
     },
     {
@@ -42,10 +42,10 @@
       "required": true
     },
     {
-      "key": "VOLUME_QBITTORRENT__DATA",
-      "label": "QBITTORRENT /DATA",
+      "key": "VOLUME_QBITTORRENT__DOWNLOADS",
+      "label": "QBITTORRENT /DOWNLOADS",
       "type": "path",
-      "defaultValue": "./data",
+      "defaultValue": "./downloads",
       "required": true
     }
   ]
