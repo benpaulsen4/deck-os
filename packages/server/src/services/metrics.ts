@@ -16,7 +16,8 @@ const metricsSubscribers: Set<(metrics: SystemMetrics) => void> = new Set();
 let pollInterval: NodeJS.Timeout | null = null;
 const metricsHistory: SystemMetrics[] = [];
 
-let raplEnergyPath: string | null | undefined = undefined;
+let cpuPowerPath: string | null | undefined = undefined;
+let cpuPowerMode: "rapl_energy" | "hwmon_power" | null | undefined = undefined;
 let raplMaxEnergyRangeUj: number | null = null;
 let lastRaplDiscoveryAtMs = 0;
 let lastCpuEnergyUj: number | null = null;
@@ -67,29 +68,97 @@ async function findRaplEnergyPath(): Promise<string | null> {
   }
 }
 
+async function findHwmonPowerPath(): Promise<string | null> {
+  const bases = ["/sys/class/hwmon", "/sys/devices/platform/zenpower.0/hwmon"];
+  const matches: Array<{ path: string; score: number }> = [];
+
+  for (const base of bases) {
+    try {
+      const entries = await readdir(base);
+      for (const entry of entries) {
+        if (!entry.startsWith("hwmon")) continue;
+        const hwmonDir = join(base, entry);
+        const sensorName = ((await readFile(join(hwmonDir, "name"), "utf8").catch(() => "")) || "")
+          .trim()
+          .toLowerCase();
+        const baseScore = sensorName.includes("zenpower")
+          ? 3
+          : sensorName.includes("k10temp")
+            ? 2
+            : sensorName.includes("coretemp") || sensorName.includes("cpu")
+              ? 1
+              : 0;
+
+        const averagePath = join(hwmonDir, "power1_average");
+        if ((await readNumberFromFile(averagePath)) !== null) {
+          matches.push({ path: averagePath, score: baseScore + 2 });
+        }
+
+        const inputPath = join(hwmonDir, "power1_input");
+        if ((await readNumberFromFile(inputPath)) !== null) {
+          matches.push({ path: inputPath, score: baseScore + 1 });
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  if (matches.length === 0) return null;
+  matches.sort((a, b) => b.score - a.score);
+  return matches[0].path;
+}
+
 async function discoverRaplEnergyPath(nowMs: number): Promise<void> {
   lastRaplDiscoveryAtMs = nowMs;
-  raplEnergyPath = await findRaplEnergyPath();
+  cpuPowerPath = null;
+  cpuPowerMode = null;
   raplMaxEnergyRangeUj = null;
-  if (!raplEnergyPath) return;
-  const maxRangePath = join(dirname(raplEnergyPath), "max_energy_range_uj");
-  raplMaxEnergyRangeUj = await readNumberFromFile(maxRangePath);
+  lastCpuEnergyUj = null;
+  lastCpuEnergyAtMs = null;
+
+  const raplPath = await findRaplEnergyPath();
+  if (raplPath) {
+    cpuPowerPath = raplPath;
+    cpuPowerMode = "rapl_energy";
+    const maxRangePath = join(dirname(raplPath), "max_energy_range_uj");
+    raplMaxEnergyRangeUj = await readNumberFromFile(maxRangePath);
+    return;
+  }
+
+  const hwmonPath = await findHwmonPowerPath();
+  if (hwmonPath) {
+    cpuPowerPath = hwmonPath;
+    cpuPowerMode = "hwmon_power";
+  }
 }
 
 async function readCpuPowerWatts(nowMs: number): Promise<number | null> {
   if (process.platform !== "linux") return null;
 
   if (
-    raplEnergyPath === undefined ||
-    (raplEnergyPath === null && nowMs - lastRaplDiscoveryAtMs >= RAPL_REDISCOVERY_INTERVAL_MS)
+    cpuPowerPath === undefined ||
+    (cpuPowerPath === null && nowMs - lastRaplDiscoveryAtMs >= RAPL_REDISCOVERY_INTERVAL_MS)
   ) {
     await discoverRaplEnergyPath(nowMs);
   }
-  if (!raplEnergyPath) return null;
+  if (!cpuPowerPath || !cpuPowerMode) return null;
 
-  const energyUj = await readNumberFromFile(raplEnergyPath);
+  if (cpuPowerMode === "hwmon_power") {
+    const rawPower = await readNumberFromFile(cpuPowerPath);
+    if (rawPower === null || rawPower < 0) {
+      cpuPowerPath = null;
+      cpuPowerMode = null;
+      return null;
+    }
+    const watts = rawPower / 1_000_000;
+    return Number.isFinite(watts) && watts >= 0 ? watts : null;
+  }
+
+  const energyUj = await readNumberFromFile(cpuPowerPath);
   if (energyUj === null) {
-    raplEnergyPath = null;
+    cpuPowerPath = null;
+    cpuPowerMode = null;
     raplMaxEnergyRangeUj = null;
     lastCpuEnergyUj = null;
     lastCpuEnergyAtMs = null;
