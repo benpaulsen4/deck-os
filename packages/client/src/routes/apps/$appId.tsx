@@ -1,6 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Play, Square, RotateCcw, Download, Trash2, ExternalLink } from "lucide-react";
 import { trpcClient, useTRPC } from "../../trpc";
 import { Button } from "../../components/ui/Button";
@@ -32,10 +32,17 @@ function AppDetailPage() {
   const [isPulling, setIsPulling] = useState(false);
 
   const { appId } = Route.useParams();
+  const navigate = useNavigate();
   const { addToast } = useToastStore();
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
 
-  const { data: app, isLoading: appLoading } = useQuery(
+  const {
+    data: app,
+    isLoading: appLoading,
+    isError: isAppError,
+    error: appError,
+  } = useQuery(
     trpc.apps.get.queryOptions({ id: appId })
   );
 
@@ -50,29 +57,48 @@ function AppDetailPage() {
     return String(err);
   };
 
+  const invalidateStatusQueries = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["stackStatus", appId] }),
+      queryClient.invalidateQueries({ queryKey: ["stackStatusBatch"] }),
+      queryClient.invalidateQueries({
+        queryKey: trpc.apps.list.queryOptions().queryKey,
+      }),
+    ]);
+  };
+
   const startMutation = useMutation({
     mutationFn: async () => await trpcClient.docker.start.mutate({ appId }),
-    onSuccess: () => addToast("App started", "success"),
+    onSuccess: async () => {
+      addToast("App started", "success");
+      await invalidateStatusQueries();
+    },
     onError: (err) => addToast(`Failed to start: ${getErrorMessage(err)}`, "error"),
   });
 
   const stopMutation = useMutation({
     mutationFn: async () => await trpcClient.docker.stop.mutate({ appId }),
-    onSuccess: () => addToast("App stopped", "success"),
+    onSuccess: async () => {
+      addToast("App stopped", "success");
+      await invalidateStatusQueries();
+    },
     onError: (err) => addToast(`Failed to stop: ${getErrorMessage(err)}`, "error"),
   });
 
   const restartMutation = useMutation({
     mutationFn: async () => await trpcClient.docker.restart.mutate({ appId }),
-    onSuccess: () => addToast("App restarted", "success"),
+    onSuccess: async () => {
+      addToast("App restarted", "success");
+      await invalidateStatusQueries();
+    },
     onError: (err) => addToast(`Failed to restart: ${getErrorMessage(err)}`, "error"),
   });
 
   const deleteMutation = useMutation({
     mutationFn: async () => await trpcClient.apps.delete.mutate({ id: appId }),
-    onSuccess: () => {
+    onSuccess: async () => {
       addToast("App deleted", "success");
-      window.location.href = "/apps";
+      await navigate({ to: "/apps" });
     },
     onError: (err) => addToast(`Failed to delete: ${getErrorMessage(err)}`, "error"),
   });
@@ -109,6 +135,15 @@ function AppDetailPage() {
   }
 
   if (!app) {
+    if (isAppError) {
+      return (
+        <div className="page-container page-container--viewport">
+          <div className="panel" style={{ padding: "var(--space-6)" }}>
+            <span className="text-muted">{getErrorMessage(appError)}</span>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="page-container page-container--viewport">
         <div className="panel" style={{ padding: "var(--space-6)" }}>

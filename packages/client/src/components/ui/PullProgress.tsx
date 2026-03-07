@@ -49,6 +49,7 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
   const [isPulling, setIsPulling] = useState(false);
   const [progress, setProgress] = useState<PullOverallProgress | null>(null);
   const onCompleteRef = useRef(onComplete);
+  const completeTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     onCompleteRef.current = onComplete;
@@ -56,6 +57,10 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
 
   useEffect(() => {
     if (!isOpen || !appId) return;
+    if (completeTimeoutRef.current !== null) {
+      window.clearTimeout(completeTimeoutRef.current);
+      completeTimeoutRef.current = null;
+    }
 
     setIsPulling(true);
     setError(null);
@@ -74,7 +79,10 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
         window.clearInterval(interval);
       }
       setIsPulling(false);
-      setTimeout(() => onCompleteRef.current({ ok: true }), 500);
+      completeTimeoutRef.current = window.setTimeout(() => {
+        onCompleteRef.current({ ok: true });
+        completeTimeoutRef.current = null;
+      }, 500);
     };
 
     const completeErr = (message: string) => {
@@ -86,7 +94,10 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
       }
       setIsPulling(false);
       setError(message);
-      setTimeout(() => onCompleteRef.current({ ok: false, error: message }), 2000);
+      completeTimeoutRef.current = window.setTimeout(() => {
+        onCompleteRef.current({ ok: false, error: message });
+        completeTimeoutRef.current = null;
+      }, 2000);
     };
 
     const start = async () => {
@@ -161,6 +172,10 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
       controller.abort();
       if (interval !== undefined) {
         window.clearInterval(interval);
+      }
+      if (completeTimeoutRef.current !== null) {
+        window.clearTimeout(completeTimeoutRef.current);
+        completeTimeoutRef.current = null;
       }
     };
   }, [isOpen, appId]);

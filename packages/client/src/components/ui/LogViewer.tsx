@@ -264,6 +264,19 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
       }
     });
 
+    setIsConnectedByContainer((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([id]) => activeIds.has(id)))
+    );
+    setIsConnectingByContainer((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([id]) => activeIds.has(id)))
+    );
+    setErrorByContainer((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([id]) => activeIds.has(id)))
+    );
+    setLogsByContainer((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([id]) => activeIds.has(id)))
+    );
+
     containers.forEach((container) => {
       void startStream(container.id, true);
     });
@@ -282,6 +295,7 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
         window.clearTimeout(flushTimeoutsRef.current[id]);
         delete flushTimeoutsRef.current[id];
       });
+      setConnected("logs", false);
     };
   }, [containerIdsKey, setConnected]);
 

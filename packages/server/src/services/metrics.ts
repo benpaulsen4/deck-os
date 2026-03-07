@@ -323,8 +323,14 @@ async function collectMetrics(): Promise<SystemMetrics> {
 
 export function startMetricsPolling(): void {
   if (pollInterval) return;
-  collectMetrics();
-  pollInterval = setInterval(collectMetrics, POLL_INTERVAL_MS);
+  void collectMetrics().catch((error: unknown) => {
+    console.error("[deckos] Initial metrics collection failed:", error);
+  });
+  pollInterval = setInterval(() => {
+    void collectMetrics().catch((error: unknown) => {
+      console.error("[deckos] Metrics polling failed:", error);
+    });
+  }, POLL_INTERVAL_MS);
 }
 
 export function stopMetricsPolling(): void {

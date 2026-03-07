@@ -3,6 +3,7 @@ import { z } from "zod";
 import * as dockerService from "../services/docker.js";
 import * as appsService from "../services/apps.js";
 import { AppNotFoundError } from "../lib/errors.js";
+import { AppIdSchema } from "../lib/schema.js";
 
 export const dockerRouter = router({
   getContainerStats: publicProcedure
@@ -12,10 +13,10 @@ export const dockerRouter = router({
     }),
 
   getStatuses: publicProcedure
-    .input(z.object({ appIds: z.array(z.string()).max(500) }))
+    .input(z.object({ appIds: z.array(AppIdSchema).max(500) }))
     .query(async ({ input }) => {
       const uniqueAppIds = Array.from(new Set(input.appIds));
-      const docker = dockerService.getDocker();
+      const docker = await dockerService.getDockerAsync();
       if (!docker) {
         return {
           available: false as const,
@@ -43,7 +44,7 @@ export const dockerRouter = router({
     }),
 
   start: publicProcedure
-    .input(z.object({ appId: z.string() }))
+    .input(z.object({ appId: AppIdSchema }))
     .mutation(async ({ input }) => {
       const app = await appsService.getApp(input.appId);
       if (!app) {
@@ -54,7 +55,7 @@ export const dockerRouter = router({
     }),
 
   stop: publicProcedure
-    .input(z.object({ appId: z.string() }))
+    .input(z.object({ appId: AppIdSchema }))
     .mutation(async ({ input }) => {
       const app = await appsService.getApp(input.appId);
       if (!app) {
@@ -65,7 +66,7 @@ export const dockerRouter = router({
     }),
 
   restart: publicProcedure
-    .input(z.object({ appId: z.string() }))
+    .input(z.object({ appId: AppIdSchema }))
     .mutation(async ({ input }) => {
       const app = await appsService.getApp(input.appId);
       if (!app) {
@@ -76,7 +77,7 @@ export const dockerRouter = router({
     }),
 
   pull: publicProcedure
-    .input(z.object({ appId: z.string() }))
+    .input(z.object({ appId: AppIdSchema }))
     .mutation(async ({ input }) => {
       const app = await appsService.getApp(input.appId);
       if (!app) {
@@ -87,7 +88,7 @@ export const dockerRouter = router({
     }),
 
   getContainers: publicProcedure
-    .input(z.object({ appId: z.string() }))
+    .input(z.object({ appId: AppIdSchema }))
     .query(async ({ input }) => {
       const app = await appsService.getApp(input.appId);
       if (!app) {
@@ -97,7 +98,7 @@ export const dockerRouter = router({
     }),
 
   getStatus: publicProcedure
-    .input(z.object({ appId: z.string() }))
+    .input(z.object({ appId: AppIdSchema }))
     .query(async ({ input }) => {
       const app = await appsService.getApp(input.appId);
       if (!app) {

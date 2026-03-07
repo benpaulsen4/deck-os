@@ -11,7 +11,7 @@ services:
       - "{{VOLUME_IMMICH_SERVER__ETC_LOCALTIME}}:/etc/localtime:ro"
     environment:
       DB_DATABASE_NAME: immich
-      DB_PASSWORD: postgres
+      DB_PASSWORD: "{{DB_PASSWORD}}"
       DB_USERNAME: postgres
     ports:
       - "{{WEB_PORT}}:2283"
@@ -28,7 +28,7 @@ services:
     image: altran1502/immich-machine-learning:latest
     environment:
       DB_DATABASE_NAME: immich
-      DB_PASSWORD: postgres
+      DB_PASSWORD: "{{DB_PASSWORD}}"
       DB_USERNAME: postgres
     restart: unless-stopped
     volumes:
@@ -51,7 +51,7 @@ services:
     hostname: immich-postgres
     image: docker.io/tensorchord/pgvecto-rs:pg14-v0.2.0@sha256:739cdd626151ff1f796dc95a6591b55a714f341c737e27f045019ceabf8e8c52
     environment:
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: "{{DB_PASSWORD}}"
       POSTGRES_USER: postgres
       POSTGRES_DB: immich
       POSTGRES_INITDB_ARGS: --data-checksums

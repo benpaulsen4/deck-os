@@ -14,6 +14,13 @@
       "required": true
     },
     {
+      "key": "DB_PASSWORD",
+      "label": "DATABASE PASSWORD",
+      "type": "string",
+      "defaultValue": "",
+      "required": true
+    },
+    {
       "key": "VOLUME_IMMICH_SERVER__USR_SRC_APP_UPLOAD",
       "label": "IMMICH-SERVER /USR/SRC/APP/UPLOAD",
       "type": "path",

@@ -3,12 +3,15 @@ import { serve } from "@hono/node-server";
 import { trpcServer } from "@hono/trpc-server";
 import { streamSSE } from "hono/streaming";
 import { serveStatic } from "@hono/node-server/serve-static";
+import { z } from "zod";
 import { appRouter } from "./trpc/router.js";
 import { createContext } from "./trpc/context.js";
 import * as metricsService from "./services/metrics.js";
 import * as dockerService from "./services/docker.js";
 import * as pullJobsService from "./services/pullJobs.js";
 import * as templatesService from "./services/templates.js";
+import { LOG_HISTORY_SIZE } from "./lib/config.js";
+import { AppIdSchema } from "./lib/schema.js";
 import { readFileSync, existsSync } from "fs";
 import { readFile } from "node:fs/promises";
 import { join, dirname } from "path";
@@ -52,8 +55,8 @@ app.get("/api/health", (c) => {
 });
 
 // Docker connectivity check
-app.get("/api/docker/status", (c) => {
-  const docker = dockerService.getDocker();
+app.get("/api/docker/status", async (c) => {
+  const docker = await dockerService.getDockerAsync();
   const isWindows = process.platform === "win32";
 
   const dockerStatus = {
@@ -79,7 +82,14 @@ app.get("/api/templates/assets/:templateId/*", async (c) => {
     : reqPath.startsWith(prefixDecoded)
       ? reqPath.slice(prefixDecoded.length)
       : "";
-  const assetRel = rawRel ? decodeURIComponent(rawRel) : "";
+  let assetRel = "";
+  if (rawRel) {
+    try {
+      assetRel = decodeURIComponent(rawRel);
+    } catch {
+      return c.json({ error: "Invalid asset path" }, 400);
+    }
+  }
   if (!assetRel) return c.json({ error: "Not found" }, 404);
 
   const assetPath = await templatesService.getTemplateAssetPath(templateId, assetRel);
@@ -172,7 +182,7 @@ app.get("/api/metrics/stream", async (c) => {
 
 // SSE endpoint for Docker events
 app.get("/api/docker/events", async (c) => {
-  const docker = dockerService.getDocker();
+  const docker = await dockerService.getDockerAsync();
   if (!docker) {
     return c.json({ error: "Docker is not available" }, 503);
   }
@@ -218,8 +228,12 @@ app.get("/api/docker/events", async (c) => {
 
 app.post("/api/apps/:appId/pull/start", async (c) => {
   const { appId } = c.req.param();
+  const appIdResult = AppIdSchema.safeParse(appId);
+  if (!appIdResult.success) {
+    return c.json({ error: "Invalid app id" }, 400);
+  }
   try {
-    const job = await pullJobsService.startPullJob(appId);
+    const job = await pullJobsService.startPullJob(appIdResult.data);
     return c.json(job);
   } catch (err: unknown) {
     if (err instanceof Error && err.message === "App not found") {
@@ -246,8 +260,20 @@ app.get("/api/logs/:containerId", async (c) => {
   const { containerId } = c.req.param();
   const tailQuery = c.req.query("tail") || "2000";
   const sinceQuery = c.req.query("since");
+  const TailSchema = z.coerce.number().int().min(1).max(LOG_HISTORY_SIZE);
+  const parsedTailResult = TailSchema.safeParse(tailQuery);
+  if (!parsedTailResult.success) {
+    return c.json({ error: "Invalid tail parameter" }, 400);
+  }
 
-  const docker = dockerService.getDocker();
+  const parsedSinceResult = z.coerce.number().int().min(0).safeParse(sinceQuery ?? 0);
+  if (!parsedSinceResult.success) {
+    return c.json({ error: "Invalid since parameter" }, 400);
+  }
+  const parsedTail = parsedTailResult.data;
+  const since = sinceQuery ? parsedSinceResult.data : undefined;
+
+  const docker = await dockerService.getDockerAsync();
   if (!docker) {
     return c.json({ error: "Docker is not available" }, 503);
   }
@@ -262,11 +288,6 @@ app.get("/api/logs/:containerId", async (c) => {
       console.warn("[deckos] Failed to inspect container for logs:", err);
     }
 
-    const since =
-      sinceQuery && Number.isFinite(parseInt(sinceQuery, 10))
-        ? parseInt(sinceQuery, 10)
-        : undefined;
-
     const logOptions: Dockerode.ContainerLogsOptions & { follow: true } = {
       follow: true,
       stdout: true,
@@ -274,10 +295,7 @@ app.get("/api/logs/:containerId", async (c) => {
       timestamps: false,
     };
 
-    if (tailQuery !== "all") {
-      const parsedTail = parseInt(tailQuery, 10);
-      logOptions.tail = Number.isFinite(parsedTail) ? parsedTail : 2000;
-    }
+    logOptions.tail = parsedTail;
     if (since !== undefined) {
       logOptions.since = since;
     }

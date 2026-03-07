@@ -17,6 +17,8 @@ export interface DockerEvent {
 export function useDockerEvents(callback: (event: DockerEvent) => void) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const callbackRef = useRef(callback);
+  const reconnectTimeoutRef = useRef<number | null>(null);
+  const disposedRef = useRef(false);
   const { setConnected } = useConnectionStore();
 
   useEffect(() => {
@@ -24,7 +26,11 @@ export function useDockerEvents(callback: (event: DockerEvent) => void) {
   }, [callback]);
 
   useEffect(() => {
+    disposedRef.current = false;
     const connect = () => {
+      if (disposedRef.current) {
+        return;
+      }
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
       }
@@ -49,16 +55,27 @@ export function useDockerEvents(callback: (event: DockerEvent) => void) {
       eventSource.addEventListener("docker-event", handleDockerEvent);
 
       eventSource.onerror = (error) => {
+        if (disposedRef.current) {
+          return;
+        }
         console.error("Docker events SSE error:", error);
         setConnected("events", false);
         eventSource.close();
-        setTimeout(connect, 5000);
+        if (reconnectTimeoutRef.current !== null) {
+          window.clearTimeout(reconnectTimeoutRef.current);
+        }
+        reconnectTimeoutRef.current = window.setTimeout(connect, 5000);
       };
     };
 
     connect();
 
     return () => {
+      disposedRef.current = true;
+      if (reconnectTimeoutRef.current !== null) {
+        window.clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;

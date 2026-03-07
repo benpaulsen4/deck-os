@@ -1,4 +1,4 @@
-import { createRootRoute, Link, Outlet } from "@tanstack/react-router";
+import { createRootRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { trpcClient, useTRPC } from "../trpc";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ToastContainer } from "../components/layout/ToastContainer";
@@ -64,6 +64,7 @@ function TopBar() {
 
   const hostname = systemInfo?.hostname || "DECKOS";
   useApiHealth();
+  const currentPath = useRouterState({ select: (state) => state.location.pathname });
 
   useLayoutEffect(() => {
     if (!scanlineApplied.current) {
@@ -99,7 +100,9 @@ function TopBar() {
 
   const isAnyConnected = getAnyConnected();
   const apiStatus = getConnectionStatus("api");
-  const currentPath = window.location.pathname;
+  const isDashboardPath = currentPath === "/";
+  const isAppsPath = currentPath === "/apps" || currentPath.startsWith("/apps/");
+  const isSettingsPath = currentPath === "/settings" || currentPath.startsWith("/settings/");
 
   const connectionStyle: React.CSSProperties = {
     display: "flex",
@@ -249,7 +252,7 @@ function TopBar() {
             to="/"
             className="topbar-menu-link"
             style={{
-              ...(currentPath === "/"
+              ...(isDashboardPath
                 ? {
                     color: "var(--accent-primary)",
                     borderLeft: "2px solid var(--accent-primary)",
@@ -264,7 +267,7 @@ function TopBar() {
             to="/apps"
             className="topbar-menu-link"
             style={{
-              ...(currentPath === "/apps"
+              ...(isAppsPath
                 ? {
                     color: "var(--accent-primary)",
                     borderLeft: "2px solid var(--accent-primary)",
@@ -279,7 +282,7 @@ function TopBar() {
             to="/settings"
             className="topbar-menu-link"
             style={{
-              ...(currentPath === "/settings"
+              ...(isSettingsPath
                 ? {
                     color: "var(--accent-primary)",
                     borderLeft: "2px solid var(--accent-primary)",

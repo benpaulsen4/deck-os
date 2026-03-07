@@ -273,16 +273,79 @@ function renderPlaceholders(template: string, values: Record<string, string>): s
   });
 }
 
+function normalizeTemplateParameterValue(
+  parameter: TemplateParameter,
+  rawValue: string
+): string {
+  const value = rawValue.trim();
+  if (!value) {
+    return value;
+  }
+  switch (parameter.type) {
+    case "string":
+      return value;
+    case "number": {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) {
+        throw new Error(`Invalid number for parameter: ${parameter.label}`);
+      }
+      return String(parsed);
+    }
+    case "boolean": {
+      const lower = value.toLowerCase();
+      if (["true", "1", "yes", "on"].includes(lower)) return "true";
+      if (["false", "0", "no", "off"].includes(lower)) return "false";
+      throw new Error(`Invalid boolean for parameter: ${parameter.label}`);
+    }
+    case "port": {
+      const parsed = Number.parseInt(value, 10);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+        throw new Error(`Invalid port for parameter: ${parameter.label}`);
+      }
+      return String(parsed);
+    }
+    case "path": {
+      const normalized = value.replace(/\\/g, "/");
+      const looksRelative =
+        normalized.startsWith("./") ||
+        /^[a-zA-Z0-9._-]+(?:\/[a-zA-Z0-9._-]+)*$/.test(normalized);
+      const looksAbsolute =
+        normalized.startsWith("/") || /^[a-zA-Z]:\//.test(normalized);
+      if (!looksRelative && !looksAbsolute) {
+        throw new Error(`Invalid path for parameter: ${parameter.label}`);
+      }
+      if (normalized.includes("..") || normalized.includes("\0")) {
+        throw new Error(`Invalid path for parameter: ${parameter.label}`);
+      }
+      return normalized;
+    }
+    case "enum": {
+      const options = parameter.options ?? [];
+      if (!options.includes(value)) {
+        throw new Error(`Invalid option for parameter: ${parameter.label}`);
+      }
+      return value;
+    }
+    default:
+      return value;
+  }
+}
+
 export async function deployTemplate(input: DeployTemplateInput) {
   const template = await getTemplate(input.templateId);
+  const templateParameterByKey = new Map(template.parameters.map((p) => [p.key, p]));
   const resolvedParams: Record<string, string> = {};
   for (const p of template.parameters) {
     if (p.defaultValue !== undefined) {
-      resolvedParams[p.key] = p.defaultValue;
+      resolvedParams[p.key] = normalizeTemplateParameterValue(p, p.defaultValue);
     }
   }
   for (const [k, v] of Object.entries(input.parameters)) {
-    resolvedParams[k] = v;
+    const parameter = templateParameterByKey.get(k);
+    if (!parameter) {
+      throw new Error(`Unknown parameter: ${k}`);
+    }
+    resolvedParams[k] = normalizeTemplateParameterValue(parameter, v);
   }
 
   for (const p of template.parameters) {

@@ -3,6 +3,7 @@ import { z } from "zod";
 import * as appsService from "../services/apps.js";
 import * as dockerService from "../services/docker.js";
 import {
+  AppIdSchema,
   OptionalUrlOrPathSchema,
   OptionalUrlSchema,
   UrlOrEmptySchema,
@@ -14,7 +15,7 @@ export const appsRouter = router({
     return await appsService.listApps();
   }),
 
-  get: publicProcedure.input(z.object({ id: z.string() })).query(async ({ input }) => {
+  get: publicProcedure.input(z.object({ id: AppIdSchema })).query(async ({ input }) => {
     const app = await appsService.getApp(input.id);
     if (!app) {
       throw new AppNotFoundError(input.id);
@@ -64,7 +65,7 @@ export const appsRouter = router({
   update: publicProcedure
     .input(
       z.object({
-        id: z.string(),
+        id: AppIdSchema,
         name: z.string().optional(),
         description: z.string().optional(),
         icon: z.union([UrlOrEmptySchema, z.string().startsWith("/")]).optional(),
@@ -88,7 +89,7 @@ export const appsRouter = router({
   updateCompose: publicProcedure
     .input(
       z.object({
-        id: z.string(),
+        id: AppIdSchema,
         composeYaml: z.string().min(1),
       })
     )
@@ -101,7 +102,7 @@ export const appsRouter = router({
     }),
 
   delete: publicProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.object({ id: AppIdSchema }))
     .mutation(async ({ input }) => {
       try {
         await dockerService.stopStack(input.id);
@@ -116,7 +117,7 @@ export const appsRouter = router({
     }),
 
   reorder: publicProcedure
-    .input(z.object({ orderedIds: z.array(z.string()) }))
+    .input(z.object({ orderedIds: z.array(AppIdSchema) }))
     .mutation(async ({ input }) => {
       await appsService.reorderApps(input.orderedIds);
       return { success: true };

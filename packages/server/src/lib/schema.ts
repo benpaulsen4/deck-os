@@ -23,9 +23,14 @@ const UrlOrPathOrEmptySchema = z.union([
   z.literal(""),
 ]);
 const OptionalUrlOrPathSchema = UrlOrPathOrEmptySchema.optional().default("");
+const AppIdSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9][a-z0-9-]*$/, "Invalid app id");
 
 const AppMetadataSchema = z.object({
-  id: z.string(),
+  id: AppIdSchema,
   name: z.string(),
   icon: OptionalUrlOrPathSchema,
   url: OptionalUrlSchema,
@@ -47,7 +52,7 @@ const ComposeFileSchema = z.object({
 });
 
 const AppSchema = z.object({
-  id: z.string(),
+  id: AppIdSchema,
   metadata: AppMetadataSchema,
   composeYaml: z.string(),
 });
@@ -203,6 +208,7 @@ export {
   UrlOrEmptySchema,
   OptionalUrlSchema,
   OptionalUrlOrPathSchema,
+  AppIdSchema,
 };
 
 export type {

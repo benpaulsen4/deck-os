@@ -104,8 +104,8 @@ export async function getDockerAsync(): Promise<Docker | null> {
   return initializeDocker();
 }
 
-function ensureDockerAvailable(): Docker {
-  const client = getDocker();
+async function ensureDockerAvailable(): Promise<Docker> {
+  const client = await getDockerAsync();
   if (!client) {
     throw new Error(
       "Docker is not available. Please ensure Docker is running and the socket is accessible."
@@ -242,7 +242,7 @@ export async function pullImagesWithProgress(
   onProgress: (progress: PullOverallProgress) => void,
   signal?: AbortSignal
 ): Promise<void> {
-  const dockerClient = ensureDockerAvailable();
+  const dockerClient = await ensureDockerAvailable();
   const modem = (dockerClient as unknown as { modem: DockerModem }).modem;
   const uniqueImages = Array.from(new Set(images.map((i) => i.trim()).filter(Boolean)));
 
@@ -404,7 +404,7 @@ export async function pullImagesWithProgress(
 }
 
 export async function getStackContainers(appId: string): Promise<ContainerInfo[]> {
-  const dockerClient = ensureDockerAvailable();
+  const dockerClient = await ensureDockerAvailable();
   const projectName = await getComposeProjectName(appId);
 
   const containers = await dockerClient.listContainers({
@@ -493,7 +493,7 @@ export async function getContainerStats(
   containerId: string
 ): Promise<{ cpu: number; memory: number; memoryBytes: number } | null> {
   try {
-    const dockerClient = ensureDockerAvailable();
+    const dockerClient = await ensureDockerAvailable();
     const container = dockerClient.getContainer(containerId);
     const stats = (await container.stats({
       stream: false,
@@ -503,11 +503,19 @@ export async function getContainerStats(
       stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
     const systemDelta =
       stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
-    const cpuPercent = (cpuDelta / systemDelta) * stats.cpu_stats.online_cpus * 100;
+    const onlineCpus = stats.cpu_stats.online_cpus > 0 ? stats.cpu_stats.online_cpus : 1;
+    const cpuPercentRaw =
+      systemDelta > 0 ? (cpuDelta / systemDelta) * onlineCpus * 100 : 0;
+    const cpuPercent = Number.isFinite(cpuPercentRaw)
+      ? Math.max(0, Math.min(100, cpuPercentRaw))
+      : 0;
 
     const memoryUsage = stats.memory_stats.usage || 0;
     const memoryLimit = stats.memory_stats.limit || 1;
-    const memoryPercent = (memoryUsage / memoryLimit) * 100;
+    const memoryPercentRaw = (memoryUsage / memoryLimit) * 100;
+    const memoryPercent = Number.isFinite(memoryPercentRaw)
+      ? Math.max(0, Math.min(100, memoryPercentRaw))
+      : 0;
 
     return {
       cpu: Math.round(cpuPercent),

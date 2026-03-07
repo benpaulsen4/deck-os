@@ -43,9 +43,16 @@ export function ContainerTable({ containers }: ContainerTableProps) {
   const [containerStats, setContainerStats] = useState<
     Record<string, { cpu: number; memory: number; memoryBytes: number }>
   >({});
+  const containerKey = containers
+    .map((container) => `${container.id}:${container.state.running ? 1 : 0}`)
+    .join("|");
 
   useEffect(() => {
+    let cancelled = false;
+    let runId = 0;
+
     const fetchStats = async () => {
+      const currentRunId = ++runId;
       const stats: Record<string, { cpu: number; memory: number; memoryBytes: number }> =
         {};
 
@@ -64,15 +71,23 @@ export function ContainerTable({ containers }: ContainerTableProps) {
         }
       }
 
+      if (cancelled || currentRunId !== runId) {
+        return;
+      }
       setContainerStats(stats);
     };
 
-    fetchStats();
+    void fetchStats();
 
-    const interval = setInterval(fetchStats, 5000);
+    const interval = window.setInterval(() => {
+      void fetchStats();
+    }, 5000);
 
-    return () => clearInterval(interval);
-  }, [containers]);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [containerKey]);
 
   const getStatusColor = (running: boolean) => {
     return running ? "var(--status-running)" : "var(--status-stopped)";

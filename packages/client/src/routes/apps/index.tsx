@@ -41,10 +41,18 @@ function AppsPage() {
     refetchInterval: 5000,
   });
 
+  const invalidateStatusQueries = async (appId: string) => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["stackStatus", appId] }),
+      queryClient.invalidateQueries({ queryKey: ["stackStatusBatch"] }),
+    ]);
+  };
+
   const startMutation = useMutation({
     mutationFn: async (appId: string) => await trpcClient.docker.start.mutate({ appId }),
-    onSuccess: () => {
+    onSuccess: async (_data, appId) => {
       addToast("App started", "success");
+      await invalidateStatusQueries(appId);
     },
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : "Unknown error";
@@ -54,8 +62,9 @@ function AppsPage() {
 
   const stopMutation = useMutation({
     mutationFn: async (appId: string) => await trpcClient.docker.stop.mutate({ appId }),
-    onSuccess: () => {
+    onSuccess: async (_data, appId) => {
       addToast("App stopped", "success");
+      await invalidateStatusQueries(appId);
     },
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : "Unknown error";
@@ -66,8 +75,9 @@ function AppsPage() {
   const restartMutation = useMutation({
     mutationFn: async (appId: string) =>
       await trpcClient.docker.restart.mutate({ appId }),
-    onSuccess: () => {
+    onSuccess: async (_data, appId) => {
       addToast("App restarted", "success");
+      await invalidateStatusQueries(appId);
     },
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : "Unknown error";
@@ -78,11 +88,15 @@ function AppsPage() {
   const deleteMutation = useMutation({
     mutationFn: async (appId: string) =>
       await trpcClient.apps.delete.mutate({ id: appId }),
-    onSuccess: async () => {
+    onSuccess: async (_data, appId) => {
       addToast("App deleted", "success");
-      await queryClient.invalidateQueries({
-        queryKey: trpc.apps.list.queryOptions().queryKey,
-      });
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: trpc.apps.list.queryOptions().queryKey,
+        }),
+        queryClient.invalidateQueries({ queryKey: ["stackStatus", appId] }),
+        queryClient.invalidateQueries({ queryKey: ["stackStatusBatch"] }),
+      ]);
     },
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : "Unknown error";
@@ -119,16 +133,16 @@ function AppsPage() {
     }
   };
 
-  const isActionPending = (action: string) => {
+  const isActionPending = (appId: string, action: string) => {
     switch (action) {
       case "start":
-        return startMutation.isPending;
+        return startMutation.isPending && startMutation.variables === appId;
       case "stop":
-        return stopMutation.isPending;
+        return stopMutation.isPending && stopMutation.variables === appId;
       case "restart":
-        return restartMutation.isPending;
+        return restartMutation.isPending && restartMutation.variables === appId;
       case "delete":
-        return deleteMutation.isPending;
+        return deleteMutation.isPending && deleteMutation.variables === appId;
       default:
         return false;
     }

@@ -8,7 +8,7 @@ interface AppRowProps {
   app: App;
   stackStatus?: StackStatus | null;
   onAction: (appId: string, action: string, e: React.MouseEvent) => void;
-  isActionPending: (action: string) => boolean;
+  isActionPending: (appId: string, action: string) => boolean;
 }
 
 export function AppRow({ app, stackStatus, onAction, isActionPending }: AppRowProps) {
@@ -176,7 +176,7 @@ export function AppRow({ app, stackStatus, onAction, isActionPending }: AppRowPr
           <Button
             variant="secondary"
             onClick={(e) => onAction(app.id, "start", e)}
-            disabled={isActionPending("start")}
+            disabled={isActionPending(app.id, "start")}
             style={actionButtonStyle}
             title="Start"
           >
@@ -185,7 +185,7 @@ export function AppRow({ app, stackStatus, onAction, isActionPending }: AppRowPr
           <Button
             variant="danger"
             onClick={(e) => onAction(app.id, "stop", e)}
-            disabled={isActionPending("stop")}
+            disabled={isActionPending(app.id, "stop")}
             style={actionButtonStyle}
             title="Stop"
           >
@@ -194,7 +194,7 @@ export function AppRow({ app, stackStatus, onAction, isActionPending }: AppRowPr
           <Button
             variant="secondary"
             onClick={(e) => onAction(app.id, "restart", e)}
-            disabled={isActionPending("restart")}
+            disabled={isActionPending(app.id, "restart")}
             style={actionButtonStyle}
             title="Restart"
           >
@@ -203,7 +203,7 @@ export function AppRow({ app, stackStatus, onAction, isActionPending }: AppRowPr
           <Button
             variant="danger"
             onClick={(e) => onAction(app.id, "delete", e)}
-            disabled={isActionPending("delete")}
+            disabled={isActionPending(app.id, "delete")}
             style={actionButtonStyle}
             title="Delete"
           >
