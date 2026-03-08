@@ -221,3 +221,12 @@
   border-color: var(--accent-primary);
   color: var(--accent-primary);
 }
+
+.deckos-button svg {
+  flex-shrink: 0;
+}
+
+.deckos-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

@@ -15,6 +15,7 @@ export function Button({
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
+    gap: "8px",
     textTransform: "uppercase",
     fontWeight: "500",
     cursor: "pointer",

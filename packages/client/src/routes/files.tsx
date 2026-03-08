@@ -1,9 +1,29 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState, useEffect, type FormEvent } from "react";
+import { useMemo, useState, useEffect, useRef, type FormEvent, type ChangeEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Folder, FolderOpen, File, Pin, PinOff, ChevronRight, ChevronDown } from "lucide-react";
+import {
+  Folder,
+  FolderOpen,
+  File,
+  Pin,
+  PinOff,
+  ChevronRight,
+  ChevronDown,
+  Upload,
+  Download,
+  FolderPlus,
+  Pencil,
+  Copy,
+  Scissors,
+  Trash2,
+  LayoutGrid,
+  Table,
+  Clipboard,
+} from "lucide-react";
 import { useTRPC, trpcClient } from "../trpc";
 import { Button } from "../components/ui/Button";
+import { Input } from "../components/ui/Input";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { useToastStore } from "../stores/toast";
 
 export const Route = createFileRoute("/files")({
@@ -68,6 +88,20 @@ function formatSize(size: number | null): string {
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+function joinChildPath(parentPath: string, childName: string): string {
+  if (parentPath.endsWith("\\") || parentPath.endsWith("/")) {
+    return `${parentPath}${childName}`;
+  }
+  const separator = parentPath.includes("\\") ? "\\" : "/";
+  return `${parentPath}${separator}${childName}`;
+}
+
+type ViewMode = "table" | "grid";
+type SortBy = "name" | "size" | "modifiedAt" | "createdAt";
+type SortDirection = "asc" | "desc";
+type FileActionMode = "mkdir" | "rename" | null;
+type ClipboardState = { mode: "copy" | "cut"; paths: string[] } | null;
+
 function FilesPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -75,6 +109,17 @@ function FilesPage() {
   const [requestedPath, setRequestedPath] = useState("");
   const [pathInput, setPathInput] = useState("");
   const [showHidden, setShowHidden] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("table");
+  const [sortBy, setSortBy] = useState<SortBy>("name");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const [selectionAnchorPath, setSelectionAnchorPath] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [actionMode, setActionMode] = useState<FileActionMode>(null);
+  const [actionInputValue, setActionInputValue] = useState("");
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [clipboard, setClipboard] = useState<ClipboardState>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const listQuery = useQuery(
     trpc.files.list.queryOptions({
@@ -97,6 +142,25 @@ function FilesPage() {
     },
   });
 
+  const mkdirMutation = useMutation({
+    mutationFn: async (targetPath: string) => await trpcClient.files.mkdir.mutate({ path: targetPath }),
+  });
+  const renameMutation = useMutation({
+    mutationFn: async ({ sourcePath, targetPath }: { sourcePath: string; targetPath: string }) =>
+      await trpcClient.files.rename.mutate({ sourcePath, targetPath }),
+  });
+  const copyMutation = useMutation({
+    mutationFn: async ({ sourcePath, targetPath }: { sourcePath: string; targetPath: string }) =>
+      await trpcClient.files.copy.mutate({ sourcePath, targetPath }),
+  });
+  const moveMutation = useMutation({
+    mutationFn: async ({ sourcePath, targetPath }: { sourcePath: string; targetPath: string }) =>
+      await trpcClient.files.move.mutate({ sourcePath, targetPath }),
+  });
+  const deleteMutation = useMutation({
+    mutationFn: async (targetPath: string) => await trpcClient.files.delete.mutate({ path: targetPath }),
+  });
+
   useEffect(() => {
     if (listQuery.data?.cwd) {
       setPathInput(listQuery.data.cwd);
@@ -109,8 +173,88 @@ function FilesPage() {
   const isPinned = currentPath.length > 0 && pinned.includes(currentPath);
   const entries = listQuery.data?.entries ?? [];
 
+  useEffect(() => {
+    setSelectedPaths([]);
+    setSelectionAnchorPath(null);
+  }, [currentPath]);
+
+  const sortedEntries = useMemo(() => {
+    const value = [...entries];
+    const sortMultiplier = sortDirection === "asc" ? 1 : -1;
+    value.sort((a, b) => {
+      if (a.type === "directory" && b.type !== "directory") return -1;
+      if (a.type !== "directory" && b.type === "directory") return 1;
+
+      if (sortBy === "name") {
+        return a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) * sortMultiplier;
+      }
+      if (sortBy === "size") {
+        return ((a.size ?? -1) - (b.size ?? -1)) * sortMultiplier;
+      }
+      const left = a[sortBy] ? Date.parse(a[sortBy] as string) : -1;
+      const right = b[sortBy] ? Date.parse(b[sortBy] as string) : -1;
+      return (left - right) * sortMultiplier;
+    });
+    return value;
+  }, [entries, sortBy, sortDirection]);
+
+  const selectedEntries = useMemo(
+    () => sortedEntries.filter((entry) => selectedPaths.includes(entry.path)),
+    [sortedEntries, selectedPaths]
+  );
+  const selectedEntry = selectedEntries.length === 1 ? selectedEntries[0] : null;
+  const canUseSelectionActions = selectedEntries.length > 0;
+  const canRename = selectedEntries.length === 1;
+  const canDownloadSelectedFile = selectedEntries.length === 1 && selectedEntries[0]?.type === "file";
+
+  const refreshDirectory = async () => {
+    await queryClient.invalidateQueries({
+      queryKey: trpc.files.list.queryOptions({ path: requestedPath, showHidden }).queryKey,
+    });
+  };
+
   const handleNavigate = (nextPath: string) => {
     setRequestedPath(nextPath);
+  };
+
+  const handleItemClick = (targetPath: string, event: React.MouseEvent) => {
+    if (event.shiftKey) {
+      const anchorPath = selectionAnchorPath ?? selectedPaths[selectedPaths.length - 1] ?? targetPath;
+      const targetIndex = sortedEntries.findIndex((entry) => entry.path === targetPath);
+      const anchorIndex = sortedEntries.findIndex((entry) => entry.path === anchorPath);
+      if (targetIndex === -1 || anchorIndex === -1) {
+        setSelectedPaths([targetPath]);
+        setSelectionAnchorPath(targetPath);
+        return;
+      }
+      const start = Math.min(anchorIndex, targetIndex);
+      const end = Math.max(anchorIndex, targetIndex);
+      const rangePaths = sortedEntries.slice(start, end + 1).map((entry) => entry.path);
+      setSelectedPaths(rangePaths);
+      if (!selectionAnchorPath) {
+        setSelectionAnchorPath(anchorPath);
+      }
+      return;
+    }
+
+    if (event.ctrlKey || event.metaKey) {
+      setSelectedPaths((previous) => {
+        if (previous.includes(targetPath)) {
+          return previous.filter((item) => item !== targetPath);
+        }
+        return [...previous, targetPath];
+      });
+      setSelectionAnchorPath(targetPath);
+      return;
+    }
+
+    setSelectedPaths([targetPath]);
+    setSelectionAnchorPath(targetPath);
+  };
+
+  const withOperationErrorToast = (error: unknown, fallbackMessage: string) => {
+    const message = error instanceof Error ? error.message : fallbackMessage;
+    addToast(message, "error");
   };
 
   const handlePathSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -130,6 +274,132 @@ function FilesPage() {
       ? pinned.filter((item) => item !== currentPath)
       : [...pinned, currentPath];
     setPinsMutation.mutate(nextPins);
+  };
+
+  const handleCreateFolder = async () => {
+    setActionMode("mkdir");
+    setActionInputValue("");
+  };
+
+  const handleRename = async () => {
+    if (!selectedEntry) {
+      return;
+    }
+    setActionMode("rename");
+    setActionInputValue(selectedEntry.name);
+  };
+
+  const handleStageClipboard = (mode: "copy" | "cut") => {
+    if (selectedPaths.length === 0) {
+      return;
+    }
+    setClipboard({ mode, paths: [...selectedPaths] });
+    addToast(`${mode === "copy" ? "Copied" : "Cut"} ${selectedPaths.length} to clipboard`, "success");
+  };
+
+  const submitActionDialog = async () => {
+    const trimmed = actionInputValue.trim();
+    if (!trimmed) {
+      addToast("Value is required", "error");
+      return;
+    }
+    try {
+      if (actionMode === "mkdir") {
+        const targetPath = joinChildPath(currentPath, trimmed);
+        await mkdirMutation.mutateAsync(targetPath);
+        addToast("Folder created", "success");
+      } else if (actionMode === "rename" && selectedEntry) {
+        const targetPath = joinChildPath(currentPath, trimmed);
+        await renameMutation.mutateAsync({ sourcePath: selectedEntry.path, targetPath });
+        addToast("Renamed", "success");
+      }
+      setActionMode(null);
+      setActionInputValue("");
+      await refreshDirectory();
+    } catch (error) {
+      withOperationErrorToast(error, "Action failed");
+    }
+  };
+
+  const handleDelete = async () => {
+    if (selectedPaths.length === 0) {
+      return;
+    }
+    try {
+      for (const targetPath of selectedPaths) {
+        await deleteMutation.mutateAsync(targetPath);
+      }
+      addToast(`Deleted ${selectedPaths.length} item(s)`, "success");
+      setSelectedPaths([]);
+      setDeleteConfirmOpen(false);
+      await refreshDirectory();
+    } catch (error) {
+      withOperationErrorToast(error, "Failed to delete");
+    }
+  };
+
+  const handleDownload = () => {
+    if (!selectedEntry) {
+      return;
+    }
+    if (selectedEntry.type === "directory") {
+      return;
+    }
+    const url = `/api/files/download?path=${encodeURIComponent(selectedEntry.path)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const handlePasteClipboard = async () => {
+    if (!clipboard || !currentPath) {
+      return;
+    }
+    let pastedCount = 0;
+    for (const sourcePath of clipboard.paths) {
+      const targetPath = joinChildPath(currentPath, getDisplayName(sourcePath));
+      if (normalizePathForCompare(targetPath) === normalizePathForCompare(sourcePath)) {
+        continue;
+      }
+      if (clipboard.mode === "copy") {
+        await copyMutation.mutateAsync({ sourcePath, targetPath });
+      } else {
+        await moveMutation.mutateAsync({ sourcePath, targetPath });
+      }
+      pastedCount += 1;
+    }
+    if (clipboard.mode === "cut") {
+      setClipboard(null);
+    }
+    setSelectedPaths([]);
+    addToast(`Pasted ${pastedCount} item(s)`, "success");
+    await refreshDirectory();
+  };
+
+  const uploadFiles = async (files: File[]) => {
+    if (!currentPath || files.length === 0) return;
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append("files", file);
+    }
+    try {
+      const response = await fetch(`/api/files/upload?path=${encodeURIComponent(currentPath)}`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error || "Upload failed");
+      }
+      addToast("Upload complete", "success");
+      await refreshDirectory();
+    } catch (error) {
+      withOperationErrorToast(error, "Failed to upload files");
+    }
+  };
+
+  const handleUploadInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files ? Array.from(event.target.files) : [];
+    await uploadFiles(files);
+    event.target.value = "";
   };
 
   return (
@@ -174,7 +444,23 @@ function FilesPage() {
           </div>
         </aside>
 
-        <section className="panel files-main">
+        <section
+          className={`panel files-main ${dragActive ? "files-main--drag-active" : ""}`}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDragActive(true);
+          }}
+          onDragLeave={(event) => {
+            event.preventDefault();
+            setDragActive(false);
+          }}
+          onDrop={async (event) => {
+            event.preventDefault();
+            setDragActive(false);
+            const files = Array.from(event.dataTransfer.files);
+            await uploadFiles(files);
+          }}
+        >
           <div className="files-toolbar">
             <form className="files-path-form" onSubmit={handlePathSubmit}>
               <label className="label" htmlFor="files-path-input">
@@ -197,11 +483,6 @@ function FilesPage() {
               >
                 Up
               </Button>
-            </form>
-            <div className="files-toolbar-actions">
-              <Button type="button" variant="secondary" onClick={() => setShowHidden((v) => !v)}>
-                {showHidden ? "Hide Hidden" : "Show Hidden"}
-              </Button>
               <Button type="button" variant="secondary" onClick={togglePin} disabled={!currentPath}>
                 {isPinned ? (
                   <>
@@ -215,14 +496,141 @@ function FilesPage() {
                   </>
                 )}
               </Button>
+            </form>
+            <div className="files-toolbar-actions">
+              <Button type="button" variant="secondary" onClick={() => uploadInputRef.current?.click()}>
+                <Upload size={14} />
+                <span>Upload</span>
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleDownload}
+                disabled={!canDownloadSelectedFile}
+              >
+                <Download size={14} />
+                <span>Download</span>
+              </Button>
+              <Button type="button" variant="secondary" onClick={handleCreateFolder}>
+                <FolderPlus size={14} />
+                <span>New Folder</span>
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleRename}
+                disabled={!canRename}
+              >
+                <Pencil size={14} />
+                <span>Rename</span>
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => handleStageClipboard("copy")}
+                disabled={!canUseSelectionActions}
+              >
+                <Copy size={14} />
+                <span>Copy</span>
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => handleStageClipboard("cut")}
+                disabled={!canUseSelectionActions}
+              >
+                <Scissors size={14} />
+                <span>Cut</span>
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={async () => {
+                  try {
+                    await handlePasteClipboard();
+                  } catch (error) {
+                    withOperationErrorToast(error, "Failed to paste");
+                  }
+                }}
+                disabled={!clipboard || !currentPath}
+              >
+                <Clipboard size={14} />
+                <span>Paste</span>
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                onClick={() => setDeleteConfirmOpen(true)}
+                disabled={!canUseSelectionActions}
+              >
+                <Trash2 size={14} />
+                <span>Delete</span>
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => setShowHidden((v) => !v)}>
+                {showHidden ? "Hide Hidden" : "Show Hidden"}
+              </Button>
             </div>
           </div>
+          <div className="files-subtoolbar">
+            <div className="files-view-switch">
+              <Button
+                type="button"
+                variant={viewMode === "table" ? "primary" : "secondary"}
+                onClick={() => setViewMode("table")}
+              >
+                <Table size={14} />
+                <span>Table</span>
+              </Button>
+              <Button
+                type="button"
+                variant={viewMode === "grid" ? "primary" : "secondary"}
+                onClick={() => setViewMode("grid")}
+              >
+                <LayoutGrid size={14} />
+                <span>Grid</span>
+              </Button>
+            </div>
+            <div className="files-sort-controls">
+              <label className="label" htmlFor="files-sort-by">
+                Sort
+              </label>
+              <select
+                id="files-sort-by"
+                className="files-select"
+                value={sortBy}
+                onChange={(event) => setSortBy(event.target.value as SortBy)}
+              >
+                <option value="name">Name</option>
+                <option value="size">Size</option>
+                <option value="modifiedAt">Modified</option>
+                <option value="createdAt">Created</option>
+              </select>
+              <select
+                className="files-select"
+                value={sortDirection}
+                onChange={(event) => setSortDirection(event.target.value as SortDirection)}
+              >
+                <option value="asc">Asc</option>
+                <option value="desc">Desc</option>
+              </select>
+            </div>
+            <div className="files-selection">
+              {selectedPaths.length > 0 ? `Selected: ${selectedPaths.length}` : "Selected: none"}
+            </div>
+          </div>
+          <input
+            ref={uploadInputRef}
+            className="files-upload-input"
+            type="file"
+            multiple
+            onChange={handleUploadInputChange}
+          />
 
           {listQuery.error ? (
             <div className="files-error">
               <span>{listQuery.error.message}</span>
             </div>
-          ) : (
+          ) : viewMode === "table" ? (
             <div className="files-table-wrap">
               <table className="deckos-table">
                 <thead>
@@ -248,20 +656,31 @@ function FilesPage() {
                       </td>
                     </tr>
                   ) : (
-                    entries.map((entry) => (
-                      <tr key={entry.path}>
+                    sortedEntries.map((entry) => (
+                      <tr
+                        key={entry.path}
+                        className={`files-row ${selectedPaths.includes(entry.path) ? "files-row--selected" : ""}`}
+                        onClick={(event) => handleItemClick(entry.path, event)}
+                        onMouseDown={(event) => {
+                          if (event.shiftKey) {
+                            event.preventDefault();
+                          }
+                        }}
+                        onDoubleClick={() => {
+                          if (entry.type === "directory") {
+                            handleNavigate(entry.path);
+                          }
+                        }}
+                      >
                         <td>
-                          <button
-                            className="files-entry-button"
-                            onClick={() => entry.type === "directory" && handleNavigate(entry.path)}
-                          >
+                          <div className="files-entry-button">
                             {entry.type === "directory" ? (
                               <Folder size={14} />
                             ) : (
                               <File size={14} />
                             )}
                             <span>{entry.name}</span>
-                          </button>
+                          </div>
                         </td>
                         <td>{entry.type}</td>
                         <td>{formatSize(entry.size)}</td>
@@ -273,9 +692,125 @@ function FilesPage() {
                 </tbody>
               </table>
             </div>
+          ) : null}
+          {viewMode === "grid" && (
+            <div className="files-grid-wrap">
+              {sortedEntries.map((entry) => (
+                <button
+                  key={entry.path}
+                  className={`files-grid-item ${selectedPaths.includes(entry.path) ? "files-grid-item--selected" : ""}`}
+                  onClick={(event) => handleItemClick(entry.path, event)}
+                  onMouseDown={(event) => {
+                    if (event.shiftKey) {
+                      event.preventDefault();
+                    }
+                  }}
+                  onDoubleClick={() => {
+                    if (entry.type === "directory") {
+                      handleNavigate(entry.path);
+                    }
+                  }}
+                >
+                  <div className="files-grid-icon">
+                    {entry.type === "directory" ? <Folder size={18} /> : <File size={18} />}
+                  </div>
+                  <div className="files-grid-name">{entry.name}</div>
+                  <div className="files-grid-meta">{entry.type}</div>
+                </button>
+              ))}
+            </div>
           )}
 
         </section>
+      </div>
+      <FileActionDialog
+        isOpen={actionMode !== null}
+        mode={actionMode}
+        value={actionInputValue}
+        onValueChange={setActionInputValue}
+        onClose={() => {
+          setActionMode(null);
+          setActionInputValue("");
+        }}
+        onSubmit={submitActionDialog}
+      />
+      <ConfirmDialog
+        isOpen={deleteConfirmOpen && selectedPaths.length > 0}
+        title="Confirm Delete"
+        message={
+          selectedPaths.length > 1
+            ? `Delete ${selectedPaths.length} selected items?`
+            : selectedEntry
+              ? `Delete ${selectedEntry.name}?`
+              : "Delete selected item?"
+        }
+        confirmText="Delete"
+        onCancel={() => setDeleteConfirmOpen(false)}
+        onConfirm={handleDelete}
+        variant="danger"
+      />
+    </div>
+  );
+}
+
+interface FileActionDialogProps {
+  isOpen: boolean;
+  mode: FileActionMode;
+  value: string;
+  onValueChange: (value: string) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}
+
+function FileActionDialog({
+  isOpen,
+  mode,
+  value,
+  onValueChange,
+  onClose,
+  onSubmit,
+}: FileActionDialogProps) {
+  if (!isOpen || !mode) {
+    return null;
+  }
+
+  const title =
+    mode === "mkdir"
+      ? "Create Folder"
+      : "Rename Item";
+
+  const label =
+    mode === "mkdir"
+      ? "Folder Name"
+      : "New Name";
+
+  const confirmText = mode === "mkdir" ? "Create" : "Rename";
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal-backdrop" onClick={onClose} />
+      <div className="modal-content">
+        <h2 className="modal-title">{title}</h2>
+        <Input
+          label={label}
+          value={value}
+          onChange={(event) => onValueChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              onSubmit();
+            }
+          }}
+          autoFocus
+        />
+        <div className="modal-actions">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="button" variant="primary" onClick={onSubmit}>
+            {confirmText}
+          </Button>
+        </div>
       </div>
     </div>
   );

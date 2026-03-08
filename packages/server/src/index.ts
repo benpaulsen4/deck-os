@@ -10,11 +10,12 @@ import * as metricsService from "./services/metrics.js";
 import * as dockerService from "./services/docker.js";
 import * as pullJobsService from "./services/pullJobs.js";
 import * as templatesService from "./services/templates.js";
+import * as filesService from "./services/files.js";
 import { LOG_HISTORY_SIZE } from "./lib/config.js";
 import { AppIdSchema } from "./lib/schema.js";
-import { readFileSync, existsSync } from "fs";
-import { readFile } from "node:fs/promises";
-import { join, dirname } from "path";
+import { readFileSync, existsSync, createReadStream } from "fs";
+import { readFile, stat, writeFile } from "node:fs/promises";
+import { join, dirname, basename } from "path";
 import { fileURLToPath } from "url";
 import type { Readable } from "node:stream";
 import type Dockerode from "dockerode";
@@ -114,6 +115,92 @@ app.get("/api/templates/assets/:templateId/*", async (c) => {
   const buf = await readFile(assetPath);
   c.header("Content-Type", contentType);
   return c.body(buf);
+});
+
+app.post("/api/files/upload", async (c) => {
+  const destinationParam = c.req.query("path");
+  if (!destinationParam) {
+    return c.json({ error: "Missing destination path" }, 400);
+  }
+  try {
+    const destinationPath = await filesService.resolveExistingPath(destinationParam);
+    const destinationStat = await stat(destinationPath);
+    if (!destinationStat.isDirectory()) {
+      return c.json({ error: "Destination path is not a directory" }, 400);
+    }
+
+    const formData = await c.req.raw.formData();
+    const allEntries = formData.getAll("files");
+    const allFiles: Array<{ name: string; arrayBuffer: () => Promise<ArrayBuffer> }> = [];
+    for (const entry of allEntries) {
+      if (typeof entry !== "object" || entry === null) {
+        continue;
+      }
+      const candidate = entry as { name?: unknown; arrayBuffer?: unknown };
+      if (typeof candidate.name === "string" && typeof candidate.arrayBuffer === "function") {
+        allFiles.push(entry as { name: string; arrayBuffer: () => Promise<ArrayBuffer> });
+      }
+    }
+
+    if (allFiles.length === 0) {
+      return c.json({ error: "No files uploaded" }, 400);
+    }
+
+    const uploaded: string[] = [];
+    for (const file of allFiles) {
+      const safeName = basename(file.name);
+      if (!safeName) {
+        continue;
+      }
+      const targetPath = await filesService.resolveTargetPath(join(destinationPath, safeName));
+      const arrayBuffer = await file.arrayBuffer();
+      await writeFile(targetPath, Buffer.from(arrayBuffer), { flag: "wx" });
+      uploaded.push(safeName);
+    }
+    return c.json({ uploaded });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Upload failed";
+    if (error instanceof filesService.FilesAccessDeniedError) {
+      return c.json({ error: message }, 403);
+    }
+    if (error instanceof filesService.FilesNotFoundError) {
+      return c.json({ error: message }, 404);
+    }
+    if (error instanceof filesService.FilesAlreadyExistsError) {
+      return c.json({ error: message }, 409);
+    }
+    if (error instanceof Error && (error as NodeJS.ErrnoException).code === "EEXIST") {
+      return c.json({ error: "One or more files already exist" }, 409);
+    }
+    return c.json({ error: message }, 500);
+  }
+});
+
+app.get("/api/files/download", async (c) => {
+  const targetParam = c.req.query("path");
+  if (!targetParam) {
+    return c.json({ error: "Missing path" }, 400);
+  }
+  try {
+    const filePath = await filesService.resolveExistingPath(targetParam);
+    const fileStat = await stat(filePath);
+    if (!fileStat.isFile()) {
+      return c.json({ error: "Download path must be a file" }, 400);
+    }
+    c.header("Content-Disposition", `attachment; filename="${basename(filePath)}"`);
+    c.header("Content-Type", "application/octet-stream");
+    c.header("Content-Length", String(fileStat.size));
+    return c.body(createReadStream(filePath) as unknown as ReadableStream);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Download failed";
+    if (error instanceof filesService.FilesAccessDeniedError) {
+      return c.json({ error: message }, 403);
+    }
+    if (error instanceof filesService.FilesNotFoundError) {
+      return c.json({ error: message }, 404);
+    }
+    return c.json({ error: message }, 500);
+  }
 });
 
 // SSE endpoint for streaming metrics

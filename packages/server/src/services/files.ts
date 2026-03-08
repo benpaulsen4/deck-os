@@ -40,6 +40,13 @@ export class FilesNotDirectoryError extends Error {
   }
 }
 
+export class FilesAlreadyExistsError extends Error {
+  constructor(targetPath: string) {
+    super(`Path already exists: ${targetPath}`);
+    this.name = "FilesAlreadyExistsError";
+  }
+}
+
 const FILES_DATA_DIR = path.join(DATA_DIR, "files");
 const PINS_PATH = path.join(FILES_DATA_DIR, "pins.json");
 
@@ -83,6 +90,13 @@ function ensureAbsolutePath(inputPath: string): string {
     throw new FilesNotFoundError(inputPath);
   }
   return path.resolve(inputPath);
+}
+
+function ensureNotRootPath(targetPath: string): void {
+  const parsed = path.parse(targetPath);
+  if (normalizeComparePath(parsed.root) === normalizeComparePath(targetPath)) {
+    throw new FilesAccessDeniedError(targetPath);
+  }
 }
 
 function getRootPath(): string {
@@ -201,6 +215,97 @@ export async function listDirectory(inputPath: string, showHidden: boolean): Pro
     parent: getParentPath(realPath),
     entries,
   };
+}
+
+export async function resolveExistingPath(inputPath: string): Promise<string> {
+  const requestedPath = ensureAbsolutePath(inputPath);
+  assertNotDeniedPath(requestedPath);
+
+  const exists = await fs.pathExists(requestedPath);
+  if (!exists) {
+    throw new FilesNotFoundError(requestedPath);
+  }
+
+  const realPath = await fs.realpath(requestedPath).catch(() => requestedPath);
+  assertNotDeniedPath(realPath);
+  return realPath;
+}
+
+export async function resolveTargetPath(inputPath: string): Promise<string> {
+  const targetPath = ensureAbsolutePath(inputPath);
+  assertNotDeniedPath(targetPath);
+  const parentPath = path.dirname(targetPath);
+  const parentRealPath = await resolveExistingPath(parentPath);
+  if (!isSameOrChildPath(targetPath, parentRealPath)) {
+    throw new FilesAccessDeniedError(targetPath);
+  }
+  return targetPath;
+}
+
+function normalizeFsError(error: unknown, fallbackPath: string): never {
+  if (error instanceof Error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      throw new FilesNotFoundError(fallbackPath);
+    }
+    if (code === "EEXIST") {
+      throw new FilesAlreadyExistsError(fallbackPath);
+    }
+  }
+  throw error;
+}
+
+export async function mkdir(targetPathInput: string): Promise<void> {
+  const targetPath = await resolveTargetPath(targetPathInput);
+  try {
+    await fs.mkdir(targetPath, { recursive: false });
+  } catch (error) {
+    normalizeFsError(error, targetPath);
+  }
+}
+
+export async function rename(sourcePathInput: string, targetPathInput: string): Promise<void> {
+  const sourcePath = await resolveExistingPath(sourcePathInput);
+  const targetPath = await resolveTargetPath(targetPathInput);
+  ensureNotRootPath(sourcePath);
+  try {
+    await fs.rename(sourcePath, targetPath);
+  } catch (error) {
+    normalizeFsError(error, targetPath);
+  }
+}
+
+export async function copy(sourcePathInput: string, targetPathInput: string): Promise<void> {
+  const sourcePath = await resolveExistingPath(sourcePathInput);
+  const targetPath = await resolveTargetPath(targetPathInput);
+  try {
+    await fs.copy(sourcePath, targetPath, { overwrite: false, errorOnExist: true });
+  } catch (error) {
+    normalizeFsError(error, targetPath);
+  }
+}
+
+export async function move(sourcePathInput: string, targetPathInput: string): Promise<void> {
+  const sourcePath = await resolveExistingPath(sourcePathInput);
+  const targetPath = await resolveTargetPath(targetPathInput);
+  ensureNotRootPath(sourcePath);
+  try {
+    await fs.rename(sourcePath, targetPath);
+    return;
+  } catch (error) {
+    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+    if (code !== "EXDEV") {
+      normalizeFsError(error, targetPath);
+    }
+  }
+  await copy(sourcePath, targetPath);
+  await fs.remove(sourcePath);
+}
+
+export async function remove(targetPathInput: string): Promise<void> {
+  const targetPath = await resolveExistingPath(targetPathInput);
+  ensureNotRootPath(targetPath);
+  await fs.remove(targetPath);
 }
 
 export async function getPins(): Promise<string[]> {
