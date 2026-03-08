@@ -182,6 +182,24 @@ Templates are shipped with the DeckOS server as an immutable library (read-only 
 - Deterministic behavior: the exact compose file that will be deployed is shown to the user
 - Security: server validates parameter values and ensures all placeholders are resolved before writing to disk
 
+### AD8: File Browser Uses Whole-Host Access with Fixed Protected Path Denylist
+
+The Files module targets full host filesystem browsing, but enforces a fixed denylist of protected system paths. Rationale:
+
+- Matches the product goal of replacing CasaOS-style host file management
+- Keeps behavior predictable for users by avoiding dynamic path-policy complexity in v0.2
+- Reduces catastrophic risk by hard-blocking sensitive OS/runtime paths
+
+All file operations must resolve and validate requested paths against the denylist before IO. Denied access returns explicit permission/protection errors.
+
+### AD9: Files Metadata and Mutations via tRPC; Binary Content via Direct HTTP Routes
+
+The Files module uses tRPC for metadata and mutating operations (list, stat, create, rename, copy, move, delete, write-text), and direct Hono routes for streaming file bytes (download, media preview, upload multipart). Rationale:
+
+- Keeps DeckOS consistent with existing type-safe tRPC mutation/query patterns
+- Preserves efficient binary streaming semantics (range requests, multipart bodies) outside JSON RPC
+- Supports browser-native media playback without adding transcoding complexity in v0.2
+
 ## Templates
 
 ### Template Library Layout (Conceptual)
@@ -258,6 +276,18 @@ docker.restart        -> void        (input: appId)
 docker.pull           -> stream      (input: appId)
 docker.getContainers  -> Container[] (input: appId)
 docker.getStatus      -> StackStatus (input: appId)
+
+files.list            -> { cwd, entries[] } (input: path, showHidden, viewMode, sort)
+files.getMeta         -> FileMeta
+files.readText        -> { content, encoding, truncated, readOnlySuggested }
+files.writeText       -> void        (input: path, content)
+files.mkdir           -> void
+files.rename          -> void
+files.copy            -> JobStatus | void
+files.move            -> void        (rename, fallback copy+delete across filesystems)
+files.delete          -> void
+files.getPins         -> { items: string[] }
+files.setPins         -> { items: string[] } (global pinned directories)
 ```
 
 ### SSE Endpoints (direct Hono routes)
@@ -266,6 +296,9 @@ docker.getStatus      -> StackStatus (input: appId)
 GET /api/metrics/stream       -> SSE: system metrics every 2s
 GET /api/logs/:containerId    -> SSE: container log stream
 GET /api/docker/events        -> SSE: Docker daemon events (container start/stop/die)
+GET /api/files/content        -> stream: file bytes (supports Range for media)
+POST /api/files/upload        -> multipart upload to target directory
+GET /api/files/download       -> attachment response for a single file
 ```
 
 ## Data Flow
@@ -330,6 +363,40 @@ systeminformation polls (2s interval)
   Dashboard components re-render
 ```
 
+### File Browser Flow
+
+```
+User opens Files tab ──> tRPC files.list(path, showHidden)
+                            │
+                            ├── Validate path against fixed denylist
+                            ├── Read directory entries + metadata
+                            └── Return entries for table/icon view
+                                  │
+                                  ▼
+User opens text file ──> tRPC files.readText
+                            │
+                            ├── Apply size threshold policy
+                            ├── Return content + readOnlySuggested
+                            └── Client opens full-page editor
+                                  │
+                                  ▼
+                           tRPC files.writeText
+                                  │
+                                  └── Persist with last-save-wins behavior
+
+User previews media ──> GET /api/files/content?path=...
+                            │
+                            ├── Validate path and denylist
+                            ├── Return range-capable stream
+                            └── Browser-native playback/rendering
+
+User uploads file(s) ──> POST /api/files/upload (multipart)
+                            │
+                            ├── Validate destination path
+                            ├── Stream file(s) to disk
+                            └── Refresh directory listing via files.list
+```
+
 ## Deployment Architecture
 
 DeckOS runs directly on the host OS as a long-running service (no containerization). In production, the Hono server serves the built SPA static files and the API from the same port (default: 3000).
@@ -390,3 +457,7 @@ While the GitHub repo is private, both install and update flows require GitHub c
 - No authentication at this stage -- the assumption is LAN-only access behind a firewall.
 - Compose YAML is validated but user-supplied; malicious YAML could mount host paths. This is acceptable for the single-user homelab context.
 - Templates are treated as user-supplied inputs at deploy time: rendered output is shown/editable before deploy, and server-side validation ensures all template placeholders are resolved and parameter types are enforced.
+- Files module path access is constrained by a fixed protected-path denylist; all browse/read/write/upload/download operations must enforce it consistently.
+- Path traversal prevention must use normalized absolute path resolution before filesystem access; symbolic link escapes must be denied when they resolve into protected paths.
+- Direct file streaming endpoints must enforce explicit content disposition/content type behavior and return clear errors on denied/unreadable paths.
+- Large text file reads should surface read-only guidance to the client to prevent browser instability.

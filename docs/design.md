@@ -94,7 +94,7 @@ This is not "dark mode with rounded corners." It is a **control system** that ha
 
 ```
 +--[TOP BAR - 48px]-------------------------------------------+
-| DECKOS          [Dashboard] [Apps] [Settings]     hostname   |
+| DECKOS      [Dashboard] [Apps] [Files] [Settings] hostname   |
 +--------------------------------------------------------------+
 |                                                              |
 |                     MAIN CONTENT AREA                        |
@@ -123,7 +123,7 @@ This is not "dark mode with rounded corners." It is a **control system** that ha
 
 - Fixed position, `height: 48px`, `background: --bg-primary`, bottom border `1px solid --border-primary`
 - Left: "DECKOS" logotype in `--font-display`, `--text-lg`, `--accent-primary` color, `letter-spacing: 0.15em`
-- Center: Navigation links styled as tab-like segments: `DASHBOARD | APPS | SETTINGS`. Active item has a bottom 2px border in `--accent-primary` and text in `--accent-primary`. Inactive items in `--text-secondary`.
+- Center: Navigation links styled as tab-like segments: `DASHBOARD | APPS | FILES | SETTINGS`. Active item has a bottom 2px border in `--accent-primary` and text in `--accent-primary`. Inactive items in `--text-secondary`.
 - Right: Hostname in `--text-muted`, `--text-xs`, uppercase
 
 ### Dashboard Page
@@ -325,6 +325,66 @@ Minimal for now:
 - Data directory path display
 - About section with version number
 
+### Files Page
+
+The Files page is a host file management workspace with dense navigation and fast operations.
+
+```
++--[FILES HEADER]------------------------------------------------------------+
+| PINS | TREE | PATH: [/mnt/media/movies] [UP] [NEW FOLDER] [UPLOAD] [VIEW] |
++----------------------------------------------------------------------------+
+| LEFT PANE (320px)           | MAIN PANE                                    |
+|-----------------------------|----------------------------------------------|
+| PINNED DIRECTORIES          | [ICON VIEW] or [TABLE VIEW]                 |
+| - /                         | NAME        TYPE    SIZE    MODIFIED CREATED |
+| - /var/lib/deckos           |----------------------------------------------|
+| - /mnt/media                | movie.mkv   VIDEO   3.2 GB  ...      ...    |
+|                             | notes.txt   TEXT    8 KB    ...      ...    |
+| DIRECTORY TREE              | poster.jpg  IMAGE   1.3 MB  ...      ...    |
+| /                           |                                              |
+| ├─ etc                      | [HIDDEN FILES: OFF|ON]                      |
+| ├─ home                     |                                              |
+| └─ mnt                      |                                              |
++----------------------------------------------------------------------------+
+```
+
+- Left pane includes global pinned directories and a full directory tree explorer
+- Path bar is always visible and accepts direct path input
+- Main pane supports icon and table modes with identical operations
+- Table columns: name, file type, size, modified date, created date (created may show unavailable fallback)
+- Hidden files are off by default and exposed through an explicit toggle
+- File operations in context menu/action bar: open, rename, delete, copy, move, download
+- Upload is drag-and-drop into current directory plus action-button fallback
+- Folder download is not present in v0.2
+
+### Files Full-Page Viewers
+
+Opening supported files transitions into a full-page viewer/editor with back navigation.
+
+```
++--[BACK TO FILES]----------------------------------------------------------+
+| /mnt/media/movies/trailer.mp4                                             |
++----------------------------------------------------------------------------+
+|                                                                            |
+|                        [FULL-PAGE PREVIEW AREA]                            |
+|                                                                            |
+|  Text files: CodeMirror editor + preview/save actions                      |
+|  Images: fit/zoom image viewer                                             |
+|  Audio/Video: browser-native controls                                      |
+|  PDF: dedicated full-page viewer (phase 3)                                 |
+|                                                                            |
++----------------------------------------------------------------------------+
+```
+
+- Full-page mode is used instead of side preview panes or modal previews
+- A persistent back button returns to the previous Files location/state
+- Text editor behavior:
+  - Reuses the DeckOS CodeMirror editor style
+  - Large files enter read-only mode first with explicit override action
+  - Save semantics are last-save-wins for v0.2
+- Media preview uses direct stream playback only; no transcoding UI in v0.2
+- PDF viewer is included in the design system and delivered in phase 3
+
 ## Interaction Patterns
 
 ### Buttons
@@ -375,6 +435,8 @@ Minimal for now:
 - **768-1023px**: 2-column metrics, 2-column apps
 - **< 768px**: Single column stack, metrics become compact horizontal bars
 - Navigation collapses to a hamburger menu below 768px
+- Files page collapses from split-pane into stacked sections below 1024px
+- Files table enables horizontal scrolling on narrow widths
 
 ## Motion & Polish
 

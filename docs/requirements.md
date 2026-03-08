@@ -63,6 +63,27 @@ Homelab enthusiasts running headless Linux servers (Raspberry Pi, NUC, old lapto
 - **R5.5** All API communication between frontend and backend uses tRPC for end-to-end type safety
 - **R5.6** Production installs support an idempotent host-native install flow and an update flow that preserves the data directory across upgrades (using GitHub Releases; private repo access via credentials is supported temporarily)
 
+### R6: File Browser
+
+- **R6.1** Add a top-level `Files` tab in the main navigation
+- **R6.2** Provide full host filesystem browsing with directory tree exploration and a path bar
+- **R6.3** Include a left pane with globally pinned directories and fast navigation shortcuts
+- **R6.4** Support file listing in two modes: icon grid and table view
+- **R6.5** Table view shows file name, file type, size, modified date, and created date (with graceful fallback when created date is unavailable on the host filesystem)
+- **R6.6** Hidden files are not shown by default and are exposed through a user toggle
+- **R6.7** Support drag-and-drop file upload from browser to current host directory using simple multipart upload
+- **R6.8** Support file download for individual files (folder download is out of scope for v0.2)
+- **R6.9** Support create, rename, delete, copy, and move operations for files/folders
+- **R6.10** Cross-filesystem move operations automatically fall back to copy+delete when native rename is not possible
+- **R6.11** Support opening text-based files in a full-page editor with preview and save
+- **R6.12** Large text files use a read-only threshold mode with an explicit user override
+- **R6.13** If an open text file changes on disk, save behavior is last-save-wins for v0.2
+- **R6.14** Support full-page in-app media preview for images, audio, and video, with a back button to return to browsing
+- **R6.15** Media playback is direct stream only (HTTP range requests + browser-native codecs); no transcoding in v0.2
+- **R6.16** PDF preview is recommended for initial v0.2 launch
+- **R6.17** Enforce a fixed denylist of protected system paths that cannot be browsed or modified through DeckOS
+- **R6.18** Files APIs must return clear permission and protection errors for denied paths
+
 ## Non-Requirements (Explicitly Out of Scope)
 
 - User authentication and multi-user support
@@ -72,6 +93,8 @@ Homelab enthusiasts running headless Linux servers (Raspberry Pi, NUC, old lapto
 - Automated backups
 - Plugin/extension system
 - Mobile-native application
+- Server-side media transcoding for the Files module in v0.2
+- Folder download/archive export in v0.2
 
 ## Success Criteria
 
@@ -82,3 +105,4 @@ The platform is successful when a user can:
 3. Click the tile to open the app's web UI
 4. Deploy a common app from a template, fill required parameters, and start it without writing YAML
 5. View logs, restart, or tear down the stack -- all without touching a terminal
+6. Browse host files, upload/download files, edit text files, and preview media directly in DeckOS without SSH
