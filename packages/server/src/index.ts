@@ -17,10 +17,14 @@ import { readFileSync, existsSync, createReadStream } from "fs";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { join, dirname, basename } from "path";
 import { fileURLToPath } from "url";
-import type { Readable } from "node:stream";
+import { Readable } from "node:stream";
 import type Dockerode from "dockerode";
 
 dockerService.getDocker();
+
+function toWebStream(fileStream: NodeJS.ReadableStream): ReadableStream {
+  return Readable.toWeb(fileStream as unknown as Readable) as ReadableStream;
+}
 
 // Global error handler
 process.on("uncaughtException", (error) => {
@@ -190,9 +194,79 @@ app.get("/api/files/download", async (c) => {
     c.header("Content-Disposition", `attachment; filename="${basename(filePath)}"`);
     c.header("Content-Type", "application/octet-stream");
     c.header("Content-Length", String(fileStat.size));
-    return c.body(createReadStream(filePath) as unknown as ReadableStream);
+    return c.body(toWebStream(createReadStream(filePath)));
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Download failed";
+    if (error instanceof filesService.FilesAccessDeniedError) {
+      return c.json({ error: message }, 403);
+    }
+    if (error instanceof filesService.FilesNotFoundError) {
+      return c.json({ error: message }, 404);
+    }
+    return c.json({ error: message }, 500);
+  }
+});
+
+app.get("/api/files/content", async (c) => {
+  const targetParam = c.req.query("path");
+  if (!targetParam) {
+    return c.json({ error: "Missing path" }, 400);
+  }
+  try {
+    const filePath = await filesService.resolveExistingPath(targetParam);
+    const fileStat = await stat(filePath);
+    if (!fileStat.isFile()) {
+      return c.json({ error: "Content path must be a file" }, 400);
+    }
+
+    const mimeType = filesService.getPathMimeType(filePath);
+    const totalSize = fileStat.size;
+    const rangeHeader = c.req.header("range");
+
+    c.header("Accept-Ranges", "bytes");
+    c.header("Content-Type", mimeType);
+    c.header("Cache-Control", "no-store");
+
+    if (!rangeHeader) {
+      c.header("Content-Length", String(totalSize));
+      return c.body(toWebStream(createReadStream(filePath)));
+    }
+
+    const match = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim());
+    if (!match) {
+      c.header("Content-Range", `bytes */${totalSize}`);
+      return c.body("Requested Range Not Satisfiable", 416);
+    }
+
+    const startRaw = match[1];
+    const endRaw = match[2];
+    let start = startRaw ? Number.parseInt(startRaw, 10) : 0;
+    let end = endRaw ? Number.parseInt(endRaw, 10) : totalSize - 1;
+
+    if (!startRaw && endRaw) {
+      const suffixLength = Number.parseInt(endRaw, 10);
+      start = Math.max(totalSize - suffixLength, 0);
+      end = totalSize - 1;
+    }
+
+    if (
+      !Number.isFinite(start) ||
+      !Number.isFinite(end) ||
+      start < 0 ||
+      end < start ||
+      start >= totalSize
+    ) {
+      c.header("Content-Range", `bytes */${totalSize}`);
+      return c.body("Requested Range Not Satisfiable", 416);
+    }
+
+    end = Math.min(end, totalSize - 1);
+    const chunkSize = end - start + 1;
+    c.header("Content-Range", `bytes ${start}-${end}/${totalSize}`);
+    c.header("Content-Length", String(chunkSize));
+    return c.body(toWebStream(createReadStream(filePath, { start, end })), 206);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Content read failed";
     if (error instanceof filesService.FilesAccessDeniedError) {
       return c.json({ error: message }, 403);
     }

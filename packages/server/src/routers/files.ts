@@ -13,6 +13,9 @@ function toTrpcError(error: unknown): TRPCError {
   if (error instanceof filesService.FilesNotDirectoryError) {
     return new TRPCError({ code: "BAD_REQUEST", message: error.message });
   }
+  if (error instanceof filesService.FilesNotFileError) {
+    return new TRPCError({ code: "BAD_REQUEST", message: error.message });
+  }
   if (error instanceof filesService.FilesAlreadyExistsError) {
     return new TRPCError({ code: "CONFLICT", message: error.message });
   }
@@ -45,6 +48,48 @@ export const filesRouter = router({
       throw toTrpcError(error);
     }
   }),
+  getMeta: publicProcedure
+    .input(
+      z.object({
+        path: z.string(),
+      })
+    )
+    .query(async ({ input }) => {
+      try {
+        return await filesService.getMeta(input.path);
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+  readText: publicProcedure
+    .input(
+      z.object({
+        path: z.string(),
+        forceEditable: z.boolean().optional().default(false),
+      })
+    )
+    .query(async ({ input }) => {
+      try {
+        return await filesService.readText(input.path, input.forceEditable);
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+  writeText: publicProcedure
+    .input(
+      z.object({
+        path: z.string(),
+        content: z.string(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      try {
+        await filesService.writeText(input.path, input.content);
+        return { success: true };
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
   setPins: publicProcedure
     .input(
       z.object({

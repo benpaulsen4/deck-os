@@ -1,12 +1,32 @@
 import { useEffect, useRef } from "react";
 import { EditorView } from "@codemirror/view";
-import { EditorState } from "@codemirror/state";
+import { EditorState, Transaction } from "@codemirror/state";
 import { lineNumbers } from "@codemirror/view";
 import { yaml } from "@codemirror/lang-yaml";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { javascript } from "@codemirror/lang-javascript";
+import { html } from "@codemirror/lang-html";
+import { css } from "@codemirror/lang-css";
+import { markdown } from "@codemirror/lang-markdown";
+import { python } from "@codemirror/lang-python";
+import { sql } from "@codemirror/lang-sql";
+import { xml } from "@codemirror/lang-xml";
+import { HighlightStyle, syntaxHighlighting, StreamLanguage } from "@codemirror/language";
+import { shell } from "@codemirror/legacy-modes/mode/shell";
+import { powerShell } from "@codemirror/legacy-modes/mode/powershell";
 import { tags as t } from "@lezer/highlight";
 
 const deckosHighlight = HighlightStyle.define([
+  { tag: t.heading, color: "var(--accent-primary)", fontWeight: "700" },
+  { tag: t.heading1, color: "var(--accent-primary)", fontWeight: "700" },
+  { tag: t.heading2, color: "var(--status-info)", fontWeight: "700" },
+  { tag: t.heading3, color: "var(--status-info)" },
+  { tag: t.strong, fontWeight: "700", color: "var(--text-primary)" },
+  { tag: t.emphasis, fontStyle: "italic", color: "var(--text-primary)" },
+  { tag: t.link, color: "var(--status-info)", textDecoration: "underline" },
+  { tag: t.url, color: "var(--status-info)" },
+  { tag: t.monospace, color: "var(--accent-primary)" },
+  { tag: t.quote, color: "var(--text-secondary)", fontStyle: "italic" },
+  { tag: t.list, color: "var(--text-secondary)" },
   { tag: t.string, color: "var(--accent-primary)" },
   { tag: t.number, color: "var(--meter-cpu)" },
   { tag: t.bool, color: "var(--meter-memory)" },
@@ -23,6 +43,20 @@ interface CodeEditorProps {
   onChange: (value: string) => void;
   readonly?: boolean;
   minHeight?: string;
+  height?: string;
+  language?:
+    | "yaml"
+    | "javascript"
+    | "typescript"
+    | "css"
+    | "html"
+    | "xml"
+    | "markdown"
+    | "python"
+    | "sql"
+    | "shell"
+    | "powershell"
+    | "plain";
 }
 
 export function CodeEditor({
@@ -30,6 +64,8 @@ export function CodeEditor({
   onChange,
   readonly = false,
   minHeight = "300px",
+  height,
+  language = "yaml",
 }: CodeEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -40,7 +76,6 @@ export function CodeEditor({
     const extensions = [
       lineNumbers(),
       EditorView.editable.of(!readonly),
-      yaml(),
       syntaxHighlighting(deckosHighlight),
       EditorView.theme(
         {
@@ -49,6 +84,7 @@ export function CodeEditor({
             color: "var(--text-primary)",
             fontSize: "var(--text-base)",
             fontFamily: "'JetBrains Mono', monospace",
+            height: height ?? "auto",
           },
           ".cm-content": {
             padding: "var(--space-2)",
@@ -76,6 +112,8 @@ export function CodeEditor({
           ".cm-scroller": {
             border: "1px solid var(--border-primary)",
             borderRadius: 0,
+            overflow: "auto",
+            height: "100%",
           },
           ".cm-focused": {
             outline: "none",
@@ -90,11 +128,42 @@ export function CodeEditor({
       EditorView.lineWrapping,
       EditorState.tabSize.of(2),
       EditorView.updateListener.of((update) => {
-        if (update.docChanged && !readonly) {
+        const changedByUser = update.transactions.some((transaction) => {
+          const userEvent = transaction.annotation(Transaction.userEvent);
+          return typeof userEvent === "string";
+        });
+        if (update.docChanged && changedByUser && !readonly) {
           onChange(update.state.doc.toString());
         }
       }),
     ];
+    const languageExtension =
+      language === "yaml"
+        ? yaml()
+        : language === "javascript"
+          ? javascript()
+          : language === "typescript"
+            ? javascript({ typescript: true })
+            : language === "css"
+              ? css()
+              : language === "html"
+                ? html()
+                : language === "xml"
+                  ? xml()
+                  : language === "markdown"
+                    ? markdown()
+                    : language === "python"
+                      ? python()
+                      : language === "sql"
+                        ? sql()
+                        : language === "shell"
+                          ? StreamLanguage.define(shell)
+                          : language === "powershell"
+                            ? StreamLanguage.define(powerShell)
+                        : null;
+    if (languageExtension) {
+      extensions.splice(2, 0, languageExtension);
+    }
 
     const state = EditorState.create({
       doc: value,
@@ -111,7 +180,7 @@ export function CodeEditor({
     return () => {
       view.destroy();
     };
-  }, [readonly]);
+  }, [readonly, minHeight, height, language]);
 
   useEffect(() => {
     if (viewRef.current && value !== viewRef.current.state.doc.toString()) {
@@ -121,5 +190,5 @@ export function CodeEditor({
     }
   }, [value]);
 
-  return <div ref={containerRef} className="code-editor" style={{ minHeight }} />;
+  return <div ref={containerRef} className="code-editor" style={{ minHeight, height }} />;
 }

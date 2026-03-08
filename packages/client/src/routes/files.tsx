@@ -19,11 +19,14 @@ import {
   LayoutGrid,
   Table,
   Clipboard,
+  ArrowLeft,
+  Save,
 } from "lucide-react";
 import { useTRPC, trpcClient } from "../trpc";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { CodeEditor } from "../components/ui/CodeEditor";
 import { useToastStore } from "../stores/toast";
 
 export const Route = createFileRoute("/files")({
@@ -101,6 +104,66 @@ type SortBy = "name" | "size" | "modifiedAt" | "createdAt";
 type SortDirection = "asc" | "desc";
 type FileActionMode = "mkdir" | "rename" | null;
 type ClipboardState = { mode: "copy" | "cut"; paths: string[] } | null;
+type ViewerMode = "text" | "image" | "audio" | "video" | "pdf" | "binary";
+type EditorLanguage =
+  | "yaml"
+  | "javascript"
+  | "typescript"
+  | "css"
+  | "html"
+  | "xml"
+  | "markdown"
+  | "python"
+  | "sql"
+  | "shell"
+  | "powershell"
+  | "plain";
+
+function getViewerMode(mimeType: string): ViewerMode {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("audio/")) return "audio";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType === "application/pdf") return "pdf";
+  if (
+    mimeType.startsWith("text/") ||
+    mimeType === "application/json" ||
+    mimeType === "application/xml" ||
+    mimeType === "application/yaml"
+  ) {
+    return "text";
+  }
+  return "binary";
+}
+
+function getEditorLanguage(filePath: string, mimeType: string): EditorLanguage {
+  const extension = filePath.split(".").pop()?.toLowerCase() ?? "";
+  if (extension === "yml" || extension === "yaml" || mimeType === "application/yaml") return "yaml";
+  if (extension === "json" || extension === "jsonc" || mimeType === "application/json") return "javascript";
+  if (extension === "js" || extension === "mjs" || extension === "cjs" || extension === "jsx") return "javascript";
+  if (extension === "ts" || extension === "tsx") return "typescript";
+  if (extension === "css" || extension === "scss" || extension === "less") return "css";
+  if (extension === "html" || extension === "htm") return "html";
+  if (extension === "xml" || extension === "svg" || mimeType === "application/xml") return "xml";
+  if (extension === "md" || extension === "markdown" || extension === "mdx") return "markdown";
+  if (extension === "py") return "python";
+  if (extension === "sql") return "sql";
+  if (extension === "sh" || extension === "bash" || extension === "zsh" || extension === "cmd" || extension === "bat")
+    return "shell";
+  if (extension === "ps1" || extension === "psm1" || extension === "psd1" || extension === "ps1xml")
+    return "powershell";
+  return "plain";
+}
+
+function getPreviewTypeLabel(pathValue: string, mimeType: string): string {
+  if (mimeType !== "application/octet-stream") {
+    return mimeType;
+  }
+  const extension = pathValue.split(".").pop()?.toLowerCase();
+  if (!extension) {
+    return "Unknown binary";
+  }
+  return `${extension.toUpperCase()} file`;
+}
 
 function FilesPage() {
   const trpc = useTRPC();
@@ -119,13 +182,28 @@ function FilesPage() {
   const [actionInputValue, setActionInputValue] = useState("");
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [clipboard, setClipboard] = useState<ClipboardState>(null);
+  const [viewerPath, setViewerPath] = useState<string | null>(null);
+  const [forceEditable, setForceEditable] = useState(false);
+  const [editorContent, setEditorContent] = useState("");
+  const [editorBaseline, setEditorBaseline] = useState("");
+  const [editorDirty, setEditorDirty] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const tableScrollRef = useRef<HTMLDivElement | null>(null);
+  const gridScrollRef = useRef<HTMLDivElement | null>(null);
+  const savedListScrollTopRef = useRef(0);
+  const shouldRestoreScrollRef = useRef(false);
+  const restoreIntervalRef = useRef<number | null>(null);
 
   const listQuery = useQuery(
-    trpc.files.list.queryOptions({
-      path: requestedPath,
-      showHidden,
-    })
+    trpc.files.list.queryOptions(
+      {
+        path: requestedPath,
+        showHidden,
+      },
+      {
+        refetchOnMount: false,
+      }
+    )
   );
   const pinsQuery = useQuery(trpc.files.getPins.queryOptions());
 
@@ -160,6 +238,10 @@ function FilesPage() {
   const deleteMutation = useMutation({
     mutationFn: async (targetPath: string) => await trpcClient.files.delete.mutate({ path: targetPath }),
   });
+  const writeTextMutation = useMutation({
+    mutationFn: async ({ path, content }: { path: string; content: string }) =>
+      await trpcClient.files.writeText.mutate({ path, content }),
+  });
 
   useEffect(() => {
     if (listQuery.data?.cwd) {
@@ -177,6 +259,13 @@ function FilesPage() {
     setSelectedPaths([]);
     setSelectionAnchorPath(null);
   }, [currentPath]);
+
+  useEffect(() => {
+    setForceEditable(false);
+    setEditorContent("");
+    setEditorBaseline("");
+    setEditorDirty(false);
+  }, [viewerPath]);
 
   const sortedEntries = useMemo(() => {
     const value = [...entries];
@@ -206,6 +295,66 @@ function FilesPage() {
   const canUseSelectionActions = selectedEntries.length > 0;
   const canRename = selectedEntries.length === 1;
   const canDownloadSelectedFile = selectedEntries.length === 1 && selectedEntries[0]?.type === "file";
+  const fileMetaQuery = useQuery(
+    trpc.files.getMeta.queryOptions(
+      { path: viewerPath ?? "" },
+      {
+        enabled: !!viewerPath,
+      }
+    )
+  );
+  const viewerMode = fileMetaQuery.data ? getViewerMode(fileMetaQuery.data.mimeType) : null;
+  const readTextQuery = useQuery(
+    trpc.files.readText.queryOptions(
+      { path: viewerPath ?? "", forceEditable },
+      {
+        enabled: !!viewerPath && viewerMode === "text",
+      }
+    )
+  );
+
+  useEffect(() => {
+    if (readTextQuery.data) {
+      setEditorContent(readTextQuery.data.content);
+      setEditorBaseline(readTextQuery.data.content);
+      setEditorDirty(false);
+    }
+  }, [readTextQuery.data]);
+
+  useEffect(() => {
+    const restore = () => {
+      const target =
+        viewMode === "table"
+          ? tableScrollRef.current
+          : viewMode === "grid"
+            ? gridScrollRef.current
+            : null;
+      if (target) {
+        target.scrollTop = savedListScrollTopRef.current;
+      }
+    };
+    if (!viewerPath && shouldRestoreScrollRef.current) {
+      let attempts = 0;
+      requestAnimationFrame(restore);
+      restoreIntervalRef.current = window.setInterval(() => {
+        restore();
+        attempts += 1;
+        if (attempts >= 16 && !listQuery.isFetching) {
+          if (restoreIntervalRef.current !== null) {
+            window.clearInterval(restoreIntervalRef.current);
+            restoreIntervalRef.current = null;
+          }
+          shouldRestoreScrollRef.current = false;
+        }
+      }, 40);
+      return () => {
+        if (restoreIntervalRef.current !== null) {
+          window.clearInterval(restoreIntervalRef.current);
+          restoreIntervalRef.current = null;
+        }
+      };
+    }
+  }, [viewerPath, viewMode, listQuery.isFetching, listQuery.dataUpdatedAt]);
 
   const refreshDirectory = async () => {
     await queryClient.invalidateQueries({
@@ -374,6 +523,39 @@ function FilesPage() {
     await refreshDirectory();
   };
 
+  const handleSaveText = async () => {
+    if (!viewerPath) {
+      return;
+    }
+    try {
+      await writeTextMutation.mutateAsync({ path: viewerPath, content: editorContent });
+      setEditorBaseline(editorContent);
+      setEditorDirty(false);
+      addToast("Saved", "success");
+      await queryClient.invalidateQueries({
+        queryKey: trpc.files.readText.queryOptions({ path: viewerPath, forceEditable }).queryKey,
+      });
+    } catch (error) {
+      withOperationErrorToast(error, "Failed to save file");
+    }
+  };
+
+  const openFileViewer = (targetPath: string) => {
+    if (restoreIntervalRef.current !== null) {
+      window.clearInterval(restoreIntervalRef.current);
+      restoreIntervalRef.current = null;
+    }
+    shouldRestoreScrollRef.current = false;
+    const scrollContainer = viewMode === "table" ? tableScrollRef.current : gridScrollRef.current;
+    savedListScrollTopRef.current = scrollContainer?.scrollTop ?? 0;
+    setViewerPath(targetPath);
+  };
+
+  const closeFileViewer = () => {
+    shouldRestoreScrollRef.current = true;
+    setViewerPath(null);
+  };
+
   const uploadFiles = async (files: File[]) => {
     if (!currentPath || files.length === 0) return;
     const formData = new FormData();
@@ -401,6 +583,134 @@ function FilesPage() {
     await uploadFiles(files);
     event.target.value = "";
   };
+
+  if (viewerPath) {
+    const sourceUrl = `/api/files/content?path=${encodeURIComponent(viewerPath)}`;
+    const readOnlySuggested = !!readTextQuery.data?.readOnlySuggested;
+    const isTextReadonly = readOnlySuggested && !forceEditable;
+    const editorLanguage = fileMetaQuery.data
+      ? getEditorLanguage(viewerPath, fileMetaQuery.data.mimeType)
+      : "plain";
+    return (
+      <div className="page-container page-container--viewport">
+        <div className="page-header files-viewer-header">
+          <Button type="button" variant="secondary" onClick={closeFileViewer}>
+            <ArrowLeft size={14} />
+            <span>Back</span>
+          </Button>
+          <div className="files-viewer-title">
+            <div className="files-viewer-path-pill">{viewerPath}</div>
+          </div>
+          {viewerMode === "text" && (
+            <div className="files-viewer-actions">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleSaveText}
+                disabled={isTextReadonly || !editorDirty || writeTextMutation.isPending}
+              >
+                <Save size={14} />
+                <span>Save</span>
+              </Button>
+            </div>
+          )}
+        </div>
+        <div className="page-body panel files-viewer-body">
+          {fileMetaQuery.isLoading ? (
+            <div className="files-empty">Loading file…</div>
+          ) : fileMetaQuery.error ? (
+            <div className="files-error">
+              <span>{fileMetaQuery.error.message}</span>
+            </div>
+          ) : viewerMode === "text" ? (
+            <div className="files-text-viewer">
+              {(readTextQuery.data?.readOnlySuggested || readTextQuery.data?.truncated) && (
+                <div className="files-viewer-warning">
+                  <span>
+                    {readTextQuery.data?.truncated
+                      ? "File content is truncated for safety."
+                      : "Large file opened in read-only mode."}
+                  </span>
+                  {readTextQuery.data?.readOnlySuggested && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setForceEditable(true)}
+                      disabled={forceEditable}
+                    >
+                      Enable Editing
+                    </Button>
+                  )}
+                </div>
+              )}
+              {readTextQuery.isLoading ? (
+                <div className="files-empty">Loading text…</div>
+              ) : readTextQuery.error ? (
+                <div className="files-error">
+                  <span>{readTextQuery.error.message}</span>
+                </div>
+              ) : (
+                <div className="files-text-editor-wrap">
+                  <CodeEditor
+                    value={editorContent}
+                    onChange={(value) => {
+                      setEditorContent(value);
+                      setEditorDirty(value !== editorBaseline);
+                    }}
+                    readonly={isTextReadonly}
+                    language={editorLanguage}
+                    height="100%"
+                    minHeight="100%"
+                  />
+                </div>
+              )}
+            </div>
+          ) : viewerMode === "image" ? (
+            <div className="files-media-viewer">
+              <img src={sourceUrl} className="files-media-image" />
+            </div>
+          ) : viewerMode === "audio" ? (
+            <div className="files-media-viewer">
+              <audio controls src={sourceUrl} className="files-media-audio" />
+            </div>
+          ) : viewerMode === "video" ? (
+            <div className="files-media-viewer">
+              <video controls src={sourceUrl} className="files-media-video" />
+            </div>
+          ) : viewerMode === "pdf" ? (
+            <div className="files-pdf-viewer">
+              <iframe src={sourceUrl} className="files-pdf-frame" />
+            </div>
+          ) : (
+            <div className="files-binary-viewer">
+              <div className="files-binary-card">
+                <File size={28} />
+                <div className="files-binary-title">Preview not available</div>
+                <div className="files-binary-meta">
+                  {viewerPath
+                    ? getPreviewTypeLabel(viewerPath, fileMetaQuery.data?.mimeType ?? "application/octet-stream")
+                    : "Unknown type"}
+                </div>
+                <div className="files-binary-meta">
+                  {formatSize(fileMetaQuery.data?.size ?? null)}
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    window.open(`/api/files/download?path=${encodeURIComponent(viewerPath)}`, "_blank")
+                  }
+                >
+                  <Download size={14} />
+                  <span>Download</span>
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page-container page-container--viewport">
@@ -631,7 +941,7 @@ function FilesPage() {
               <span>{listQuery.error.message}</span>
             </div>
           ) : viewMode === "table" ? (
-            <div className="files-table-wrap">
+            <div className="files-table-wrap" ref={tableScrollRef}>
               <table className="deckos-table">
                 <thead>
                   <tr>
@@ -643,7 +953,7 @@ function FilesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {listQuery.isLoading || listQuery.isFetching ? (
+                  {listQuery.isLoading ? (
                     <tr>
                       <td colSpan={5} className="files-loading-cell">
                         Loading directory…
@@ -669,6 +979,8 @@ function FilesPage() {
                         onDoubleClick={() => {
                           if (entry.type === "directory") {
                             handleNavigate(entry.path);
+                          } else {
+                            openFileViewer(entry.path);
                           }
                         }}
                       >
@@ -694,7 +1006,7 @@ function FilesPage() {
             </div>
           ) : null}
           {viewMode === "grid" && (
-            <div className="files-grid-wrap">
+            <div className="files-grid-wrap" ref={gridScrollRef}>
               {sortedEntries.map((entry) => (
                 <button
                   key={entry.path}
@@ -708,6 +1020,8 @@ function FilesPage() {
                   onDoubleClick={() => {
                     if (entry.type === "directory") {
                       handleNavigate(entry.path);
+                    } else {
+                      openFileViewer(entry.path);
                     }
                   }}
                 >
