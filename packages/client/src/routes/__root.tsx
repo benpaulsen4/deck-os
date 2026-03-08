@@ -102,6 +102,7 @@ function TopBar() {
   const apiStatus = getConnectionStatus("api");
   const isDashboardPath = currentPath === "/";
   const isAppsPath = currentPath === "/apps" || currentPath.startsWith("/apps/");
+  const isFilesPath = currentPath === "/files" || currentPath.startsWith("/files/");
   const isSettingsPath = currentPath === "/settings" || currentPath.startsWith("/settings/");
 
   const connectionStyle: React.CSSProperties = {
@@ -150,6 +151,13 @@ function TopBar() {
               activeProps={{ className: "topbar-link topbar-link--active" }}
             >
               Apps
+            </Link>
+            <Link
+              to="/files"
+              className="topbar-link"
+              activeProps={{ className: "topbar-link topbar-link--active" }}
+            >
+              Files
             </Link>
             <Link
               to="/settings"
@@ -277,6 +285,21 @@ function TopBar() {
             onClick={() => setMobileMenuOpen(false)}
           >
             Apps
+          </Link>
+          <Link
+            to="/files"
+            className="topbar-menu-link"
+            style={{
+              ...(isFilesPath
+                ? {
+                    color: "var(--accent-primary)",
+                    borderLeft: "2px solid var(--accent-primary)",
+                  }
+                : {}),
+            }}
+            onClick={() => setMobileMenuOpen(false)}
+          >
+            Files
           </Link>
           <Link
             to="/settings"
