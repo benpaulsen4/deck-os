@@ -1,10 +1,22 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState, useEffect, useRef, type FormEvent, type ChangeEvent } from "react";
+import {
+  useMemo,
+  useState,
+  useEffect,
+  useRef,
+  type FormEvent,
+  type ChangeEvent,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Folder,
   FolderOpen,
   File,
+  FileText,
+  FileCode,
+  Image as ImageIcon,
+  Video,
+  Music,
   Pin,
   PinOff,
   ChevronRight,
@@ -137,19 +149,40 @@ function getViewerMode(mimeType: string): ViewerMode {
 
 function getEditorLanguage(filePath: string, mimeType: string): EditorLanguage {
   const extension = filePath.split(".").pop()?.toLowerCase() ?? "";
-  if (extension === "yml" || extension === "yaml" || mimeType === "application/yaml") return "yaml";
-  if (extension === "json" || extension === "jsonc" || mimeType === "application/json") return "javascript";
-  if (extension === "js" || extension === "mjs" || extension === "cjs" || extension === "jsx") return "javascript";
+  if (extension === "yml" || extension === "yaml" || mimeType === "application/yaml")
+    return "yaml";
+  if (extension === "json" || extension === "jsonc" || mimeType === "application/json")
+    return "javascript";
+  if (
+    extension === "js" ||
+    extension === "mjs" ||
+    extension === "cjs" ||
+    extension === "jsx"
+  )
+    return "javascript";
   if (extension === "ts" || extension === "tsx") return "typescript";
   if (extension === "css" || extension === "scss" || extension === "less") return "css";
   if (extension === "html" || extension === "htm") return "html";
-  if (extension === "xml" || extension === "svg" || mimeType === "application/xml") return "xml";
-  if (extension === "md" || extension === "markdown" || extension === "mdx") return "markdown";
+  if (extension === "xml" || extension === "svg" || mimeType === "application/xml")
+    return "xml";
+  if (extension === "md" || extension === "markdown" || extension === "mdx")
+    return "markdown";
   if (extension === "py") return "python";
   if (extension === "sql") return "sql";
-  if (extension === "sh" || extension === "bash" || extension === "zsh" || extension === "cmd" || extension === "bat")
+  if (
+    extension === "sh" ||
+    extension === "bash" ||
+    extension === "zsh" ||
+    extension === "cmd" ||
+    extension === "bat"
+  )
     return "shell";
-  if (extension === "ps1" || extension === "psm1" || extension === "psd1" || extension === "ps1xml")
+  if (
+    extension === "ps1" ||
+    extension === "psm1" ||
+    extension === "psd1" ||
+    extension === "ps1xml"
+  )
     return "powershell";
   return "plain";
 }
@@ -163,6 +196,154 @@ function getPreviewTypeLabel(pathValue: string, mimeType: string): string {
     return "Unknown binary";
   }
   return `${extension.toUpperCase()} file`;
+}
+
+type FileListEntry = {
+  name: string;
+  type: "directory" | "file" | "symlink" | "other";
+  mimeType: string | null;
+};
+
+type FileVisualKind =
+  | "directory"
+  | "document"
+  | "image"
+  | "video"
+  | "audio"
+  | "code"
+  | "generic";
+
+function getExtensionLabel(fileName: string): string {
+  const extension = fileName.split(".").pop()?.trim().toUpperCase();
+  return extension && extension !== fileName.toUpperCase() ? extension : "";
+}
+
+function getMimeSubtypeLabel(mimeType: string): string {
+  if (
+    mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ) {
+    return "DOCX";
+  }
+  if (mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
+    return "XLSX";
+  }
+  if (
+    mimeType ===
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+  ) {
+    return "PPTX";
+  }
+  if (mimeType === "application/msword") {
+    return "DOC";
+  }
+  if (mimeType === "application/vnd.ms-excel") {
+    return "XLS";
+  }
+  if (mimeType === "application/vnd.ms-powerpoint") {
+    return "PPT";
+  }
+  const subtype = mimeType.split("/")[1] ?? "";
+  if (!subtype) {
+    return mimeType;
+  }
+  const normalized = subtype
+    .split(";")[0]
+    .replace(/^vnd\./, "")
+    .replace(/^x-/, "")
+    .replace(/\+xml$/, " xml")
+    .replace(/[.+_-]/g, " ")
+    .trim();
+  return normalized
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.toUpperCase())
+    .join(" ");
+}
+
+function getFileVisualKind(entry: FileListEntry): FileVisualKind {
+  if (entry.type === "directory") return "directory";
+  const extension = entry.name.split(".").pop()?.toLowerCase() ?? "";
+  const mimeType = entry.mimeType ?? "application/octet-stream";
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("audio/")) return "audio";
+  if (
+    extension === "js" ||
+    extension === "mjs" ||
+    extension === "cjs" ||
+    extension === "jsx" ||
+    extension === "ts" ||
+    extension === "tsx" ||
+    extension === "json" ||
+    extension === "jsonc" ||
+    extension === "yaml" ||
+    extension === "yml" ||
+    extension === "py" ||
+    extension === "sql" ||
+    extension === "css" ||
+    extension === "scss" ||
+    extension === "less" ||
+    extension === "xml" ||
+    extension === "html" ||
+    extension === "htm" ||
+    extension === "sh" ||
+    extension === "bash" ||
+    extension === "zsh" ||
+    extension === "ps1" ||
+    extension === "psm1" ||
+    extension === "psd1" ||
+    extension === "ps1xml" ||
+    extension === "bat" ||
+    extension === "cmd"
+  ) {
+    return "code";
+  }
+  if (mimeType.startsWith("text/")) return "document";
+  if (
+    mimeType === "application/pdf" ||
+    mimeType === "application/msword" ||
+    mimeType ===
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    mimeType === "application/vnd.ms-excel" ||
+    mimeType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    mimeType === "application/vnd.ms-powerpoint" ||
+    mimeType ===
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+  ) {
+    return "document";
+  }
+  return "generic";
+}
+
+function getEntryTypeLabel(entry: FileListEntry): string {
+  const visualKind = getFileVisualKind(entry);
+  if (visualKind === "directory") {
+    return "Directory";
+  }
+  if (entry.mimeType) {
+    const subtype = getMimeSubtypeLabel(entry.mimeType);
+    if (visualKind === "image") return `Image (${subtype})`;
+    if (visualKind === "video") return `Video (${subtype})`;
+    if (visualKind === "audio") return `Audio (${subtype})`;
+    if (visualKind === "code") return `Code (${subtype})`;
+    if (visualKind === "document") return `Document (${subtype})`;
+  }
+  const extension = getExtensionLabel(entry.name);
+  if (visualKind === "code") return extension ? `Code (${extension})` : "Code";
+  if (visualKind === "document")
+    return extension ? `Document (${extension})` : "Document";
+  return extension ? `File (${extension})` : "File";
+}
+
+function renderEntryIcon(entry: FileListEntry, size: number) {
+  const visualKind = getFileVisualKind(entry);
+  if (visualKind === "directory") return <Folder size={size} />;
+  if (visualKind === "image") return <ImageIcon size={size} />;
+  if (visualKind === "video") return <Video size={size} />;
+  if (visualKind === "audio") return <Music size={size} />;
+  if (visualKind === "code") return <FileCode size={size} />;
+  if (visualKind === "document") return <FileText size={size} />;
+  return <File size={size} />;
 }
 
 function FilesPage() {
@@ -199,16 +380,19 @@ function FilesPage() {
       {
         path: requestedPath,
         showHidden,
+        directoriesOnly: false,
       },
       {
         refetchOnMount: false,
+        placeholderData: (previous) => previous,
       }
     )
   );
   const pinsQuery = useQuery(trpc.files.getPins.queryOptions());
 
   const setPinsMutation = useMutation({
-    mutationFn: async (items: string[]) => await trpcClient.files.setPins.mutate({ items }),
+    mutationFn: async (items: string[]) =>
+      await trpcClient.files.setPins.mutate({ items }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({
         queryKey: trpc.files.getPins.queryOptions().queryKey,
@@ -221,22 +405,39 @@ function FilesPage() {
   });
 
   const mkdirMutation = useMutation({
-    mutationFn: async (targetPath: string) => await trpcClient.files.mkdir.mutate({ path: targetPath }),
+    mutationFn: async (targetPath: string) =>
+      await trpcClient.files.mkdir.mutate({ path: targetPath }),
   });
   const renameMutation = useMutation({
-    mutationFn: async ({ sourcePath, targetPath }: { sourcePath: string; targetPath: string }) =>
-      await trpcClient.files.rename.mutate({ sourcePath, targetPath }),
+    mutationFn: async ({
+      sourcePath,
+      targetPath,
+    }: {
+      sourcePath: string;
+      targetPath: string;
+    }) => await trpcClient.files.rename.mutate({ sourcePath, targetPath }),
   });
   const copyMutation = useMutation({
-    mutationFn: async ({ sourcePath, targetPath }: { sourcePath: string; targetPath: string }) =>
-      await trpcClient.files.copy.mutate({ sourcePath, targetPath }),
+    mutationFn: async ({
+      sourcePath,
+      targetPath,
+    }: {
+      sourcePath: string;
+      targetPath: string;
+    }) => await trpcClient.files.copy.mutate({ sourcePath, targetPath }),
   });
   const moveMutation = useMutation({
-    mutationFn: async ({ sourcePath, targetPath }: { sourcePath: string; targetPath: string }) =>
-      await trpcClient.files.move.mutate({ sourcePath, targetPath }),
+    mutationFn: async ({
+      sourcePath,
+      targetPath,
+    }: {
+      sourcePath: string;
+      targetPath: string;
+    }) => await trpcClient.files.move.mutate({ sourcePath, targetPath }),
   });
   const deleteMutation = useMutation({
-    mutationFn: async (targetPath: string) => await trpcClient.files.delete.mutate({ path: targetPath }),
+    mutationFn: async (targetPath: string) =>
+      await trpcClient.files.delete.mutate({ path: targetPath }),
   });
   const writeTextMutation = useMutation({
     mutationFn: async ({ path, content }: { path: string; content: string }) =>
@@ -275,7 +476,10 @@ function FilesPage() {
       if (a.type !== "directory" && b.type === "directory") return 1;
 
       if (sortBy === "name") {
-        return a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) * sortMultiplier;
+        return (
+          a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) *
+          sortMultiplier
+        );
       }
       if (sortBy === "size") {
         return ((a.size ?? -1) - (b.size ?? -1)) * sortMultiplier;
@@ -286,15 +490,17 @@ function FilesPage() {
     });
     return value;
   }, [entries, sortBy, sortDirection]);
+  const selectedPathSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
 
   const selectedEntries = useMemo(
-    () => sortedEntries.filter((entry) => selectedPaths.includes(entry.path)),
-    [sortedEntries, selectedPaths]
+    () => sortedEntries.filter((entry) => selectedPathSet.has(entry.path)),
+    [sortedEntries, selectedPathSet]
   );
   const selectedEntry = selectedEntries.length === 1 ? selectedEntries[0] : null;
   const canUseSelectionActions = selectedEntries.length > 0;
   const canRename = selectedEntries.length === 1;
-  const canDownloadSelectedFile = selectedEntries.length === 1 && selectedEntries[0]?.type === "file";
+  const canDownloadSelectedFile =
+    selectedEntries.length === 1 && selectedEntries[0]?.type === "file";
   const fileMetaQuery = useQuery(
     trpc.files.getMeta.queryOptions(
       { path: viewerPath ?? "" },
@@ -303,7 +509,9 @@ function FilesPage() {
       }
     )
   );
-  const viewerMode = fileMetaQuery.data ? getViewerMode(fileMetaQuery.data.mimeType) : null;
+  const viewerMode = fileMetaQuery.data
+    ? getViewerMode(fileMetaQuery.data.mimeType)
+    : null;
   const readTextQuery = useQuery(
     trpc.files.readText.queryOptions(
       { path: viewerPath ?? "", forceEditable },
@@ -358,7 +566,8 @@ function FilesPage() {
 
   const refreshDirectory = async () => {
     await queryClient.invalidateQueries({
-      queryKey: trpc.files.list.queryOptions({ path: requestedPath, showHidden }).queryKey,
+      queryKey: trpc.files.list.queryOptions({ path: requestedPath, showHidden })
+        .queryKey,
     });
   };
 
@@ -368,7 +577,8 @@ function FilesPage() {
 
   const handleItemClick = (targetPath: string, event: React.MouseEvent) => {
     if (event.shiftKey) {
-      const anchorPath = selectionAnchorPath ?? selectedPaths[selectedPaths.length - 1] ?? targetPath;
+      const anchorPath =
+        selectionAnchorPath ?? selectedPaths[selectedPaths.length - 1] ?? targetPath;
       const targetIndex = sortedEntries.findIndex((entry) => entry.path === targetPath);
       const anchorIndex = sortedEntries.findIndex((entry) => entry.path === anchorPath);
       if (targetIndex === -1 || anchorIndex === -1) {
@@ -443,7 +653,10 @@ function FilesPage() {
       return;
     }
     setClipboard({ mode, paths: [...selectedPaths] });
-    addToast(`${mode === "copy" ? "Copied" : "Cut"} ${selectedPaths.length} to clipboard`, "success");
+    addToast(
+      `${mode === "copy" ? "Copied" : "Cut"} ${selectedPaths.length} to clipboard`,
+      "success"
+    );
   };
 
   const submitActionDialog = async () => {
@@ -533,7 +746,8 @@ function FilesPage() {
       setEditorDirty(false);
       addToast("Saved", "success");
       await queryClient.invalidateQueries({
-        queryKey: trpc.files.readText.queryOptions({ path: viewerPath, forceEditable }).queryKey,
+        queryKey: trpc.files.readText.queryOptions({ path: viewerPath, forceEditable })
+          .queryKey,
       });
     } catch (error) {
       withOperationErrorToast(error, "Failed to save file");
@@ -546,7 +760,8 @@ function FilesPage() {
       restoreIntervalRef.current = null;
     }
     shouldRestoreScrollRef.current = false;
-    const scrollContainer = viewMode === "table" ? tableScrollRef.current : gridScrollRef.current;
+    const scrollContainer =
+      viewMode === "table" ? tableScrollRef.current : gridScrollRef.current;
     savedListScrollTopRef.current = scrollContainer?.scrollTop ?? 0;
     setViewerPath(targetPath);
   };
@@ -563,12 +778,17 @@ function FilesPage() {
       formData.append("files", file);
     }
     try {
-      const response = await fetch(`/api/files/upload?path=${encodeURIComponent(currentPath)}`, {
-        method: "POST",
-        body: formData,
-      });
+      const response = await fetch(
+        `/api/files/upload?path=${encodeURIComponent(currentPath)}`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
         throw new Error(payload?.error || "Upload failed");
       }
       addToast("Upload complete", "success");
@@ -624,7 +844,8 @@ function FilesPage() {
             </div>
           ) : viewerMode === "text" ? (
             <div className="files-text-viewer">
-              {(readTextQuery.data?.readOnlySuggested || readTextQuery.data?.truncated) && (
+              {(readTextQuery.data?.readOnlySuggested ||
+                readTextQuery.data?.truncated) && (
                 <div className="files-viewer-warning">
                   <span>
                     {readTextQuery.data?.truncated
@@ -688,7 +909,10 @@ function FilesPage() {
                 <div className="files-binary-title">Preview not available</div>
                 <div className="files-binary-meta">
                   {viewerPath
-                    ? getPreviewTypeLabel(viewerPath, fileMetaQuery.data?.mimeType ?? "application/octet-stream")
+                    ? getPreviewTypeLabel(
+                        viewerPath,
+                        fileMetaQuery.data?.mimeType ?? "application/octet-stream"
+                      )
                     : "Unknown type"}
                 </div>
                 <div className="files-binary-meta">
@@ -698,7 +922,10 @@ function FilesPage() {
                   type="button"
                   variant="secondary"
                   onClick={() =>
-                    window.open(`/api/files/download?path=${encodeURIComponent(viewerPath)}`, "_blank")
+                    window.open(
+                      `/api/files/download?path=${encodeURIComponent(viewerPath)}`,
+                      "_blank"
+                    )
                   }
                 >
                   <Download size={14} />
@@ -793,7 +1020,12 @@ function FilesPage() {
               >
                 Up
               </Button>
-              <Button type="button" variant="secondary" onClick={togglePin} disabled={!currentPath}>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={togglePin}
+                disabled={!currentPath}
+              >
                 {isPinned ? (
                   <>
                     <PinOff size={14} />
@@ -808,7 +1040,11 @@ function FilesPage() {
               </Button>
             </form>
             <div className="files-toolbar-actions">
-              <Button type="button" variant="secondary" onClick={() => uploadInputRef.current?.click()}>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => uploadInputRef.current?.click()}
+              >
                 <Upload size={14} />
                 <span>Upload</span>
               </Button>
@@ -876,7 +1112,11 @@ function FilesPage() {
                 <Trash2 size={14} />
                 <span>Delete</span>
               </Button>
-              <Button type="button" variant="secondary" onClick={() => setShowHidden((v) => !v)}>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setShowHidden((v) => !v)}
+              >
                 {showHidden ? "Hide Hidden" : "Show Hidden"}
               </Button>
             </div>
@@ -918,14 +1158,20 @@ function FilesPage() {
               <select
                 className="files-select"
                 value={sortDirection}
-                onChange={(event) => setSortDirection(event.target.value as SortDirection)}
+                onChange={(event) =>
+                  setSortDirection(event.target.value as SortDirection)
+                }
               >
                 <option value="asc">Asc</option>
                 <option value="desc">Desc</option>
               </select>
             </div>
             <div className="files-selection">
-              {selectedPaths.length > 0 ? `Selected: ${selectedPaths.length}` : "Selected: none"}
+              {listQuery.isFetching
+                ? "Refreshing…"
+                : selectedPaths.length > 0
+                  ? `Selected: ${selectedPaths.length}`
+                  : "Selected: none"}
             </div>
           </div>
           <input
@@ -969,7 +1215,7 @@ function FilesPage() {
                     sortedEntries.map((entry) => (
                       <tr
                         key={entry.path}
-                        className={`files-row ${selectedPaths.includes(entry.path) ? "files-row--selected" : ""}`}
+                        className={`files-row ${selectedPathSet.has(entry.path) ? "files-row--selected" : ""}`}
                         onClick={(event) => handleItemClick(entry.path, event)}
                         onMouseDown={(event) => {
                           if (event.shiftKey) {
@@ -986,15 +1232,13 @@ function FilesPage() {
                       >
                         <td>
                           <div className="files-entry-button">
-                            {entry.type === "directory" ? (
-                              <Folder size={14} />
-                            ) : (
-                              <File size={14} />
-                            )}
+                            {entry.type === "directory"
+                              ? renderEntryIcon(entry, 14)
+                              : renderEntryIcon(entry, 14)}
                             <span>{entry.name}</span>
                           </div>
                         </td>
-                        <td>{entry.type}</td>
+                        <td>{getEntryTypeLabel(entry)}</td>
                         <td>{formatSize(entry.size)}</td>
                         <td>{formatDate(entry.modifiedAt)}</td>
                         <td>{formatDate(entry.createdAt)}</td>
@@ -1007,34 +1251,37 @@ function FilesPage() {
           ) : null}
           {viewMode === "grid" && (
             <div className="files-grid-wrap" ref={gridScrollRef}>
-              {sortedEntries.map((entry) => (
-                <button
-                  key={entry.path}
-                  className={`files-grid-item ${selectedPaths.includes(entry.path) ? "files-grid-item--selected" : ""}`}
-                  onClick={(event) => handleItemClick(entry.path, event)}
-                  onMouseDown={(event) => {
-                    if (event.shiftKey) {
-                      event.preventDefault();
-                    }
-                  }}
-                  onDoubleClick={() => {
-                    if (entry.type === "directory") {
-                      handleNavigate(entry.path);
-                    } else {
-                      openFileViewer(entry.path);
-                    }
-                  }}
-                >
-                  <div className="files-grid-icon">
-                    {entry.type === "directory" ? <Folder size={18} /> : <File size={18} />}
-                  </div>
-                  <div className="files-grid-name">{entry.name}</div>
-                  <div className="files-grid-meta">{entry.type}</div>
-                </button>
-              ))}
+              {listQuery.isLoading ? (
+                <div className="files-empty">Loading directory…</div>
+              ) : sortedEntries.length === 0 ? (
+                <div className="files-empty">Empty directory</div>
+              ) : (
+                sortedEntries.map((entry) => (
+                  <button
+                    key={entry.path}
+                    className={`files-grid-item ${selectedPathSet.has(entry.path) ? "files-grid-item--selected" : ""}`}
+                    onClick={(event) => handleItemClick(entry.path, event)}
+                    onMouseDown={(event) => {
+                      if (event.shiftKey) {
+                        event.preventDefault();
+                      }
+                    }}
+                    onDoubleClick={() => {
+                      if (entry.type === "directory") {
+                        handleNavigate(entry.path);
+                      } else {
+                        openFileViewer(entry.path);
+                      }
+                    }}
+                  >
+                    <div className="files-grid-icon">{renderEntryIcon(entry, 18)}</div>
+                    <div className="files-grid-name">{entry.name}</div>
+                    <div className="files-grid-meta">{getEntryTypeLabel(entry)}</div>
+                  </button>
+                ))
+              )}
             </div>
           )}
-
         </section>
       </div>
       <FileActionDialog
@@ -1088,15 +1335,9 @@ function FileActionDialog({
     return null;
   }
 
-  const title =
-    mode === "mkdir"
-      ? "Create Folder"
-      : "Rename Item";
+  const title = mode === "mkdir" ? "Create Folder" : "Rename Item";
 
-  const label =
-    mode === "mkdir"
-      ? "Folder Name"
-      : "New Name";
+  const label = mode === "mkdir" ? "Folder Name" : "New Name";
 
   const confirmText = mode === "mkdir" ? "Create" : "Rename";
 
@@ -1138,7 +1379,13 @@ interface TreeNodeProps {
   depth: number;
 }
 
-function TreeNode({ nodePath, showHidden, currentPath, onNavigate, depth }: TreeNodeProps) {
+function TreeNode({
+  nodePath,
+  showHidden,
+  currentPath,
+  onNavigate,
+  depth,
+}: TreeNodeProps) {
   const trpc = useTRPC();
   const [expanded, setExpanded] = useState(depth === 0);
   const shouldBeExpanded = isSameOrParentPath(nodePath, currentPath);
@@ -1154,6 +1401,7 @@ function TreeNode({ nodePath, showHidden, currentPath, onNavigate, depth }: Tree
       {
         path: nodePath,
         showHidden,
+        directoriesOnly: true,
       },
       {
         enabled: expanded,
@@ -1191,7 +1439,10 @@ function TreeNode({ nodePath, showHidden, currentPath, onNavigate, depth }: Tree
       {expanded && (
         <div>
           {nodeQuery.isLoading && !nodeQuery.data ? (
-            <div className="files-tree-loading" style={{ paddingLeft: `${depth * 12 + 30}px` }}>
+            <div
+              className="files-tree-loading"
+              style={{ paddingLeft: `${depth * 12 + 30}px` }}
+            >
               Loading…
             </div>
           ) : (

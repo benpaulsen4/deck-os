@@ -29,13 +29,17 @@ export const filesRouter = router({
   list: publicProcedure
     .input(
       z.object({
-        path: z.string().optional().default(""),
+        path: z.string().max(4096).optional().default(""),
         showHidden: z.boolean().optional().default(false),
+        directoriesOnly: z.boolean().optional().default(false),
       })
     )
     .query(async ({ input }) => {
       try {
-        return await filesService.listDirectory(input.path, input.showHidden);
+        return await filesService.listDirectory(input.path, {
+          showHidden: input.showHidden,
+          directoriesOnly: input.directoriesOnly,
+        });
       } catch (error) {
         throw toTrpcError(error);
       }
@@ -51,7 +55,7 @@ export const filesRouter = router({
   getMeta: publicProcedure
     .input(
       z.object({
-        path: z.string(),
+        path: z.string().min(1).max(4096),
       })
     )
     .query(async ({ input }) => {
@@ -64,7 +68,7 @@ export const filesRouter = router({
   readText: publicProcedure
     .input(
       z.object({
-        path: z.string(),
+        path: z.string().min(1).max(4096),
         forceEditable: z.boolean().optional().default(false),
       })
     )
@@ -78,8 +82,8 @@ export const filesRouter = router({
   writeText: publicProcedure
     .input(
       z.object({
-        path: z.string(),
-        content: z.string(),
+        path: z.string().min(1).max(4096),
+        content: z.string().max(4 * 1024 * 1024),
       })
     )
     .mutation(async ({ input }) => {
@@ -93,7 +97,7 @@ export const filesRouter = router({
   setPins: publicProcedure
     .input(
       z.object({
-        items: z.array(z.string()),
+        items: z.array(z.string().min(1).max(4096)).max(64),
       })
     )
     .mutation(async ({ input }) => {
@@ -107,7 +111,7 @@ export const filesRouter = router({
   mkdir: publicProcedure
     .input(
       z.object({
-        path: z.string(),
+        path: z.string().min(1).max(4096),
       })
     )
     .mutation(async ({ input }) => {
@@ -121,8 +125,8 @@ export const filesRouter = router({
   rename: publicProcedure
     .input(
       z.object({
-        sourcePath: z.string(),
-        targetPath: z.string(),
+        sourcePath: z.string().min(1).max(4096),
+        targetPath: z.string().min(1).max(4096),
       })
     )
     .mutation(async ({ input }) => {
@@ -136,8 +140,8 @@ export const filesRouter = router({
   copy: publicProcedure
     .input(
       z.object({
-        sourcePath: z.string(),
-        targetPath: z.string(),
+        sourcePath: z.string().min(1).max(4096),
+        targetPath: z.string().min(1).max(4096),
       })
     )
     .mutation(async ({ input }) => {
@@ -151,8 +155,8 @@ export const filesRouter = router({
   move: publicProcedure
     .input(
       z.object({
-        sourcePath: z.string(),
-        targetPath: z.string(),
+        sourcePath: z.string().min(1).max(4096),
+        targetPath: z.string().min(1).max(4096),
       })
     )
     .mutation(async ({ input }) => {
@@ -166,7 +170,7 @@ export const filesRouter = router({
   delete: publicProcedure
     .input(
       z.object({
-        path: z.string(),
+        path: z.string().min(1).max(4096),
       })
     )
     .mutation(async ({ input }) => {

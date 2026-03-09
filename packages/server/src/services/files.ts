@@ -1,5 +1,6 @@
 import fs from "fs-extra";
 import * as path from "node:path";
+import { open as openFile } from "node:fs/promises";
 import { DATA_DIR } from "../lib/config.js";
 
 type FileEntryType = "directory" | "file" | "symlink" | "other";
@@ -11,12 +12,18 @@ export interface FileEntry {
   size: number | null;
   modifiedAt: string | null;
   createdAt: string | null;
+  mimeType: string | null;
 }
 
 export interface FilesListResult {
   cwd: string;
   parent: string | null;
   entries: FileEntry[];
+}
+
+export interface FilesListOptions {
+  showHidden: boolean;
+  directoriesOnly?: boolean;
 }
 
 export interface FileMeta {
@@ -75,6 +82,7 @@ const FILES_DATA_DIR = path.join(DATA_DIR, "files");
 const PINS_PATH = path.join(FILES_DATA_DIR, "pins.json");
 const LARGE_TEXT_READONLY_BYTES = 512 * 1024;
 const MAX_TEXT_READ_BYTES = 2 * 1024 * 1024;
+const LIST_DIRECTORY_CONCURRENCY = 24;
 
 function normalizeComparePath(value: string): string {
   const resolved = path.resolve(value);
@@ -150,13 +158,21 @@ function toIsoTime(timestampMs: number): string | null {
 
 function getMimeTypeFromPath(targetPath: string): string {
   const extension = path.extname(targetPath).toLowerCase();
-  if (extension === ".txt" || extension === ".log" || extension === ".md") return "text/plain";
+  if (extension === ".txt" || extension === ".log" || extension === ".md")
+    return "text/plain";
   if (extension === ".json") return "application/json";
-  if (extension === ".js" || extension === ".mjs" || extension === ".cjs") return "text/javascript";
+  if (extension === ".js" || extension === ".mjs" || extension === ".cjs")
+    return "text/javascript";
   if (extension === ".ts" || extension === ".tsx") return "text/typescript";
   if (extension === ".jsx") return "text/jsx";
-  if (extension === ".sh" || extension === ".bash" || extension === ".zsh") return "text/x-shellscript";
-  if (extension === ".ps1" || extension === ".psm1" || extension === ".psd1" || extension === ".ps1xml")
+  if (extension === ".sh" || extension === ".bash" || extension === ".zsh")
+    return "text/x-shellscript";
+  if (
+    extension === ".ps1" ||
+    extension === ".psm1" ||
+    extension === ".psd1" ||
+    extension === ".ps1xml"
+  )
     return "text/x-powershell";
   if (extension === ".bat" || extension === ".cmd") return "text/plain";
   if (extension === ".css") return "text/css";
@@ -227,7 +243,79 @@ async function loadPinsRaw(): Promise<string[]> {
   return items.length > 0 ? items : getDefaultPins();
 }
 
-export async function listDirectory(inputPath: string, showHidden: boolean): Promise<FilesListResult> {
+async function mapWithConcurrencyLimit<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) {
+    return [];
+  }
+  const workers = Math.max(1, Math.min(concurrency, items.length));
+  const results = new Array<R>(items.length);
+  let index = 0;
+  await Promise.all(
+    Array.from({ length: workers }, async () => {
+      while (true) {
+        const currentIndex = index;
+        index += 1;
+        if (currentIndex >= items.length) {
+          return;
+        }
+        results[currentIndex] = await mapper(items[currentIndex]);
+      }
+    })
+  );
+  return results;
+}
+
+async function toDirectoryEntry(
+  basePath: string,
+  dirent: fs.Dirent
+): Promise<FileEntry | null> {
+  const entryPath = path.join(basePath, dirent.name);
+  try {
+    const entryLstat = await fs.lstat(entryPath);
+    const isSymlink = entryLstat.isSymbolicLink();
+    let targetStat = entryLstat;
+
+    if (isSymlink) {
+      const symlinkTarget = await fs.realpath(entryPath).catch(() => null);
+      if (symlinkTarget) {
+        assertNotDeniedPath(symlinkTarget);
+        targetStat = await fs.stat(entryPath).catch(() => entryLstat);
+      }
+    } else {
+      assertNotDeniedPath(entryPath);
+    }
+
+    const entryType: FileEntryType = targetStat.isDirectory()
+      ? "directory"
+      : targetStat.isFile()
+        ? "file"
+        : isSymlink
+          ? "symlink"
+          : "other";
+
+    return {
+      name: dirent.name,
+      path: entryPath,
+      type: entryType,
+      size: targetStat.isFile() ? targetStat.size : null,
+      modifiedAt: toIsoTime(targetStat.mtimeMs),
+      createdAt: toIsoTime(targetStat.birthtimeMs),
+      mimeType: targetStat.isFile() ? getMimeTypeFromPath(entryPath) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function listDirectory(
+  inputPath: string,
+  options: FilesListOptions
+): Promise<FilesListResult> {
+  const { showHidden, directoriesOnly = false } = options;
   const basePath = inputPath.trim().length > 0 ? inputPath : getRootPath();
   const requestedPath = ensureAbsolutePath(basePath);
   assertNotDeniedPath(requestedPath);
@@ -246,51 +334,20 @@ export async function listDirectory(inputPath: string, showHidden: boolean): Pro
   }
 
   const directoryEntries = await fs.readdir(realPath, { withFileTypes: true });
-  const entries: FileEntry[] = [];
+  const visibleEntries = directoryEntries.filter(
+    (dirent) => showHidden || !dirent.name.startsWith(".")
+  );
+  const resolvedEntries = await mapWithConcurrencyLimit(
+    visibleEntries,
+    LIST_DIRECTORY_CONCURRENCY,
+    async (dirent) => await toDirectoryEntry(realPath, dirent)
+  );
+  const entries = resolvedEntries.filter((entry): entry is FileEntry => !!entry);
+  const scopedEntries = directoriesOnly
+    ? entries.filter((entry) => entry.type === "directory")
+    : entries;
 
-  for (const dirent of directoryEntries) {
-    if (!showHidden && dirent.name.startsWith(".")) {
-      continue;
-    }
-
-    const entryPath = path.join(realPath, dirent.name);
-    try {
-      const entryLstat = await fs.lstat(entryPath);
-      const isSymlink = entryLstat.isSymbolicLink();
-      let targetStat = entryLstat;
-
-      if (isSymlink) {
-        const symlinkTarget = await fs.realpath(entryPath).catch(() => null);
-        if (symlinkTarget) {
-          assertNotDeniedPath(symlinkTarget);
-          targetStat = await fs.stat(entryPath).catch(() => entryLstat);
-        }
-      } else {
-        assertNotDeniedPath(entryPath);
-      }
-
-      const entryType: FileEntryType = targetStat.isDirectory()
-        ? "directory"
-        : targetStat.isFile()
-          ? "file"
-          : isSymlink
-            ? "symlink"
-            : "other";
-
-      entries.push({
-        name: dirent.name,
-        path: entryPath,
-        type: entryType,
-        size: targetStat.isFile() ? targetStat.size : null,
-        modifiedAt: toIsoTime(targetStat.mtimeMs),
-        createdAt: toIsoTime(targetStat.birthtimeMs),
-      });
-    } catch {
-      continue;
-    }
-  }
-
-  entries.sort((a, b) => {
+  scopedEntries.sort((a, b) => {
     if (a.type === "directory" && b.type !== "directory") return -1;
     if (a.type !== "directory" && b.type === "directory") return 1;
     return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
@@ -299,7 +356,7 @@ export async function listDirectory(inputPath: string, showHidden: boolean): Pro
   return {
     cwd: realPath,
     parent: getParentPath(realPath),
-    entries,
+    entries: scopedEntries,
   };
 }
 
@@ -314,6 +371,24 @@ export async function resolveExistingPath(inputPath: string): Promise<string> {
 
   const realPath = await fs.realpath(requestedPath).catch(() => requestedPath);
   assertNotDeniedPath(realPath);
+  return realPath;
+}
+
+export async function resolveExistingFilePath(inputPath: string): Promise<string> {
+  const realPath = await resolveExistingPath(inputPath);
+  const targetStat = await fs.stat(realPath);
+  if (!targetStat.isFile()) {
+    throw new FilesNotFileError(realPath);
+  }
+  return realPath;
+}
+
+export async function resolveExistingDirectoryPath(inputPath: string): Promise<string> {
+  const realPath = await resolveExistingPath(inputPath);
+  const targetStat = await fs.stat(realPath);
+  if (!targetStat.isDirectory()) {
+    throw new FilesNotDirectoryError(realPath);
+  }
   return realPath;
 }
 
@@ -350,7 +425,10 @@ export async function mkdir(targetPathInput: string): Promise<void> {
   }
 }
 
-export async function rename(sourcePathInput: string, targetPathInput: string): Promise<void> {
+export async function rename(
+  sourcePathInput: string,
+  targetPathInput: string
+): Promise<void> {
   const sourcePath = await resolveExistingPath(sourcePathInput);
   const targetPath = await resolveTargetPath(targetPathInput);
   ensureNotRootPath(sourcePath);
@@ -361,7 +439,10 @@ export async function rename(sourcePathInput: string, targetPathInput: string): 
   }
 }
 
-export async function copy(sourcePathInput: string, targetPathInput: string): Promise<void> {
+export async function copy(
+  sourcePathInput: string,
+  targetPathInput: string
+): Promise<void> {
   const sourcePath = await resolveExistingPath(sourcePathInput);
   const targetPath = await resolveTargetPath(targetPathInput);
   try {
@@ -371,7 +452,10 @@ export async function copy(sourcePathInput: string, targetPathInput: string): Pr
   }
 }
 
-export async function move(sourcePathInput: string, targetPathInput: string): Promise<void> {
+export async function move(
+  sourcePathInput: string,
+  targetPathInput: string
+): Promise<void> {
   const sourcePath = await resolveExistingPath(sourcePathInput);
   const targetPath = await resolveTargetPath(targetPathInput);
   ensureNotRootPath(sourcePath);
@@ -379,7 +463,8 @@ export async function move(sourcePathInput: string, targetPathInput: string): Pr
     await fs.rename(sourcePath, targetPath);
     return;
   } catch (error) {
-    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+    const code =
+      error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
     if (code !== "EXDEV") {
       normalizeFsError(error, targetPath);
     }
@@ -395,11 +480,8 @@ export async function remove(targetPathInput: string): Promise<void> {
 }
 
 export async function getMeta(inputPath: string): Promise<FileMeta> {
-  const targetPath = await resolveExistingPath(inputPath);
+  const targetPath = await resolveExistingFilePath(inputPath);
   const targetStat = await fs.stat(targetPath);
-  if (!targetStat.isFile()) {
-    throw new FilesNotFileError(targetPath);
-  }
   const mimeType = getMimeTypeFromPath(targetPath);
   return {
     path: targetPath,
@@ -412,14 +494,27 @@ export async function getMeta(inputPath: string): Promise<FileMeta> {
   };
 }
 
-export async function readText(inputPath: string, forceEditable: boolean): Promise<ReadTextResult> {
+export async function readText(
+  inputPath: string,
+  forceEditable: boolean
+): Promise<ReadTextResult> {
   const fileMeta = await getMeta(inputPath);
   if (!fileMeta.isTextLike) {
     throw new FilesNotFileError(fileMeta.path);
   }
-  const fileBuffer = await fs.readFile(fileMeta.path);
-  const truncated = fileBuffer.length > MAX_TEXT_READ_BYTES;
-  const contentBuffer = truncated ? fileBuffer.subarray(0, MAX_TEXT_READ_BYTES) : fileBuffer;
+  const fileHandle = await openFile(fileMeta.path, "r");
+  const buffer = Buffer.alloc(MAX_TEXT_READ_BYTES + 1);
+  let bytesRead = 0;
+  try {
+    const result = await fileHandle.read(buffer, 0, MAX_TEXT_READ_BYTES + 1, 0);
+    bytesRead = result.bytesRead;
+  } finally {
+    await fileHandle.close();
+  }
+  const truncated = bytesRead > MAX_TEXT_READ_BYTES;
+  const contentBuffer = truncated
+    ? buffer.subarray(0, MAX_TEXT_READ_BYTES)
+    : buffer.subarray(0, bytesRead);
   const readOnlySuggested = !forceEditable && fileMeta.size > LARGE_TEXT_READONLY_BYTES;
   return {
     content: contentBuffer.toString("utf8"),

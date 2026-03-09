@@ -325,6 +325,10 @@
   gap: 10px;
 }
 
+.files-grid-wrap .files-empty {
+  grid-column: 1 / -1;
+}
+
 .files-grid-item {
   border: 1px solid var(--border-primary);
   background: var(--bg-secondary);

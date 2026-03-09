@@ -26,6 +26,55 @@ function toWebStream(fileStream: NodeJS.ReadableStream): ReadableStream {
   return Readable.toWeb(fileStream as unknown as Readable) as ReadableStream;
 }
 
+const MAX_UPLOAD_FILES = 32;
+const MAX_UPLOAD_FILE_BYTES = 128 * 1024 * 1024;
+const MAX_UPLOAD_TOTAL_BYTES = 512 * 1024 * 1024;
+
+function isSafeUploadName(fileName: string): boolean {
+  const safeName = basename(fileName);
+  if (!safeName || safeName !== fileName) {
+    return false;
+  }
+  if (
+    safeName.includes("\0") ||
+    safeName.includes("/") ||
+    safeName.includes("\\") ||
+    safeName === "." ||
+    safeName === ".."
+  ) {
+    return false;
+  }
+  return true;
+}
+
+type FilesHttpStatusCode = 400 | 403 | 404 | 409 | 413 | 500;
+
+function toFilesHttpErrorResponse(
+  error: unknown,
+  fallbackMessage: string
+): { status: FilesHttpStatusCode; message: string } {
+  const message = error instanceof Error ? error.message : fallbackMessage;
+  if (error instanceof filesService.FilesAccessDeniedError) {
+    return { status: 403, message };
+  }
+  if (error instanceof filesService.FilesNotFoundError) {
+    return { status: 404, message };
+  }
+  if (
+    error instanceof filesService.FilesNotDirectoryError ||
+    error instanceof filesService.FilesNotFileError
+  ) {
+    return { status: 400, message };
+  }
+  if (error instanceof filesService.FilesAlreadyExistsError) {
+    return { status: 409, message };
+  }
+  if (error instanceof Error && (error as NodeJS.ErrnoException).code === "EEXIST") {
+    return { status: 409, message: "One or more files already exist" };
+  }
+  return { status: 500, message };
+}
+
 // Global error handler
 process.on("uncaughtException", (error) => {
   console.error("[deckos] Uncaught exception:", error);
@@ -127,11 +176,8 @@ app.post("/api/files/upload", async (c) => {
     return c.json({ error: "Missing destination path" }, 400);
   }
   try {
-    const destinationPath = await filesService.resolveExistingPath(destinationParam);
-    const destinationStat = await stat(destinationPath);
-    if (!destinationStat.isDirectory()) {
-      return c.json({ error: "Destination path is not a directory" }, 400);
-    }
+    const destinationPath =
+      await filesService.resolveExistingDirectoryPath(destinationParam);
 
     const formData = await c.req.raw.formData();
     const allEntries = formData.getAll("files");
@@ -141,7 +187,10 @@ app.post("/api/files/upload", async (c) => {
         continue;
       }
       const candidate = entry as { name?: unknown; arrayBuffer?: unknown };
-      if (typeof candidate.name === "string" && typeof candidate.arrayBuffer === "function") {
+      if (
+        typeof candidate.name === "string" &&
+        typeof candidate.arrayBuffer === "function"
+      ) {
         allFiles.push(entry as { name: string; arrayBuffer: () => Promise<ArrayBuffer> });
       }
     }
@@ -149,34 +198,36 @@ app.post("/api/files/upload", async (c) => {
     if (allFiles.length === 0) {
       return c.json({ error: "No files uploaded" }, 400);
     }
+    if (allFiles.length > MAX_UPLOAD_FILES) {
+      return c.json({ error: `Too many files. Maximum is ${MAX_UPLOAD_FILES}.` }, 400);
+    }
 
     const uploaded: string[] = [];
+    let totalBytes = 0;
     for (const file of allFiles) {
       const safeName = basename(file.name);
-      if (!safeName) {
-        continue;
+      if (!isSafeUploadName(file.name) || !safeName) {
+        return c.json({ error: `Invalid file name: ${file.name}` }, 400);
       }
-      const targetPath = await filesService.resolveTargetPath(join(destinationPath, safeName));
+      const targetPath = await filesService.resolveTargetPath(
+        join(destinationPath, safeName)
+      );
       const arrayBuffer = await file.arrayBuffer();
+      const fileBytes = arrayBuffer.byteLength;
+      totalBytes += fileBytes;
+      if (fileBytes > MAX_UPLOAD_FILE_BYTES) {
+        return c.json({ error: `File too large: ${safeName}` }, 413);
+      }
+      if (totalBytes > MAX_UPLOAD_TOTAL_BYTES) {
+        return c.json({ error: "Total upload size exceeded" }, 413);
+      }
       await writeFile(targetPath, Buffer.from(arrayBuffer), { flag: "wx" });
       uploaded.push(safeName);
     }
     return c.json({ uploaded });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Upload failed";
-    if (error instanceof filesService.FilesAccessDeniedError) {
-      return c.json({ error: message }, 403);
-    }
-    if (error instanceof filesService.FilesNotFoundError) {
-      return c.json({ error: message }, 404);
-    }
-    if (error instanceof filesService.FilesAlreadyExistsError) {
-      return c.json({ error: message }, 409);
-    }
-    if (error instanceof Error && (error as NodeJS.ErrnoException).code === "EEXIST") {
-      return c.json({ error: "One or more files already exist" }, 409);
-    }
-    return c.json({ error: message }, 500);
+    const response = toFilesHttpErrorResponse(error, "Upload failed");
+    return c.json({ error: response.message }, response.status);
   }
 });
 
@@ -186,24 +237,16 @@ app.get("/api/files/download", async (c) => {
     return c.json({ error: "Missing path" }, 400);
   }
   try {
-    const filePath = await filesService.resolveExistingPath(targetParam);
+    const filePath = await filesService.resolveExistingFilePath(targetParam);
     const fileStat = await stat(filePath);
-    if (!fileStat.isFile()) {
-      return c.json({ error: "Download path must be a file" }, 400);
-    }
     c.header("Content-Disposition", `attachment; filename="${basename(filePath)}"`);
     c.header("Content-Type", "application/octet-stream");
     c.header("Content-Length", String(fileStat.size));
+    c.header("X-Content-Type-Options", "nosniff");
     return c.body(toWebStream(createReadStream(filePath)));
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Download failed";
-    if (error instanceof filesService.FilesAccessDeniedError) {
-      return c.json({ error: message }, 403);
-    }
-    if (error instanceof filesService.FilesNotFoundError) {
-      return c.json({ error: message }, 404);
-    }
-    return c.json({ error: message }, 500);
+    const response = toFilesHttpErrorResponse(error, "Download failed");
+    return c.json({ error: response.message }, response.status);
   }
 });
 
@@ -213,11 +256,8 @@ app.get("/api/files/content", async (c) => {
     return c.json({ error: "Missing path" }, 400);
   }
   try {
-    const filePath = await filesService.resolveExistingPath(targetParam);
+    const filePath = await filesService.resolveExistingFilePath(targetParam);
     const fileStat = await stat(filePath);
-    if (!fileStat.isFile()) {
-      return c.json({ error: "Content path must be a file" }, 400);
-    }
 
     const mimeType = filesService.getPathMimeType(filePath);
     const totalSize = fileStat.size;
@@ -226,6 +266,7 @@ app.get("/api/files/content", async (c) => {
     c.header("Accept-Ranges", "bytes");
     c.header("Content-Type", mimeType);
     c.header("Cache-Control", "no-store");
+    c.header("X-Content-Type-Options", "nosniff");
 
     if (!rangeHeader) {
       c.header("Content-Length", String(totalSize));
@@ -266,14 +307,8 @@ app.get("/api/files/content", async (c) => {
     c.header("Content-Length", String(chunkSize));
     return c.body(toWebStream(createReadStream(filePath, { start, end })), 206);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Content read failed";
-    if (error instanceof filesService.FilesAccessDeniedError) {
-      return c.json({ error: message }, 403);
-    }
-    if (error instanceof filesService.FilesNotFoundError) {
-      return c.json({ error: message }, 404);
-    }
-    return c.json({ error: message }, 500);
+    const response = toFilesHttpErrorResponse(error, "Content read failed");
+    return c.json({ error: response.message }, response.status);
   }
 });
 
@@ -427,7 +462,11 @@ app.get("/api/logs/:containerId", async (c) => {
     return c.json({ error: "Invalid tail parameter" }, 400);
   }
 
-  const parsedSinceResult = z.coerce.number().int().min(0).safeParse(sinceQuery ?? 0);
+  const parsedSinceResult = z.coerce
+    .number()
+    .int()
+    .min(0)
+    .safeParse(sinceQuery ?? 0);
   if (!parsedSinceResult.success) {
     return c.json({ error: "Invalid since parameter" }, 400);
   }
