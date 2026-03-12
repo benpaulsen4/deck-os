@@ -82,15 +82,19 @@ function SettingsPage() {
     return `${(bytes / Math.pow(k, unit)).toFixed(1)} ${sizes[unit]}`;
   };
 
+  const diskEntries = [...(diskMetrics?.disk.fs ?? [])].sort(
+    (a, b) => b.usePercent - a.usePercent
+  );
+
   return (
     <div className="page-container page-container--viewport">
       <div className="page-header">
         <h1 className="page-title">Settings</h1>
       </div>
 
-      <div className="page-body">
-        <div className="page-grid-2col">
-          <div className="page-col">
+      <div className="page-body settings-page-body">
+        <div className="page-grid-2col settings-grid">
+          <div className="page-col settings-col">
             <div className="panel" style={{ padding: "var(--space-3)" }}>
               <div className="label" style={{ marginBottom: "var(--space-2)" }}>
                 SYSTEM INFORMATION
@@ -129,7 +133,7 @@ function SettingsPage() {
               ) : null}
             </div>
 
-            <div className="panel" style={{ padding: "var(--space-3)" }}>
+            <div className="panel settings-disk-panel" style={{ padding: "var(--space-3)" }}>
               <div className="label" style={{ marginBottom: "var(--space-2)" }}>
                 DISK INFORMATION
               </div>
@@ -138,81 +142,67 @@ function SettingsPage() {
                   <span className="label">LOADING...</span>
                 </div>
               ) : diskMetrics ? (
-                <div className="settings-kv">
-                  {diskMetrics.disk.fs.length > 0 ? (
-                    diskMetrics.disk.fs.map((disk) => (
-                      <div
-                        key={`${disk.fs}:${disk.mount}`}
-                        style={{
-                          gridColumn: "1 / -1",
-                          borderTop: "1px solid var(--border-subtle)",
-                          paddingTop: "var(--space-2)",
-                          marginTop: "var(--space-2)",
-                          fontSize: "var(--text-sm)",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            gap: "var(--space-2)",
-                          }}
-                        >
-                          <div style={{ minWidth: 0 }}>
-                            <div
-                              className="system-info-label"
-                              style={{ marginBottom: "var(--space-1)" }}
-                            >
-                              {disk.mount}
+                <div className="settings-disk-layout">
+                  <div className="settings-disk-scroll">
+                    {diskEntries.length > 0 ? (
+                      <div className="settings-disk-list">
+                        {diskEntries.map((disk) => {
+                          const diskFree = Math.max(0, disk.size - disk.used);
+                          return (
+                            <div className="settings-disk-item" key={`${disk.fs}:${disk.mount}`}>
+                              <div className="settings-disk-item-head">
+                                <div className="settings-disk-meta">
+                                  <span className="settings-disk-mount">{disk.mount}</span>
+                                  <span className="settings-disk-fs">{disk.fs}</span>
+                                </div>
+                                <span className="settings-disk-percent">
+                                  {Math.round(disk.usePercent)}%
+                                </span>
+                              </div>
+                              <div className="settings-disk-stats">
+                                <span className="settings-disk-stat">
+                                  <span className="system-info-label">USED</span>
+                                  <span className="system-info-value">
+                                    {formatBytes(disk.used)}
+                                  </span>
+                                </span>
+                                <span className="settings-disk-stat">
+                                  <span className="system-info-label">TOTAL</span>
+                                  <span className="system-info-value">
+                                    {formatBytes(disk.size)}
+                                  </span>
+                                </span>
+                                <span className="settings-disk-stat">
+                                  <span className="system-info-label">FREE</span>
+                                  <span className="system-info-value">
+                                    {formatBytes(diskFree)}
+                                  </span>
+                                </span>
+                              </div>
+                              <div className="metric-card-bar-container">
+                                <div
+                                  className="metric-card-bar-fill"
+                                  style={{
+                                    width: `${Math.min(100, Math.max(0, disk.usePercent))}%`,
+                                    background: "var(--meter-disk)",
+                                    transition: "width var(--transition-meter) linear",
+                                  }}
+                                />
+                              </div>
                             </div>
-                            <div
-                              style={{
-                                color: "var(--text-muted)",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {disk.fs}
-                            </div>
-                          </div>
-                          <div
-                            style={{
-                              textAlign: "right",
-                              whiteSpace: "nowrap",
-                              color: "var(--text-secondary)",
-                            }}
-                          >
-                            {formatBytes(disk.used)} / {formatBytes(disk.size)} (
-                            {Math.round(disk.usePercent)}%)
-                          </div>
-                        </div>
-                        <div
-                          className="metric-card-bar-container"
-                          style={{
-                            marginTop: "var(--space-1)",
-                          }}
-                        >
-                          <div
-                            className="metric-card-bar-fill"
-                            style={{
-                              width: `${Math.min(100, Math.max(0, disk.usePercent))}%`,
-                              background: "var(--meter-disk)",
-                              transition: "width var(--transition-meter) linear",
-                            }}
-                          />
-                        </div>
+                          );
+                        })}
                       </div>
-                    ))
-                  ) : (
-                    <span className="system-info-value">NO DISKS DETECTED</span>
-                  )}
+                    ) : (
+                      <span className="system-info-value">NO DISKS DETECTED</span>
+                    )}
+                  </div>
                 </div>
               ) : null}
             </div>
           </div>
 
-          <div className="page-col">
+          <div className="page-col settings-col">
             <div className="panel" style={{ padding: "var(--space-3)" }}>
               <div className="label" style={{ marginBottom: "var(--space-2)" }}>
                 DATA DIRECTORY
