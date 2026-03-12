@@ -9,16 +9,24 @@ import { getCurrentVersion } from "../lib/version.js";
 import { checkForUpdatesNow, getUpdateStatus } from "../services/updates.js";
 import { applyUpdate } from "../services/selfUpdate.js";
 
+type PowerCommand = {
+  command: string;
+  args: readonly string[];
+  requiresRoot?: boolean;
+};
+
 const POWER_COMMANDS = {
   linux: {
     restart: [
-      { command: "systemctl", args: ["reboot"] },
-      { command: "reboot", args: [] },
+      { command: "/usr/bin/systemctl", args: ["reboot"], requiresRoot: true },
+      { command: "/usr/sbin/reboot", args: [], requiresRoot: true },
+      { command: "/sbin/reboot", args: [], requiresRoot: true },
     ],
     shutdown: [
-      { command: "systemctl", args: ["poweroff"] },
-      { command: "shutdown", args: ["-h", "now"] },
-      { command: "poweroff", args: [] },
+      { command: "/usr/bin/systemctl", args: ["poweroff"], requiresRoot: true },
+      { command: "/usr/sbin/shutdown", args: ["-h", "now"], requiresRoot: true },
+      { command: "/usr/sbin/poweroff", args: [], requiresRoot: true },
+      { command: "/sbin/poweroff", args: [], requiresRoot: true },
     ],
   },
   darwin: {
@@ -31,31 +39,89 @@ const POWER_COMMANDS = {
   },
 } as const;
 
-async function runPowerAction(action: "restart" | "shutdown") {
+async function executePowerCommand(
+  spawnImpl: typeof spawn,
+  command: string,
+  args: readonly string[]
+) {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawnImpl(command, args, { stdio: "ignore" });
+    child.once("error", (error) => {
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(new Error(`exit code ${code ?? "null"}${signal ? ` signal ${signal}` : ""}`));
+    });
+  });
+}
+
+function getUid() {
+  if (typeof process.getuid !== "function") {
+    return null;
+  }
+
+  return process.getuid();
+}
+
+function buildPowerAttempts(
+  powerCommand: PowerCommand,
+  platform: keyof typeof POWER_COMMANDS,
+  uid: number | null
+) {
+  const attempts: PowerCommand[] = [];
+  const requiresSudo =
+    platform !== "win32" && powerCommand.requiresRoot === true && uid !== null && uid !== 0;
+  if (requiresSudo) {
+    attempts.push({
+      command: "sudo",
+      args: ["-n", powerCommand.command, ...powerCommand.args],
+    });
+  }
+
+  attempts.push(powerCommand);
+  return attempts;
+}
+
+export async function runPowerAction(
+  action: "restart" | "shutdown",
+  options?: {
+    spawnImpl?: typeof spawn;
+    platform?: NodeJS.Platform;
+    uid?: number | null;
+  }
+) {
+  const spawnImpl = options?.spawnImpl ?? spawn;
+  const platformValue = options?.platform ?? process.platform;
+  const platform =
+    platformValue === "linux" || platformValue === "darwin" || platformValue === "win32"
+      ? platformValue
+      : "linux";
+  const uid = options?.uid ?? getUid();
   const platformCommands =
-    POWER_COMMANDS[process.platform as keyof typeof POWER_COMMANDS] ?? POWER_COMMANDS.linux;
+    POWER_COMMANDS[platform as keyof typeof POWER_COMMANDS] ?? POWER_COMMANDS.linux;
   const commands = platformCommands[action];
   const errors: string[] = [];
 
-  for (const { command, args } of commands) {
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn(command, args, { detached: true, stdio: "ignore" });
-        child.once("error", (error) => reject(error));
-        child.once("spawn", () => {
-          child.unref();
-          resolve();
-        });
-      });
-      return;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      errors.push(`${command} ${args.join(" ")}: ${message}`);
+  for (const powerCommand of commands) {
+    const attempts = buildPowerAttempts(powerCommand, platform, uid);
+    for (const { command, args } of attempts) {
+      try {
+        await executePowerCommand(spawnImpl, command, args);
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(`${command} ${args.join(" ")}: ${message}`);
+      }
     }
   }
 
   throw new Error(
-    `Unable to execute ${action} command on ${process.platform}: ${errors.join(" | ")}`
+    `Unable to execute ${action} command on ${platform}: ${errors.join(" | ")}`
   );
 }
 

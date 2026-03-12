@@ -82,7 +82,7 @@ if [[ "$REQUESTED_VERSION" != "latest" && ! "$REQUESTED_VERSION" =~ ^v?[0-9]+\.[
 fi
 
 apt-get update -y
-apt-get install -y ca-certificates curl gnupg lsb-release jq tar xz-utils bash
+apt-get install -y ca-certificates curl gnupg lsb-release jq tar xz-utils bash sudo
 
 if ! command -v docker >/dev/null 2>&1; then
   install -m 0755 -d /etc/apt/keyrings
@@ -102,6 +102,19 @@ if ! id -u deckos >/dev/null 2>&1; then
 fi
 
 usermod -aG docker deckos
+
+step "Configuring sudoers for host power actions"
+cat > /etc/sudoers.d/deckos-power <<'EOF'
+deckos ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff
+deckos ALL=(root) NOPASSWD: /usr/bin/systemctl reboot
+deckos ALL=(root) NOPASSWD: /usr/sbin/shutdown -h now
+deckos ALL=(root) NOPASSWD: /usr/sbin/shutdown -r now
+deckos ALL=(root) NOPASSWD: /usr/sbin/poweroff
+deckos ALL=(root) NOPASSWD: /usr/sbin/reboot
+deckos ALL=(root) NOPASSWD: /sbin/poweroff
+deckos ALL=(root) NOPASSWD: /sbin/reboot
+EOF
+chmod 0440 /etc/sudoers.d/deckos-power
 
 if [[ ! -s /home/deckos/.nvm/nvm.sh ]]; then
   step "Installing NVM (latest release)"
