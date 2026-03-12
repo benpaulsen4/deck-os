@@ -140,10 +140,15 @@ exec node "$@"
 EOF
 chmod 0755 /usr/local/bin/deckos-node
 
-install -d -m 0755 "${INSTALL_ROOT}/releases" "${INSTALL_ROOT}/tmp"
+install -d -m 0755 "${INSTALL_ROOT}/releases"
 chown -R deckos:deckos "${INSTALL_ROOT}"
 install -d -m 0755 "${DATA_DIR}"
 chown -R deckos:deckos "${DATA_DIR}"
+DOWNLOAD_TMP_DIR="$(mktemp -d /tmp/deckos-install.XXXXXX)"
+cleanup_download_tmp() {
+  rm -rf "${DOWNLOAD_TMP_DIR}"
+}
+trap cleanup_download_tmp EXIT
 
 install -d -m 0755 /etc/deckos
 ENV_FILE="/etc/deckos/deckos.env"
@@ -187,7 +192,7 @@ if [[ -z "$ASSET_ID" || "$ASSET_ID" == "null" ]]; then
   exit 1
 fi
 
-TAR_PATH="${INSTALL_ROOT}/tmp/deckos-${VER}.tar.gz"
+TAR_PATH="${DOWNLOAD_TMP_DIR}/deckos-${VER}.tar.gz"
 ASSET_URL="${API}/releases/assets/${ASSET_ID}"
 step "Downloading release asset"
 step "GET ${ASSET_URL}"

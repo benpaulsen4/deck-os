@@ -4,6 +4,7 @@ import { trpcClient } from "../trpc";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToastStore } from "../stores/toast";
 import { Button } from "../components/ui/Button";
+import { useEffect, useRef } from "react";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
@@ -32,12 +33,64 @@ function SettingsPage() {
     isLoading: updateLoading,
     isFetching: updateFetching,
   } = updateStatusQuery;
+  const updateReloadIntervalRef = useRef<number | null>(null);
+
+  const stopUpdateReloadPolling = () => {
+    if (updateReloadIntervalRef.current !== null) {
+      window.clearInterval(updateReloadIntervalRef.current);
+      updateReloadIntervalRef.current = null;
+    }
+  };
+
+  const startUpdateCompletionPolling = (targetVersion: string) => {
+    stopUpdateReloadPolling();
+    let sawDowntime = false;
+    let attempts = 0;
+    const attemptReload = async () => {
+      attempts += 1;
+      try {
+        const response = await fetch(`/api/health?_=${Date.now()}`, {
+          cache: "no-store",
+        });
+        if (response.ok && (sawDowntime || attempts >= 15)) {
+          window.location.reload();
+          return;
+        }
+        if (!response.ok) {
+          sawDowntime = true;
+        }
+      } catch {
+        sawDowntime = true;
+      }
+      if (attempts >= 180) {
+        stopUpdateReloadPolling();
+        addToast(
+          `Update to v${targetVersion} may be complete. Refresh if this page does not reload.`,
+          "info"
+        );
+      }
+    };
+    updateReloadIntervalRef.current = window.setInterval(() => {
+      void attemptReload();
+    }, 2000);
+    void attemptReload();
+  };
+
+  useEffect(() => {
+    return () => {
+      stopUpdateReloadPolling();
+    };
+  }, []);
 
   const applyUpdateMutation = useMutation({
     mutationFn: async () => await trpcClient.system.applyUpdate.mutate({}),
     onSuccess: (res: { targetVersion: string; restarting: boolean }) => {
       if (res.restarting) {
-        addToast(`Updating to v${res.targetVersion}...`, "success");
+        addToast(
+          `Update in progress (v${res.targetVersion}). This page will refresh automatically.`,
+          "success"
+        );
+        startUpdateCompletionPolling(res.targetVersion);
       } else {
         addToast(`v${res.targetVersion} already installed`, "success");
       }

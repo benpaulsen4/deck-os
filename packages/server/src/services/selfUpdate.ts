@@ -1,6 +1,8 @@
 import { createWriteStream } from "node:fs";
-import { stat, mkdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import type { Dirent } from "node:fs";
+import { stat, mkdir, rm, readdir, readlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { execFile as execFileCb } from "node:child_process";
@@ -39,6 +41,10 @@ function getGithubConfig() {
 
 function getInstallRoot(): string {
   return (process.env.DECKOS_INSTALL_ROOT?.trim() || "/opt/deckos").replace(/\/+$/, "");
+}
+
+function getUpdateTmpRoot(): string {
+  return (process.env.DECKOS_UPDATE_TMP_DIR?.trim() || tmpdir()).replace(/\/+$/, "");
 }
 
 function normalizeVersion(v: string): string {
@@ -133,6 +139,53 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
+function isWithinPath(parentPath: string, childPath: string): boolean {
+  const rel = relative(resolve(parentPath), resolve(childPath));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+async function getCurrentReleaseVersion(
+  currentLink: string,
+  releasesDir: string
+): Promise<string | null> {
+  try {
+    const linkedPath = await readlink(currentLink);
+    const resolvedPath = isAbsolute(linkedPath)
+      ? linkedPath
+      : resolve(dirname(currentLink), linkedPath);
+    if (!isWithinPath(releasesDir, resolvedPath)) {
+      return null;
+    }
+    const name = basename(resolvedPath).trim();
+    return name || null;
+  } catch {
+    return null;
+  }
+}
+
+async function pruneReleases(
+  releasesDir: string,
+  keepVersions: ReadonlySet<string>
+): Promise<void> {
+  let entries: Dirent[] = [];
+  try {
+    entries = await readdir(releasesDir, { withFileTypes: true, encoding: "utf8" });
+  } catch {
+    return;
+  }
+  await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .filter((entry) => !keepVersions.has(entry.name))
+      .map(async (entry) =>
+        rm(join(releasesDir, entry.name), {
+          recursive: true,
+          force: true,
+        })
+      )
+  );
+}
+
 export async function applyUpdate(version?: string): Promise<ApplyUpdateResult> {
   if (updateInProgress) {
     throw new Error("Update already in progress");
@@ -142,6 +195,8 @@ export async function applyUpdate(version?: string): Promise<ApplyUpdateResult> 
   }
 
   updateInProgress = true;
+  let updateWorkDir = "";
+  let extractTmp = "";
   try {
     const status = await getUpdateStatus();
     if (!status.enabled) throw new Error(status.error || "Updates are disabled");
@@ -149,7 +204,7 @@ export async function applyUpdate(version?: string): Promise<ApplyUpdateResult> 
     const installRoot = getInstallRoot();
     const releasesDir = join(installRoot, "releases");
     const currentLink = join(installRoot, "current");
-    const tmpDir = join(installRoot, "tmp");
+    const previousVersion = await getCurrentReleaseVersion(currentLink, releasesDir);
 
     const tag = version ? `v${normalizeVersion(version)}` : null;
     const release = tag ? await fetchReleaseByTag(tag) : await fetchLatestRelease();
@@ -172,14 +227,20 @@ export async function applyUpdate(version?: string): Promise<ApplyUpdateResult> 
     }
 
     await mkdir(releasesDir, { recursive: true });
-    await mkdir(tmpDir, { recursive: true });
+    const updateTmpRoot = getUpdateTmpRoot();
+    await mkdir(updateTmpRoot, { recursive: true });
 
-    const tarPath = join(tmpDir, `deckos-${targetVersion}.tar.gz`);
-    await rm(tarPath, { force: true });
+    updateWorkDir = join(
+      updateTmpRoot,
+      `deckos-update-${targetVersion}-${process.pid}-${Date.now()}`
+    );
+    await rm(updateWorkDir, { recursive: true, force: true });
+    await mkdir(updateWorkDir, { recursive: true });
 
+    const tarPath = join(updateWorkDir, `deckos-${targetVersion}.tar.gz`);
     await downloadReleaseAsset(asset.id, tarPath);
 
-    const extractTmp = join(releasesDir, `${targetVersion}.tmp`);
+    extractTmp = join(releasesDir, `${targetVersion}.tmp`);
     await rm(extractTmp, { recursive: true, force: true });
     await mkdir(extractTmp, { recursive: true });
 
@@ -194,6 +255,11 @@ export async function applyUpdate(version?: string): Promise<ApplyUpdateResult> 
     await execFile("mv", [extractTmp, targetDir]);
 
     await execFile("ln", ["-sfn", targetDir, currentLink]);
+    const keepVersions = new Set([targetVersion]);
+    if (previousVersion && previousVersion !== targetVersion) {
+      keepVersions.add(previousVersion);
+    }
+    await pruneReleases(releasesDir, keepVersions);
 
     setTimeout(() => {
       process.exit(0);
@@ -202,5 +268,11 @@ export async function applyUpdate(version?: string): Promise<ApplyUpdateResult> 
     return { targetVersion, restarting: true };
   } finally {
     updateInProgress = false;
+    if (extractTmp) {
+      await rm(extractTmp, { recursive: true, force: true });
+    }
+    if (updateWorkDir) {
+      await rm(updateWorkDir, { recursive: true, force: true });
+    }
   }
 }
