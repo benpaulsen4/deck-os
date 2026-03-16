@@ -20,7 +20,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
-  if systemctl list-unit-files | grep -q "^${SERVICE_NAME}\\.service"; then
+  if [[ "$(systemctl show --property=LoadState --value "${SERVICE_NAME}.service" 2>/dev/null || true)" != "not-found" ]]; then
     systemctl stop "${SERVICE_NAME}.service" || true
     systemctl disable "${SERVICE_NAME}.service" || true
   fi
