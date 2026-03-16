@@ -197,6 +197,17 @@ journalctl -u deckos -f
 
 DeckOS requires access to the host Docker socket via `/var/run/docker.sock`. The `deckos` service runs as a dedicated user that is granted Docker access (commonly via the `docker` group).
 
+### CPU power metric shows N/A
+
+DeckOS reads CPU power from Linux sysfs paths under `/sys/class/powercap` and `/sys/class/hwmon`. Some kernels expose these files as root-only by default. The service now runs a root pre-start step to grant group-read access on supported power sensor files before starting as the non-root `deckos` user.
+
+If CPU power still shows `N/A`, restart the service and check logs for permission warnings:
+
+```bash
+sudo systemctl restart deckos
+journalctl -u deckos -n 200 --no-pager | grep "CPU power metric"
+```
+
 ### Resetting DeckOS
 
 To remove all DeckOS data (including managed app metadata/compose files), stop the service and remove the data directory:

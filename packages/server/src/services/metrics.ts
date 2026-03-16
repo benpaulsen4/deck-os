@@ -23,13 +23,33 @@ let lastRaplDiscoveryAtMs = 0;
 let lastCpuEnergyUj: number | null = null;
 let lastCpuEnergyAtMs: number | null = null;
 const RAPL_REDISCOVERY_INTERVAL_MS = 60_000;
+const cpuPowerPermissionWarningPaths = new Set<string>();
+let cpuPowerSourceWarningLogged = false;
+
+function logCpuPowerPermissionIssue(path: string, error: unknown): void {
+  if (
+    !path.startsWith("/sys/class/powercap") &&
+    !path.startsWith("/sys/class/hwmon") &&
+    !path.startsWith("/sys/devices/platform/zenpower.0/hwmon")
+  ) {
+    return;
+  }
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  if (code !== "EACCES" && code !== "EPERM") return;
+  if (cpuPowerPermissionWarningPaths.has(path)) return;
+  cpuPowerPermissionWarningPaths.add(path);
+  console.warn(
+    `[deckos] CPU power metric cannot read ${path} (${code}). Grant deckos read access to powercap/hwmon sysfs files.`
+  );
+}
 
 async function readNumberFromFile(path: string): Promise<number | null> {
   try {
     const raw = await readFile(path, "utf8");
     const value = Number.parseFloat(raw.trim());
     return Number.isFinite(value) ? value : null;
-  } catch {
+  } catch (error: unknown) {
+    logCpuPowerPermissionIssue(path, error);
     return null;
   }
 }
@@ -130,6 +150,14 @@ async function discoverRaplEnergyPath(nowMs: number): Promise<void> {
   if (hwmonPath) {
     cpuPowerPath = hwmonPath;
     cpuPowerMode = "hwmon_power";
+    cpuPowerSourceWarningLogged = false;
+    return;
+  }
+  if (!cpuPowerSourceWarningLogged) {
+    cpuPowerSourceWarningLogged = true;
+    console.warn(
+      "[deckos] CPU power metric source unavailable. Ensure powercap/hwmon sensors exist and deckos can read them."
+    );
   }
 }
 

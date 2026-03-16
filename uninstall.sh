@@ -29,6 +29,7 @@ fi
 UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 rm -f "$UNIT_PATH"
 rm -f /usr/local/bin/deckos-node
+rm -f /usr/local/bin/deckos-fix-cpu-power-perms
 
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true

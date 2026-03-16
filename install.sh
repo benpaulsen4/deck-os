@@ -140,6 +140,32 @@ exec node "$@"
 EOF
 chmod 0755 /usr/local/bin/deckos-node
 
+cat > /usr/local/bin/deckos-fix-cpu-power-perms <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+apply_group_read() {
+  local target="$1"
+  [[ -r "$target" ]] || return 0
+  chgrp deckos "$target" 2>/dev/null || true
+  chmod g+r "$target" 2>/dev/null || true
+}
+
+for file in \
+  /sys/class/powercap/*/energy_uj \
+  /sys/class/powercap/*/max_energy_range_uj \
+  /sys/class/powercap/*/*/energy_uj \
+  /sys/class/powercap/*/*/max_energy_range_uj \
+  /sys/class/hwmon/hwmon*/power1_average \
+  /sys/class/hwmon/hwmon*/power1_input \
+  /sys/class/hwmon/hwmon*/name \
+  /sys/devices/platform/zenpower.0/hwmon/hwmon*/power1_average \
+  /sys/devices/platform/zenpower.0/hwmon/hwmon*/power1_input \
+  /sys/devices/platform/zenpower.0/hwmon/hwmon*/name; do
+  apply_group_read "$file"
+done
+EOF
+chmod 0755 /usr/local/bin/deckos-fix-cpu-power-perms
+
 install -d -m 0755 "${INSTALL_ROOT}/releases"
 chown -R deckos:deckos "${INSTALL_ROOT}"
 install -d -m 0755 "${DATA_DIR}"
@@ -237,6 +263,7 @@ Group=deckos
 SupplementaryGroups=docker
 EnvironmentFile=/etc/deckos/deckos.env
 WorkingDirectory=${INSTALL_ROOT}/current
+ExecStartPre=+/usr/local/bin/deckos-fix-cpu-power-perms
 ExecStart=/usr/local/bin/deckos-node ${INSTALL_ROOT}/current/packages/server/dist/index.js
 Restart=always
 RestartSec=2
