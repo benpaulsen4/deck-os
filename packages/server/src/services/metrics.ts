@@ -280,7 +280,11 @@ async function collectDiskMetrics(): Promise<DiskMetrics> {
   const fsSize = await si.fsSize();
   const realFileSystems = fsSize.filter((fs) => {
     const fsType = (fs.type || "").toLowerCase();
-    if (fsType === "tmpfs" || fsType === "swap") return false;
+    const fsName = (fs.fs || "").toLowerCase();
+    const mount = (fs.mount || "").toLowerCase();
+    if (fsType === "tmpfs" || fsType === "swap" || fsType === "efivarfs") return false;
+    if (fsName.includes("efivars")) return false;
+    if (mount.includes("/efivars")) return false;
     return true;
   });
   return {

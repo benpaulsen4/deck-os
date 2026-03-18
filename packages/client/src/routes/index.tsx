@@ -131,7 +131,13 @@ function DashboardPage() {
   const getDiskEntries = (m: SystemMetrics): SystemMetrics["disk"]["fs"] => {
     return m.disk.fs.filter((disk) => {
       const name = disk.fs.toLowerCase();
-      return !name.includes("tmpfs") && !name.includes("swap");
+      const mount = disk.mount.toLowerCase();
+      return (
+        !name.includes("tmpfs") &&
+        !name.includes("swap") &&
+        !name.includes("efivars") &&
+        !mount.includes("/efivars")
+      );
     });
   };
 

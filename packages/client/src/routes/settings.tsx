@@ -135,9 +135,18 @@ function SettingsPage() {
     return `${(bytes / Math.pow(k, unit)).toFixed(1)} ${sizes[unit]}`;
   };
 
-  const diskEntries = [...(diskMetrics?.disk.fs ?? [])].sort(
-    (a, b) => b.usePercent - a.usePercent
-  );
+  const diskEntries = (diskMetrics?.disk.fs ?? [])
+    .filter((disk) => {
+      const name = disk.fs.toLowerCase();
+      const mount = disk.mount.toLowerCase();
+      return (
+        !name.includes("tmpfs") &&
+        !name.includes("swap") &&
+        !name.includes("efivars") &&
+        !mount.includes("/efivars")
+      );
+    })
+    .sort((a, b) => b.usePercent - a.usePercent);
 
   return (
     <div className="page-container page-container--viewport">
