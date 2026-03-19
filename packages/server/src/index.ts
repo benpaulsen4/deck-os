@@ -13,6 +13,7 @@ import * as templatesService from "./services/templates.js";
 import * as filesService from "./services/files.js";
 import { LOG_HISTORY_SIZE } from "./lib/config.js";
 import { AppIdSchema } from "./lib/schema.js";
+import { getCurrentVersion } from "./lib/version.js";
 import { readFileSync, existsSync, createReadStream } from "fs";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { join, dirname, basename } from "path";
@@ -106,6 +107,10 @@ app.use(
 // Health check
 app.get("/api/health", (c) => {
   return c.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+app.get("/api/version", (c) => {
+  return c.json({ version: getCurrentVersion(), timestamp: new Date().toISOString() });
 });
 
 // Docker connectivity check

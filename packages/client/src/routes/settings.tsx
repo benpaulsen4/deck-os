@@ -11,6 +11,7 @@ export const Route = createFileRoute("/settings")({
 });
 
 function SettingsPage() {
+  const normalizeVersion = (version: string) => version.trim().replace(/^v/i, "");
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { addToast } = useToastStore();
@@ -44,28 +45,29 @@ function SettingsPage() {
 
   const startUpdateCompletionPolling = (targetVersion: string) => {
     stopUpdateReloadPolling();
-    let sawDowntime = false;
+    const expectedVersion = normalizeVersion(targetVersion);
     let attempts = 0;
     const attemptReload = async () => {
       attempts += 1;
       try {
-        const response = await fetch(`/api/health?_=${Date.now()}`, {
+        const response = await fetch(`/api/version?_=${Date.now()}`, {
           cache: "no-store",
         });
-        if (response.ok && (sawDowntime || attempts >= 15)) {
-          window.location.reload();
-          return;
+        if (response.ok) {
+          const payload = (await response.json()) as { version?: unknown };
+          if (typeof payload.version === "string") {
+            const reportedVersion = normalizeVersion(payload.version);
+            if (reportedVersion === expectedVersion) {
+              window.location.reload();
+              return;
+            }
+          }
         }
-        if (!response.ok) {
-          sawDowntime = true;
-        }
-      } catch {
-        sawDowntime = true;
-      }
+      } catch {}
       if (attempts >= 180) {
         stopUpdateReloadPolling();
         addToast(
-          `Update to v${targetVersion} may be complete. Refresh if this page does not reload.`,
+          `Still waiting for v${targetVersion}. Refresh manually if needed.`,
           "info"
         );
       }
