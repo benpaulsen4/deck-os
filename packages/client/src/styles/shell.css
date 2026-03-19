@@ -785,6 +785,10 @@
   margin-top: 0;
 }
 
+.app-detail-layout .page-col {
+  min-width: 0;
+}
+
 .app-detail-containers {
   flex: 1;
   min-height: 0;
@@ -801,6 +805,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  min-width: 0;
 }
 
 .app-detail-section-label {
@@ -831,6 +836,7 @@
   white-space: pre;
   overflow: auto;
   max-height: 100%;
+  margin: 0;
 }
 
 .compose-editor-panel {
@@ -844,12 +850,14 @@
 .compose-editor-body {
   flex: 1;
   min-height: 0;
+  min-width: 0;
 }
 
 .compose-section {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
 }
 
 .compose-section .compose-editor-panel {
