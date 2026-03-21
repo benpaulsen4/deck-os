@@ -19,11 +19,35 @@ type PullJobInternal = PullJobSnapshot & {
   finishedAt?: number;
 };
 
+type PullJobListener = (snapshot: PullJobSnapshot) => void;
+
 const jobs = new Map<string, PullJobInternal>();
 const runningByAppId = new Map<string, string>();
+const listenersByJobId = new Map<string, Set<PullJobListener>>();
 
 const RUNNING_TTL_MS = 2 * 60 * 60 * 1000;
 const FINISHED_TTL_MS = 5 * 60 * 1000;
+
+function toSnapshot(job: PullJobInternal): PullJobSnapshot {
+  const {
+    controller: _controller,
+    createdAt: _createdAt,
+    finishedAt: _finishedAt,
+    ...snapshot
+  } = job;
+  return snapshot;
+}
+
+function notifyPullJobUpdate(jobId: string) {
+  const listeners = listenersByJobId.get(jobId);
+  if (!listeners || listeners.size === 0) return;
+  const job = jobs.get(jobId);
+  if (!job) return;
+  const snapshot = toSnapshot(job);
+  for (const listener of listeners) {
+    listener(snapshot);
+  }
+}
 
 function pruneJobs(now: number = Date.now()) {
   for (const [jobId, job] of jobs) {
@@ -33,6 +57,7 @@ function pruneJobs(now: number = Date.now()) {
         job.status = "error";
         job.error = "Pull timed out";
         job.finishedAt = now;
+        notifyPullJobUpdate(jobId);
         if (runningByAppId.get(job.appId) === jobId) {
           runningByAppId.delete(job.appId);
         }
@@ -43,6 +68,7 @@ function pruneJobs(now: number = Date.now()) {
     const finishedAt = job.finishedAt ?? job.createdAt;
     if (now - finishedAt > FINISHED_TTL_MS) {
       jobs.delete(jobId);
+      listenersByJobId.delete(jobId);
       if (runningByAppId.get(job.appId) === jobId) {
         runningByAppId.delete(job.appId);
       }
@@ -69,13 +95,24 @@ export function getPullJob(jobId: string): PullJobSnapshot | null {
   pruneJobs();
   const job = jobs.get(jobId);
   if (!job) return null;
-  const {
-    controller: _controller,
-    createdAt: _createdAt,
-    finishedAt: _finishedAt,
-    ...snapshot
-  } = job;
-  return snapshot;
+  return toSnapshot(job);
+}
+
+export function subscribeToPullJob(jobId: string, listener: PullJobListener): () => void {
+  let listeners = listenersByJobId.get(jobId);
+  if (!listeners) {
+    listeners = new Set();
+    listenersByJobId.set(jobId, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    const current = listenersByJobId.get(jobId);
+    if (!current) return;
+    current.delete(listener);
+    if (current.size === 0) {
+      listenersByJobId.delete(jobId);
+    }
+  };
 }
 
 export async function startPullJob(appId: string): Promise<PullJobSnapshot> {
@@ -124,6 +161,7 @@ export async function startPullJob(appId: string): Promise<PullJobSnapshot> {
         const j = jobs.get(jobId);
         if (!j) return;
         j.progress = progress;
+        notifyPullJobUpdate(jobId);
       },
       controller.signal
     )
@@ -137,6 +175,7 @@ export async function startPullJob(appId: string): Promise<PullJobSnapshot> {
         percent: 100,
         completedImages: j.progress.totalImages,
       };
+      notifyPullJobUpdate(jobId);
       if (runningByAppId.get(appId) === jobId) {
         runningByAppId.delete(appId);
       }
@@ -147,6 +186,7 @@ export async function startPullJob(appId: string): Promise<PullJobSnapshot> {
       j.status = "error";
       j.finishedAt = Date.now();
       j.error = err instanceof Error ? err.message : "Pull failed";
+      notifyPullJobUpdate(jobId);
       if (runningByAppId.get(appId) === jobId) {
         runningByAppId.delete(appId);
       }

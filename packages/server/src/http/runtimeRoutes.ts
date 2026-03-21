@@ -168,7 +168,54 @@ export function registerRuntimeRoutes(app: Hono) {
     if (!job) {
       return c.json({ error: "Not found" }, 404);
     }
-    return c.json(job);
+    const accept = c.req.header("accept") ?? "";
+    if (!accept.toLowerCase().includes("text/event-stream")) {
+      return c.json(job);
+    }
+    return streamSSE(c, async (stream) => {
+      try {
+        stream.writeSSE({
+          data: JSON.stringify(job),
+          event: "pull",
+          id: Date.now().toString(),
+        });
+      } catch (error) {
+        console.error("[deckos] Error sending initial pull status:", error);
+        return;
+      }
+
+      const unsubscribe = pullJobsService.subscribeToPullJob(jobId, (snapshot) => {
+        try {
+          stream.writeSSE({
+            data: JSON.stringify(snapshot),
+            event: "pull",
+            id: Date.now().toString(),
+          });
+        } catch (error) {
+          console.error("[deckos] Error sending pull status:", error);
+          unsubscribe();
+        }
+      });
+
+      const keepaliveInterval = setInterval(() => {
+        try {
+          stream.writeSSE({
+            data: "keepalive",
+            event: "keepalive",
+            id: Date.now().toString(),
+          });
+        } catch (error) {
+          console.error("[deckos] Error sending pull keepalive:", error);
+        }
+      }, 30000);
+
+      stream.onAbort(() => {
+        clearInterval(keepaliveInterval);
+        unsubscribe();
+      });
+
+      await stream.sleep(1000000);
+    });
   });
 
   app.get("/api/logs/:containerId", async (c) => {

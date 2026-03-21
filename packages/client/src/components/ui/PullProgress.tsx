@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { authFetch } from "../../lib/auth";
+import { authFetch, emitUnauthorizedEvent, fetchAuthStatus } from "../../lib/auth";
 
 interface PullProgressProps {
   isOpen: boolean;
@@ -69,15 +69,15 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
 
     let finished = false;
     const controller = new AbortController();
-    let interval: number | undefined;
-    let consecutiveFailures = 0;
+    let eventSource: EventSource | null = null;
 
     const completeOk = () => {
       if (finished) return;
       finished = true;
       controller.abort();
-      if (interval !== undefined) {
-        window.clearInterval(interval);
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
       }
       setIsPulling(false);
       completeTimeoutRef.current = window.setTimeout(() => {
@@ -90,8 +90,9 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
       if (finished) return;
       finished = true;
       controller.abort();
-      if (interval !== undefined) {
-        window.clearInterval(interval);
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
       }
       setIsPulling(false);
       setError(message);
@@ -119,27 +120,19 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
           completeErr("Failed to start pull");
           return;
         }
+        const encodedJobId = encodeURIComponent(jobId);
+        eventSource = new EventSource(`/api/pull/${encodedJobId}`);
+        let consecutiveFailures = 0;
 
-        const poll = async () => {
+        eventSource.onopen = () => {
+          consecutiveFailures = 0;
+        };
+
+        eventSource.addEventListener("pull", (event) => {
           if (finished) return;
           try {
-            const res = await authFetch(`/api/pull/${encodeURIComponent(jobId)}`, {
-              signal: controller.signal,
-            });
-            if (!res.ok) {
-              consecutiveFailures++;
-              if (res.status === 404) {
-                completeErr("Pull job not found");
-                return;
-              }
-              if (consecutiveFailures >= 10) {
-                const body = await safeJson(res);
-                completeErr(getErrorFromBody(body) ?? "Lost connection to pull job");
-              }
-              return;
-            }
-            consecutiveFailures = 0;
-            const job = (await res.json()) as {
+            const message = event as MessageEvent;
+            const job = JSON.parse(message.data) as {
               status: "running" | "done" | "error";
               error?: string;
               progress: PullOverallProgress;
@@ -152,14 +145,28 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
             } else if (job.status === "error") {
               completeErr(job.error || "Pull failed");
             }
-          } catch (err: unknown) {
-            if (finished) return;
-            if (err instanceof DOMException && err.name === "AbortError") return;
+          } catch {
+            completeErr("Invalid pull status update");
           }
-        };
+        });
 
-        await poll();
-        interval = window.setInterval(poll, 300);
+        eventSource.addEventListener("keepalive", () => {});
+
+        eventSource.onerror = () => {
+          if (finished) return;
+          consecutiveFailures++;
+          if (consecutiveFailures < 3) {
+            return;
+          }
+          void fetchAuthStatus()
+            .then((status) => {
+              if (status.enabled && !status.unlocked) {
+                emitUnauthorizedEvent();
+              }
+            })
+            .catch(() => {});
+          completeErr("Lost connection to pull job");
+        };
       } catch (err: unknown) {
         if (finished) return;
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -171,8 +178,9 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
 
     return () => {
       controller.abort();
-      if (interval !== undefined) {
-        window.clearInterval(interval);
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
       }
       if (completeTimeoutRef.current !== null) {
         window.clearTimeout(completeTimeoutRef.current);
