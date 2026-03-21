@@ -15,13 +15,15 @@ export const appsRouter = router({
     return await appsService.listApps();
   }),
 
-  get: protectedProcedure.input(z.object({ id: AppIdSchema })).query(async ({ input }) => {
-    const app = await appsService.getApp(input.id);
-    if (!app) {
-      throw new AppNotFoundError(input.id);
-    }
-    return app;
-  }),
+  get: protectedProcedure
+    .input(z.object({ id: AppIdSchema }))
+    .query(async ({ input }) => {
+      const app = await appsService.getApp(input.id);
+      if (!app) {
+        throw new AppNotFoundError(input.id);
+      }
+      return app;
+    }),
 
   validateCompose: protectedProcedure
     .input(z.object({ composeYaml: z.string() }))

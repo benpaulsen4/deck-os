@@ -309,8 +309,7 @@ function normalizeTemplateParameterValue(
       const looksRelative =
         normalized.startsWith("./") ||
         /^[a-zA-Z0-9._-]+(?:\/[a-zA-Z0-9._-]+)*$/.test(normalized);
-      const looksAbsolute =
-        normalized.startsWith("/") || /^[a-zA-Z]:\//.test(normalized);
+      const looksAbsolute = normalized.startsWith("/") || /^[a-zA-Z]:\//.test(normalized);
       if (!looksRelative && !looksAbsolute) {
         throw new Error(`Invalid path for parameter: ${parameter.label}`);
       }

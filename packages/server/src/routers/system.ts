@@ -55,7 +55,9 @@ async function executePowerCommand(
         return;
       }
 
-      reject(new Error(`exit code ${code ?? "null"}${signal ? ` signal ${signal}` : ""}`));
+      reject(
+        new Error(`exit code ${code ?? "null"}${signal ? ` signal ${signal}` : ""}`)
+      );
     });
   });
 }
@@ -75,7 +77,10 @@ function buildPowerAttempts(
 ) {
   const attempts: PowerCommand[] = [];
   const requiresSudo =
-    platform !== "win32" && powerCommand.requiresRoot === true && uid !== null && uid !== 0;
+    platform !== "win32" &&
+    powerCommand.requiresRoot === true &&
+    uid !== null &&
+    uid !== 0;
   if (requiresSudo) {
     attempts.push({
       command: "sudo",

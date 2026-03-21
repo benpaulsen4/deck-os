@@ -32,9 +32,7 @@ const AppIdSchema = z
   .min(1)
   .max(64)
   .regex(/^[a-z0-9][a-z0-9-]*$/, "Invalid app id");
-const PasscodeSchema = z
-  .string()
-  .regex(/^[0-9]{4,10}$/, "Passcode must be 4-10 digits");
+const PasscodeSchema = z.string().regex(/^[0-9]{4,10}$/, "Passcode must be 4-10 digits");
 const SessionDurationMsSchema = z
   .number()
   .int()

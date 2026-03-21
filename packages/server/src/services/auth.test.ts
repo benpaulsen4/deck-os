@@ -56,7 +56,10 @@ test("unlock enforces per-IP cooldown after repeated failures", async () => {
   });
 
   for (let index = 0; index < 5; index += 1) {
-    await assert.rejects(unlock({ passcode: "0000", ip: "10.0.0.9" }), AuthInvalidPasscodeError);
+    await assert.rejects(
+      unlock({ passcode: "0000", ip: "10.0.0.9" }),
+      AuthInvalidPasscodeError
+    );
   }
 
   await assert.rejects(

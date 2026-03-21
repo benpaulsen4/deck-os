@@ -93,7 +93,8 @@ function sanitizeConfig(input: unknown): PersistedAuthConfig {
   }
   const candidate = input as Partial<PersistedAuthConfig>;
   const enabled = candidate.enabled === true;
-  const sessionDurationMs = SessionDurationMsSchema.safeParse(candidate.sessionDurationMs).success
+  const sessionDurationMs = SessionDurationMsSchema.safeParse(candidate.sessionDurationMs)
+    .success
     ? (candidate.sessionDurationMs as number)
     : AUTH_DEFAULT_SESSION_DURATION_MS;
   const passcodeHash =
@@ -146,9 +147,19 @@ async function writeConfig(config: PersistedAuthConfig): Promise<PersistedAuthCo
   return config;
 }
 
-function hashPasscode(passcode: string, saltHex: string, iterations: number, digest: string) {
-  return pbkdf2Sync(passcode, Buffer.from(saltHex, "hex"), iterations, PASSCODE_KEY_LENGTH, digest)
-    .toString("hex");
+function hashPasscode(
+  passcode: string,
+  saltHex: string,
+  iterations: number,
+  digest: string
+) {
+  return pbkdf2Sync(
+    passcode,
+    Buffer.from(saltHex, "hex"),
+    iterations,
+    PASSCODE_KEY_LENGTH,
+    digest
+  ).toString("hex");
 }
 
 function verifyPasscode(config: PersistedAuthConfig, passcode: string): boolean {
@@ -191,13 +202,19 @@ function getOrCreateAttemptRecord(ip: string): FailedAttemptRecord {
   if (existing) {
     return existing;
   }
-  const initial: FailedAttemptRecord = { failedAtMs: [], cooldownUntilMs: 0, cooldownLevel: 0 };
+  const initial: FailedAttemptRecord = {
+    failedAtMs: [],
+    cooldownUntilMs: 0,
+    cooldownLevel: 0,
+  };
   failedAttemptsByIp.set(ip, initial);
   return initial;
 }
 
 function pruneAttemptWindow(record: FailedAttemptRecord, atMs: number) {
-  record.failedAtMs = record.failedAtMs.filter((value) => atMs - value <= FAILED_ATTEMPT_WINDOW_MS);
+  record.failedAtMs = record.failedAtMs.filter(
+    (value) => atMs - value <= FAILED_ATTEMPT_WINDOW_MS
+  );
 }
 
 function assertNotRateLimited(ip: string, atMs: number) {
@@ -256,7 +273,8 @@ function clearAllSessions() {
 export async function getAuthStatus(sessionToken?: string | null) {
   const config = await readConfig();
   pruneSessions();
-  const unlocked = config.enabled && sessionToken ? isSessionValid(sessionToken) : !config.enabled;
+  const unlocked =
+    config.enabled && sessionToken ? isSessionValid(sessionToken) : !config.enabled;
   return {
     enabled: config.enabled,
     unlocked,
@@ -264,7 +282,10 @@ export async function getAuthStatus(sessionToken?: string | null) {
   };
 }
 
-export async function configureAuth(input: { passcode: string; sessionDurationMs: number }) {
+export async function configureAuth(input: {
+  passcode: string;
+  sessionDurationMs: number;
+}) {
   const passcode = parsePasscode(input.passcode);
   const sessionDurationMs = parseSessionDurationMs(input.sessionDurationMs);
   const current = await readConfig();

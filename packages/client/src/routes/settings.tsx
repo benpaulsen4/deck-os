@@ -108,7 +108,9 @@ function SettingsPage() {
             }
           }
         }
-      } catch {}
+      } catch (error) {
+        void error;
+      }
       if (attempts >= 180) {
         stopUpdateReloadPolling();
         addToast(
@@ -174,7 +176,9 @@ function SettingsPage() {
         body: JSON.stringify(input),
       });
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
         throw new Error(payload?.error || "Failed to configure passcode");
       }
       return await response.json();
@@ -207,7 +211,9 @@ function SettingsPage() {
         body: JSON.stringify(input),
       });
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
         throw new Error(payload?.error || "Failed to change passcode");
       }
       return await response.json();
@@ -237,7 +243,9 @@ function SettingsPage() {
         body: JSON.stringify(input),
       });
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
         throw new Error(payload?.error || "Failed to update session duration");
       }
       return await response.json();
@@ -265,7 +273,9 @@ function SettingsPage() {
         body: JSON.stringify(input),
       });
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
         throw new Error(payload?.error || "Failed to disable passcode");
       }
       return await response.json();
@@ -322,7 +332,9 @@ function SettingsPage() {
     );
 
   const openSecurityModal = (modal: "enable" | "session" | "passcode" | "disable") => {
-    const currentHours = sessionMsToHours(authStatusQuery.data?.sessionDurationMs ?? 24 * 3600 * 1000);
+    const currentHours = sessionMsToHours(
+      authStatusQuery.data?.sessionDurationMs ?? 24 * 3600 * 1000
+    );
     if (modal === "enable") {
       setSetupPasscode("");
       setSetupConfirmPasscode("");
@@ -440,7 +452,10 @@ function SettingsPage() {
               ) : null}
             </div>
 
-            <div className="panel settings-disk-panel" style={{ padding: "var(--space-3)" }}>
+            <div
+              className="panel settings-disk-panel"
+              style={{ padding: "var(--space-3)" }}
+            >
               <div className="label" style={{ marginBottom: "var(--space-2)" }}>
                 DISK INFORMATION
               </div>
@@ -456,10 +471,15 @@ function SettingsPage() {
                         {diskEntries.map((disk) => {
                           const diskFree = Math.max(0, disk.size - disk.used);
                           return (
-                            <div className="settings-disk-item" key={`${disk.fs}:${disk.mount}`}>
+                            <div
+                              className="settings-disk-item"
+                              key={`${disk.fs}:${disk.mount}`}
+                            >
                               <div className="settings-disk-item-head">
                                 <div className="settings-disk-meta">
-                                  <span className="settings-disk-mount">{disk.mount}</span>
+                                  <span className="settings-disk-mount">
+                                    {disk.mount}
+                                  </span>
                                   <span className="settings-disk-fs">{disk.fs}</span>
                                 </div>
                                 <span className="settings-disk-percent">
@@ -681,7 +701,9 @@ function SettingsPage() {
                 maxLength={10}
                 value={setupPasscode}
                 onChange={(event) =>
-                  setSetupPasscode(event.currentTarget.value.replace(/\D/g, "").slice(0, 10))
+                  setSetupPasscode(
+                    event.currentTarget.value.replace(/\D/g, "").slice(0, 10)
+                  )
                 }
                 style={securityInputStyle}
               />
@@ -774,7 +796,9 @@ function SettingsPage() {
                   CANCEL
                 </Button>
                 <Button type="submit" disabled={updateSessionMutation.isPending}>
-                  {updateSessionMutation.isPending ? "SAVING..." : "UPDATE SESSION TIMEOUT"}
+                  {updateSessionMutation.isPending
+                    ? "SAVING..."
+                    : "UPDATE SESSION TIMEOUT"}
                 </Button>
               </div>
             </form>
@@ -813,7 +837,9 @@ function SettingsPage() {
                 maxLength={10}
                 value={manageNextPasscode}
                 onChange={(event) =>
-                  setManageNextPasscode(event.currentTarget.value.replace(/\D/g, "").slice(0, 10))
+                  setManageNextPasscode(
+                    event.currentTarget.value.replace(/\D/g, "").slice(0, 10)
+                  )
                 }
                 style={securityInputStyle}
               />
@@ -882,7 +908,11 @@ function SettingsPage() {
                 >
                   CANCEL
                 </Button>
-                <Button variant="danger" type="submit" disabled={disableAuthMutation.isPending}>
+                <Button
+                  variant="danger"
+                  type="submit"
+                  disabled={disableAuthMutation.isPending}
+                >
                   {disableAuthMutation.isPending ? "DISABLING..." : "DISABLE PASSCODE"}
                 </Button>
               </div>

@@ -160,7 +160,7 @@ export function CodeEditor({
                           ? StreamLanguage.define(shell)
                           : language === "powershell"
                             ? StreamLanguage.define(powerShell)
-                        : null;
+                            : null;
     if (languageExtension) {
       extensions.splice(2, 0, languageExtension);
     }

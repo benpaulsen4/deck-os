@@ -98,7 +98,9 @@ async function findHwmonPowerPath(): Promise<string | null> {
       for (const entry of entries) {
         if (!entry.startsWith("hwmon")) continue;
         const hwmonDir = join(base, entry);
-        const sensorName = ((await readFile(join(hwmonDir, "name"), "utf8").catch(() => "")) || "")
+        const sensorName = (
+          (await readFile(join(hwmonDir, "name"), "utf8").catch(() => "")) || ""
+        )
           .trim()
           .toLowerCase();
         const baseScore = sensorName.includes("zenpower")
@@ -166,7 +168,8 @@ async function readCpuPowerWatts(nowMs: number): Promise<number | null> {
 
   if (
     cpuPowerPath === undefined ||
-    (cpuPowerPath === null && nowMs - lastRaplDiscoveryAtMs >= RAPL_REDISCOVERY_INTERVAL_MS)
+    (cpuPowerPath === null &&
+      nowMs - lastRaplDiscoveryAtMs >= RAPL_REDISCOVERY_INTERVAL_MS)
   ) {
     await discoverRaplEnergyPath(nowMs);
   }

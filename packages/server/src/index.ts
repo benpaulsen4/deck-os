@@ -78,13 +78,30 @@ function toFilesHttpErrorResponse(
   return { status: 500, message };
 }
 
-// Global error handler
+let fatalExitScheduled = false;
+
+function scheduleFatalExit(
+  kind: "uncaughtException" | "unhandledRejection",
+  detail: unknown
+) {
+  const payload = detail instanceof Error ? detail.stack || detail.message : detail;
+  console.error(`[deckos] Fatal ${kind}; exiting for supervised restart`, payload);
+  if (fatalExitScheduled) {
+    return;
+  }
+  fatalExitScheduled = true;
+  process.exitCode = 1;
+  setTimeout(() => {
+    process.exit(1);
+  }, 50).unref();
+}
+
 process.on("uncaughtException", (error) => {
-  console.error("[deckos] Uncaught exception:", error);
+  scheduleFatalExit("uncaughtException", error);
 });
 
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("[deckos] Unhandled rejection at:", promise, "reason:", reason);
+process.on("unhandledRejection", (reason) => {
+  scheduleFatalExit("unhandledRejection", reason);
 });
 
 const app = new Hono();
@@ -210,7 +227,10 @@ app.post("/api/auth/configure", async (c) => {
     if (error instanceof authService.AuthValidationError) {
       return c.json({ error: error.message }, 400);
     }
-    return c.json({ error: error instanceof Error ? error.message : "Configure failed" }, 500);
+    return c.json(
+      { error: error instanceof Error ? error.message : "Configure failed" },
+      500
+    );
   }
 });
 
@@ -227,7 +247,9 @@ app.post("/api/auth/change", async (c) => {
         typeof body?.currentPasscode === "string" ? body.currentPasscode : "",
       nextPasscode: typeof body?.nextPasscode === "string" ? body.nextPasscode : "",
       sessionDurationMs:
-        body?.sessionDurationMs === undefined ? undefined : Number(body.sessionDurationMs),
+        body?.sessionDurationMs === undefined
+          ? undefined
+          : Number(body.sessionDurationMs),
     });
     authService.revokeSession(sessionToken);
     clearSessionCookie(c);

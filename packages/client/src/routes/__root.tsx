@@ -71,9 +71,10 @@ function RootLayout() {
         body: JSON.stringify({ passcode: pin }),
       });
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as
-          | { error?: string; retryAfterMs?: number }
-          | null;
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string;
+          retryAfterMs?: number;
+        } | null;
         if (typeof payload?.retryAfterMs === "number" && payload.retryAfterMs > 0) {
           setRetryAfterMs(payload.retryAfterMs);
         }
@@ -136,7 +137,9 @@ function RootLayout() {
               Retry in {Math.ceil(retryAfterMs / 1000)}s
             </div>
           )}
-          {unlockError && <div className="auth-message auth-message--error">{unlockError}</div>}
+          {unlockError && (
+            <div className="auth-message auth-message--error">{unlockError}</div>
+          )}
         </div>
       </div>
     );
@@ -173,9 +176,9 @@ function TopBar({
   const powerMenuRef = useRef<HTMLDivElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [powerMenuOpen, setPowerMenuOpen] = useState(false);
-  const [pendingPowerAction, setPendingPowerAction] = useState<"shutdown" | "restart" | null>(
-    null
-  );
+  const [pendingPowerAction, setPendingPowerAction] = useState<
+    "shutdown" | "restart" | null
+  >(null);
 
   const powerActionMutation = useMutation({
     mutationFn: async (action: "shutdown" | "restart") =>
@@ -235,7 +238,8 @@ function TopBar({
   const isDashboardPath = currentPath === "/";
   const isAppsPath = currentPath === "/apps" || currentPath.startsWith("/apps/");
   const isFilesPath = currentPath === "/files" || currentPath.startsWith("/files/");
-  const isSettingsPath = currentPath === "/settings" || currentPath.startsWith("/settings/");
+  const isSettingsPath =
+    currentPath === "/settings" || currentPath.startsWith("/settings/");
 
   const connectionStyle: React.CSSProperties = {
     display: "flex",
@@ -355,7 +359,11 @@ function TopBar({
                 <Power size={14} />
               </button>
               {powerMenuOpen && (
-                <div className="topbar-power-dropdown" role="menu" aria-label="Power actions">
+                <div
+                  className="topbar-power-dropdown"
+                  role="menu"
+                  aria-label="Power actions"
+                >
                   <button
                     className="topbar-power-item"
                     role="menuitem"

@@ -193,6 +193,17 @@ Check service logs:
 journalctl -u deckos -f
 ```
 
+### Crash and restart behavior
+
+DeckOS is designed for supervised operation under `systemd` with `Restart=always`.
+If the server hits an unrecoverable runtime fault (`uncaughtException` or `unhandledRejection`), it exits with a non-zero code so `systemd` can restart it cleanly.
+
+For incident review:
+
+```bash
+journalctl -u deckos -n 200 --no-pager
+```
+
 ### Accessing the Docker socket
 
 DeckOS requires access to the host Docker socket via `/var/run/docker.sock`. The `deckos` service runs as a dedicated user that is granted Docker access (commonly via the `docker` group).

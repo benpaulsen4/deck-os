@@ -56,8 +56,9 @@ function getGithubConfig() {
   const owner = process.env.DECKOS_GITHUB_OWNER?.trim() || "";
   const repo = process.env.DECKOS_GITHUB_REPO?.trim() || "";
   const token = process.env.DECKOS_GITHUB_TOKEN?.trim() || "";
-  const apiBase = (process.env.DECKOS_GITHUB_API_BASE?.trim() || "https://api.github.com")
-    .replace(/\/+$/, "");
+  const apiBase = (
+    process.env.DECKOS_GITHUB_API_BASE?.trim() || "https://api.github.com"
+  ).replace(/\/+$/, "");
   return { owner, repo, token, apiBase };
 }
 
@@ -177,4 +178,3 @@ export async function checkForUpdatesNow(): Promise<UpdateStatus> {
   clearUpdateStatusCache();
   return await getUpdateStatus();
 }
-

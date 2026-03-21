@@ -434,6 +434,7 @@ DeckOS is managed by `systemd` on Linux. The service runs as a dedicated user an
 - `EnvironmentFile=/etc/deckos/deckos.env`
 - `WorkingDirectory=/opt/deckos/current`
 - `Restart=always` (used to restart after self-update)
+- Fatal runtime faults (`uncaughtException`/`unhandledRejection`) exit the process with a non-zero code so `systemd` can perform a clean supervised restart
 
 ### Updates and Rollback
 

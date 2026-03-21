@@ -42,9 +42,7 @@ function AppDetailPage() {
     isLoading: appLoading,
     isError: isAppError,
     error: appError,
-  } = useQuery(
-    trpc.apps.get.queryOptions({ id: appId })
-  );
+  } = useQuery(trpc.apps.get.queryOptions({ id: appId }));
 
   const { data: stackStatus } = useQuery({
     queryKey: ["stackStatus", appId],
