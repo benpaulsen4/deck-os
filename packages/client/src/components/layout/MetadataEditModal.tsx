@@ -117,8 +117,15 @@ export function MetadataEditModal({ app, isOpen, onClose }: MetadataEditModalPro
   return (
     <div className="modal-overlay">
       <div className="modal-backdrop" onClick={handleClose} />
-      <div className="modal-content">
-        <h2 className="modal-title">EDIT METADATA</h2>
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="metadata-edit-modal-title"
+      >
+        <h2 id="metadata-edit-modal-title" className="modal-title">
+          EDIT METADATA
+        </h2>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <Input

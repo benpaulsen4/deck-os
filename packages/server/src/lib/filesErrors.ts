@@ -17,21 +17,20 @@ export function mapFilesError(
   trpcCode: FilesTrpcErrorCode;
   message: string;
 } {
-  const message = error instanceof Error ? error.message : fallbackMessage;
   if (error instanceof filesService.FilesAccessDeniedError) {
-    return { status: 403, trpcCode: "FORBIDDEN", message };
+    return { status: 403, trpcCode: "FORBIDDEN", message: error.message };
   }
   if (error instanceof filesService.FilesNotFoundError) {
-    return { status: 404, trpcCode: "NOT_FOUND", message };
+    return { status: 404, trpcCode: "NOT_FOUND", message: error.message };
   }
   if (
     error instanceof filesService.FilesNotDirectoryError ||
     error instanceof filesService.FilesNotFileError
   ) {
-    return { status: 400, trpcCode: "BAD_REQUEST", message };
+    return { status: 400, trpcCode: "BAD_REQUEST", message: error.message };
   }
   if (error instanceof filesService.FilesAlreadyExistsError) {
-    return { status: 409, trpcCode: "CONFLICT", message };
+    return { status: 409, trpcCode: "CONFLICT", message: error.message };
   }
   if (error instanceof Error && (error as NodeJS.ErrnoException).code === "EEXIST") {
     return {
@@ -44,12 +43,12 @@ export function mapFilesError(
     return {
       status: 413,
       trpcCode: "PAYLOAD_TOO_LARGE",
-      message,
+      message: fallbackMessage,
     };
   }
   return {
     status: 500,
     trpcCode: "INTERNAL_SERVER_ERROR",
-    message,
+    message: fallbackMessage,
   };
 }

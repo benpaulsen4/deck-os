@@ -53,33 +53,60 @@ export function AppTile({ app, style, className, rootRef, rootProps }: AppTilePr
       style={{ ...(rootStyle ?? {}), ...(style ?? {}) }}
       {...restRootProps}
     >
-      <a
-        href={safeUrl || "#"}
-        target={safeUrl ? "_blank" : undefined}
-        rel={safeUrl ? "noopener noreferrer" : undefined}
-        className="app-tile-inner"
-        style={{
-          textDecoration: "none",
-          color: "inherit",
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-2)",
-          width: "100%",
-          alignItems: "center",
-        }}
-      >
-        <div className="app-tile-icon">
-          <AppIcon name={app.metadata.name} src={app.metadata.icon} />
+      {safeUrl ? (
+        <a
+          href={safeUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="app-tile-inner"
+          style={{
+            textDecoration: "none",
+            color: "inherit",
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-2)",
+            width: "100%",
+            alignItems: "center",
+          }}
+        >
+          <div className="app-tile-icon">
+            <AppIcon name={app.metadata.name} src={app.metadata.icon} />
+          </div>
+          <span className="app-tile-name">{app.metadata.name}</span>
+          <span className="app-tile-status">
+            <span
+              className={`app-tile-status-dot ${status === "running" ? "status-pulse" : ""}`}
+              data-status={status}
+            />
+            {getStatusLabel()}
+          </span>
+        </a>
+      ) : (
+        <div
+          className="app-tile-inner"
+          style={{
+            textDecoration: "none",
+            color: "inherit",
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-2)",
+            width: "100%",
+            alignItems: "center",
+          }}
+        >
+          <div className="app-tile-icon">
+            <AppIcon name={app.metadata.name} src={app.metadata.icon} />
+          </div>
+          <span className="app-tile-name">{app.metadata.name}</span>
+          <span className="app-tile-status">
+            <span
+              className={`app-tile-status-dot ${status === "running" ? "status-pulse" : ""}`}
+              data-status={status}
+            />
+            {getStatusLabel()}
+          </span>
         </div>
-        <span className="app-tile-name">{app.metadata.name}</span>
-        <span className="app-tile-status">
-          <span
-            className={`app-tile-status-dot ${status === "running" ? "status-pulse" : ""}`}
-            data-status={status}
-          />
-          {getStatusLabel()}
-        </span>
-      </a>
+      )}
       <Link
         to="/apps/$appId"
         params={{ appId: app.id }}

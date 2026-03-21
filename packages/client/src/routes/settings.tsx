@@ -685,8 +685,15 @@ function SettingsPage() {
       {securityModal === "enable" && (
         <div className="modal-overlay">
           <div className="modal-backdrop" onClick={() => setSecurityModal(null)} />
-          <div className="modal-content">
-            <h2 className="modal-title">ENABLE PASSCODE</h2>
+          <div
+            className="modal-content"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="security-modal-enable-title"
+          >
+            <h2 id="security-modal-enable-title" className="modal-title">
+              ENABLE PASSCODE
+            </h2>
             <form
               onSubmit={(event) => {
                 event.preventDefault();
@@ -694,8 +701,11 @@ function SettingsPage() {
               }}
               style={{ display: "grid", gap: "var(--space-2)" }}
             >
-              <label className="system-info-label">NEW PASSCODE</label>
+              <label htmlFor="setup-passcode" className="system-info-label">
+                NEW PASSCODE
+              </label>
               <input
+                id="setup-passcode"
                 type="password"
                 inputMode="numeric"
                 maxLength={10}
@@ -707,8 +717,11 @@ function SettingsPage() {
                 }
                 style={securityInputStyle}
               />
-              <label className="system-info-label">CONFIRM PASSCODE</label>
+              <label htmlFor="setup-confirm-passcode" className="system-info-label">
+                CONFIRM PASSCODE
+              </label>
               <input
+                id="setup-confirm-passcode"
                 type="password"
                 inputMode="numeric"
                 maxLength={10}
@@ -720,8 +733,11 @@ function SettingsPage() {
                 }
                 style={securityInputStyle}
               />
-              <label className="system-info-label">SESSION HOURS (1-168)</label>
+              <label htmlFor="setup-session-hours" className="system-info-label">
+                SESSION HOURS (1-168)
+              </label>
               <input
+                id="setup-session-hours"
                 type="number"
                 min={1}
                 max={168}
@@ -752,8 +768,15 @@ function SettingsPage() {
       {securityModal === "session" && (
         <div className="modal-overlay">
           <div className="modal-backdrop" onClick={() => setSecurityModal(null)} />
-          <div className="modal-content">
-            <h2 className="modal-title">CHANGE SESSION TIMEOUT</h2>
+          <div
+            className="modal-content"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="security-modal-session-title"
+          >
+            <h2 id="security-modal-session-title" className="modal-title">
+              CHANGE SESSION TIMEOUT
+            </h2>
             <form
               onSubmit={(event) => {
                 event.preventDefault();
@@ -761,8 +784,14 @@ function SettingsPage() {
               }}
               style={{ display: "grid", gap: "var(--space-2)" }}
             >
-              <label className="system-info-label">CURRENT PASSCODE</label>
+              <label
+                htmlFor="manage-current-passcode-session"
+                className="system-info-label"
+              >
+                CURRENT PASSCODE
+              </label>
               <input
+                id="manage-current-passcode-session"
                 type="password"
                 inputMode="numeric"
                 maxLength={10}
@@ -774,8 +803,11 @@ function SettingsPage() {
                 }
                 style={securityInputStyle}
               />
-              <label className="system-info-label">SESSION HOURS (1-168)</label>
+              <label htmlFor="manage-session-hours" className="system-info-label">
+                SESSION HOURS (1-168)
+              </label>
               <input
+                id="manage-session-hours"
                 type="number"
                 min={1}
                 max={168}
@@ -808,8 +840,15 @@ function SettingsPage() {
       {securityModal === "passcode" && (
         <div className="modal-overlay">
           <div className="modal-backdrop" onClick={() => setSecurityModal(null)} />
-          <div className="modal-content">
-            <h2 className="modal-title">CHANGE PASSCODE</h2>
+          <div
+            className="modal-content"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="security-modal-passcode-title"
+          >
+            <h2 id="security-modal-passcode-title" className="modal-title">
+              CHANGE PASSCODE
+            </h2>
             <form
               onSubmit={(event) => {
                 event.preventDefault();
@@ -817,8 +856,14 @@ function SettingsPage() {
               }}
               style={{ display: "grid", gap: "var(--space-2)" }}
             >
-              <label className="system-info-label">CURRENT PASSCODE</label>
+              <label
+                htmlFor="manage-current-passcode-change"
+                className="system-info-label"
+              >
+                CURRENT PASSCODE
+              </label>
               <input
+                id="manage-current-passcode-change"
                 type="password"
                 inputMode="numeric"
                 maxLength={10}
@@ -830,8 +875,11 @@ function SettingsPage() {
                 }
                 style={securityInputStyle}
               />
-              <label className="system-info-label">NEW PASSCODE</label>
+              <label htmlFor="manage-next-passcode" className="system-info-label">
+                NEW PASSCODE
+              </label>
               <input
+                id="manage-next-passcode"
                 type="password"
                 inputMode="numeric"
                 maxLength={10}
@@ -843,8 +891,11 @@ function SettingsPage() {
                 }
                 style={securityInputStyle}
               />
-              <label className="system-info-label">CONFIRM NEW PASSCODE</label>
+              <label htmlFor="manage-confirm-next-passcode" className="system-info-label">
+                CONFIRM NEW PASSCODE
+              </label>
               <input
+                id="manage-confirm-next-passcode"
                 type="password"
                 inputMode="numeric"
                 maxLength={10}
@@ -875,8 +926,15 @@ function SettingsPage() {
       {securityModal === "disable" && (
         <div className="modal-overlay">
           <div className="modal-backdrop" onClick={() => setSecurityModal(null)} />
-          <div className="modal-content">
-            <h2 className="modal-title">DISABLE PASSCODE</h2>
+          <div
+            className="modal-content"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="security-modal-disable-title"
+          >
+            <h2 id="security-modal-disable-title" className="modal-title">
+              DISABLE PASSCODE
+            </h2>
             <form
               onSubmit={(event) => {
                 event.preventDefault();
@@ -887,8 +945,14 @@ function SettingsPage() {
               <div className="system-info-value">
                 Enter your current passcode to disable authentication.
               </div>
-              <label className="system-info-label">CURRENT PASSCODE</label>
+              <label
+                htmlFor="manage-current-passcode-disable"
+                className="system-info-label"
+              >
+                CURRENT PASSCODE
+              </label>
               <input
+                id="manage-current-passcode-disable"
                 type="password"
                 inputMode="numeric"
                 maxLength={10}

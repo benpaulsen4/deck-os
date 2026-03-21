@@ -348,12 +348,14 @@ function ParameterField({
   const label = param.required ? `${param.label} *` : param.label;
 
   if (param.type === "enum" && param.options?.length) {
+    const selectId = `template-param-${param.key}`;
     return (
       <div>
-        <div className="label" style={{ marginBottom: "4px" }}>
+        <label className="label" htmlFor={selectId} style={{ marginBottom: "4px" }}>
           {label}
-        </div>
+        </label>
         <select
+          id={selectId}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           style={{

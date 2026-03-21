@@ -247,8 +247,15 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
   return (
     <div style={overlayStyle}>
       <div style={backdropStyle} />
-      <div style={panelStyle}>
-        <h2 style={titleStyle}>{title || "Pulling Images"}</h2>
+      <div
+        style={panelStyle}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pull-progress-title"
+      >
+        <h2 id="pull-progress-title" style={titleStyle}>
+          {title || "Pulling Images"}
+        </h2>
         <div style={contentStyle}>
           {isPulling ? (
             <div>

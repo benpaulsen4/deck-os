@@ -8,11 +8,11 @@
 |           React + Vite + tRPC Client              |
 +--------------------------------------------------+
                         |
-                   HTTP / WSS
+                   HTTP / SSE
                         |
 +--------------------------------------------------+
 |                  Hono HTTP Server                 |
-|         tRPC Router + SSE/WS endpoints            |
+|         tRPC Router + HTTP/SSE endpoints          |
 +--------------------------------------------------+
             |             |                 |
      +------+------+ +----+-----+    +------+------+
@@ -39,18 +39,12 @@ deckos/
 │   ├── client/               # React SPA (Vite)
 │   │   ├── src/
 │   │   │   ├── main.tsx
-│   │   │   ├── App.tsx
-│   │   │   ├── router.tsx          # TanStack Router
+│   │   │   ├── routeTree.gen.ts
 │   │   │   ├── trpc.ts             # tRPC client setup
 │   │   │   ├── components/         # Shared UI components
 │   │   │   │   ├── ui/             # Primitive components
 │   │   │   │   └── layout/         # Shell, sidebar, etc.
-│   │   │   ├── pages/              # Route pages
-│   │   │   │   ├── Dashboard.tsx
-│   │   │   │   ├── Apps.tsx
-│   │   │   │   ├── AppDetail.tsx
-│   │   │   │   ├── AppEditor.tsx
-│   │   │   │   └── Settings.tsx
+│   │   │   ├── routes/             # TanStack file-based routes
 │   │   │   ├── hooks/              # Custom React hooks
 │   │   │   ├── stores/             # Zustand stores
 │   │   │   └── styles/             # Global CSS
@@ -61,7 +55,11 @@ deckos/
 │   │
 │   └── server/               # Hono backend
 │       ├── src/
-│       │   ├── index.ts            # Hono app entry + server start
+│       │   ├── index.ts            # App assembly + server boot
+│       │   ├── http/               # HTTP route registrars
+│       │   │   ├── authRoutes.ts
+│       │   │   ├── runtimeRoutes.ts
+│       │   │   └── filesRoutes.ts
 │       │   ├── trpc/
 │       │   │   ├── router.ts       # Root tRPC router
 │       │   │   ├── context.ts      # tRPC context factory
@@ -100,7 +98,7 @@ deckos/
 | Compose Ops    | child_process (docker compose CLI) | Direct CLI invocation for compose up/down/pull -- more reliable than programmatic alternatives |
 | System Metrics | systeminformation                  | Cross-platform system info library (CPU, mem, disk, network)                                   |
 | Validation     | Zod                                | Runtime type validation, integrates natively with tRPC                                         |
-| Styling        | Vanilla CSS + CSS Modules          | No framework overhead, full control for the brutalist aesthetic                                |
+| Styling        | Vanilla CSS + component styles     | No framework overhead, full control for the brutalist aesthetic                                |
 | Code Editor    | CodeMirror 6                       | YAML editing with syntax highlighting for compose files                                        |
 | Runtime        | Node.js 20 LTS                     | Stable, wide compatibility                                                                     |
 | Package Mgr    | pnpm                               | Fast, disk-efficient, excellent workspace support                                              |
@@ -161,9 +159,9 @@ System metrics (CPU, memory, disk, network) are pushed to the client via Server-
 
 The SSE endpoint sits outside tRPC (as a direct Hono route) since tRPC subscriptions add complexity with minimal benefit for this one-way stream.
 
-### AD5: tRPC for All Mutations and Queries
+### AD5: tRPC-First API with HTTP/SSE for Streaming and Transfer Paths
 
-All CRUD operations (create app, list apps, update metadata, delete app) and Docker operations (start, stop, restart, pull, logs) go through tRPC procedures. This gives:
+Most CRUD and orchestration operations go through tRPC procedures, while streaming/transfer paths use direct HTTP endpoints (SSE events/logs/metrics, upload/download/content, and pull job tracking). This gives:
 
 - Full type inference from backend to frontend
 - Input validation via Zod at the procedure level

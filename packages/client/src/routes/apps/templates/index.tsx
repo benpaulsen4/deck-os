@@ -159,10 +159,15 @@ function TemplatesStorefrontPage() {
               placeholder="jellyfin, media, dns..."
             />
             <div>
-              <div className="label" style={{ marginBottom: "4px" }}>
+              <label
+                className="label"
+                htmlFor="templates-category-filter"
+                style={{ marginBottom: "4px" }}
+              >
                 CATEGORY
-              </div>
+              </label>
               <select
+                id="templates-category-filter"
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
                 style={{

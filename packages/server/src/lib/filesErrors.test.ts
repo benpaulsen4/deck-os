@@ -46,3 +46,19 @@ test("mapFilesError maps eexist into conflict", () => {
     message: "One or more files already exist",
   });
 });
+
+test("mapFilesError maps oversized payload and unknown errors to fallback messages", () => {
+  const largeFile = new Error("filesystem payload too large") as NodeJS.ErrnoException;
+  largeFile.code = "EFBIG";
+  assert.deepEqual(mapFilesError(largeFile, "Upload failed"), {
+    status: 413,
+    trpcCode: "PAYLOAD_TOO_LARGE",
+    message: "Upload failed",
+  });
+
+  assert.deepEqual(mapFilesError(new Error("raw internal"), "Files operation failed"), {
+    status: 500,
+    trpcCode: "INTERNAL_SERVER_ERROR",
+    message: "Files operation failed",
+  });
+});

@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { useEffect, useId } from "react";
 import { Button } from "./Button";
 
 interface ConfirmDialogProps {
@@ -22,6 +23,24 @@ export function ConfirmDialog({
   onCancel,
   variant = "danger",
 }: ConfirmDialogProps) {
+  const titleId = useId();
+  const descriptionId = useId();
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, onCancel]);
+
   if (!isOpen) return null;
 
   const overlayStyle: React.CSSProperties = {
@@ -85,13 +104,23 @@ export function ConfirmDialog({
   return (
     <div style={overlayStyle}>
       <div style={backdropStyle} onClick={onCancel} />
-      <div style={dialogStyle}>
-        <button style={closeStyle} onClick={onCancel}>
+      <div
+        style={dialogStyle}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+      >
+        <button style={closeStyle} onClick={onCancel} aria-label="Close dialog">
           <X size={16} />
         </button>
 
-        <h2 style={titleStyle}>{title}</h2>
-        <p style={messageStyle}>{message}</p>
+        <h2 id={titleId} style={titleStyle}>
+          {title}
+        </h2>
+        <p id={descriptionId} style={messageStyle}>
+          {message}
+        </p>
 
         <div style={buttonGroupStyle}>
           <Button variant="secondary" onClick={onCancel}>

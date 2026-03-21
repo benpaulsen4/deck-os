@@ -1,8 +1,12 @@
+import { useId } from "react";
+
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
 }
 
 export function Input({ label, className, ...props }: InputProps) {
+  const generatedId = useId();
+  const inputId = props.id ?? generatedId;
   const labelStyle = {
     display: "block",
     marginBottom: "4px",
@@ -28,8 +32,13 @@ export function Input({ label, className, ...props }: InputProps) {
 
   return (
     <div style={{ marginBottom: "var(--space-1)" }}>
-      {label && <label style={labelStyle}>{label}</label>}
+      {label && (
+        <label htmlFor={inputId} style={labelStyle}>
+          {label}
+        </label>
+      )}
       <input
+        id={inputId}
         className={className}
         style={inputStyle}
         onMouseEnter={(e) => {

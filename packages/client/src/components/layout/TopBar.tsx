@@ -257,6 +257,7 @@ export function TopBar({
               cursor: "pointer",
             }}
             onClick={() => setMobileMenuOpen(false)}
+            aria-label="Close menu"
           >
             <X size={20} />
           </button>

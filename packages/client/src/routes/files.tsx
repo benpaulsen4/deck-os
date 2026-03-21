@@ -1158,6 +1158,7 @@ function FilesPage() {
               </select>
               <select
                 className="files-select"
+                aria-label="Sort direction"
                 value={sortDirection}
                 onChange={(event) =>
                   setSortDirection(event.target.value as SortDirection)
@@ -1337,16 +1338,25 @@ function FileActionDialog({
   }
 
   const title = mode === "mkdir" ? "Create Folder" : "Rename Item";
-
   const label = mode === "mkdir" ? "Folder Name" : "New Name";
-
   const confirmText = mode === "mkdir" ? "Create" : "Rename";
+  const titleId =
+    mode === "mkdir"
+      ? "file-action-dialog-title-mkdir"
+      : "file-action-dialog-title-rename";
 
   return (
     <div className="modal-overlay">
       <div className="modal-backdrop" onClick={onClose} />
-      <div className="modal-content">
-        <h2 className="modal-title">{title}</h2>
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
+        <h2 id={titleId} className="modal-title">
+          {title}
+        </h2>
         <Input
           label={label}
           value={value}
@@ -1425,14 +1435,24 @@ function TreeNode({
         onClick={() => onNavigate(nodePath)}
       >
         <span className="files-tree-toggle">
-          <span
+          <button
+            type="button"
+            aria-label={expanded ? "Collapse folder" : "Expand folder"}
             onClick={(event) => {
               event.stopPropagation();
               setExpanded((value) => !value);
             }}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "inherit",
+              padding: 0,
+              display: "inline-flex",
+              cursor: "pointer",
+            }}
           >
             {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          </span>
+          </button>
         </span>
         {expanded ? <FolderOpen size={14} /> : <Folder size={14} />}
         <span>{getDisplayName(nodePath)}</span>
