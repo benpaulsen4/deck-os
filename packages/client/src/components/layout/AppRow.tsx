@@ -1,41 +1,20 @@
 import { Link } from "@tanstack/react-router";
-import { useAppStatusStore, type AppStatus } from "../../stores/appStatus";
+import { useAppStatusStore } from "../../stores/appStatus";
 import { Button } from "../../components/ui/Button";
-import type { App, StackStatus } from "../../../../server/src/lib/schema.js";
+import type { App } from "../../../../server/src/lib/schema.js";
 import { AppIcon } from "../ui/AppIcon";
 
 interface AppRowProps {
   app: App;
-  stackStatus?: StackStatus | null;
   onAction: (appId: string, action: string, e: React.MouseEvent) => void;
   isActionPending: (appId: string, action: string) => boolean;
 }
 
-export function AppRow({ app, stackStatus, onAction, isActionPending }: AppRowProps) {
-  const appStatus = useAppStatusStore((state) => state.appStatuses);
-
-  const liveStatus: AppStatus = appStatus[app.id] || "unknown";
-
-  const getActualStatus = (): AppStatus => {
-    if (liveStatus && liveStatus !== "unknown") {
-      return liveStatus;
-    }
-    if (!stackStatus) {
-      return "unknown";
-    }
-    if (stackStatus.running > 0) {
-      return "running";
-    }
-    if (stackStatus.restarting > 0) {
-      return "restarting";
-    }
-    if (stackStatus.stopped > 0 || (stackStatus.containers?.length ?? 0) === 0) {
-      return "stopped";
-    }
-    return "unknown";
-  };
-
-  const status = getActualStatus();
+export function AppRow({ app, onAction, isActionPending }: AppRowProps) {
+  const getResolvedStatus = useAppStatusStore((state) => state.getResolvedStatus);
+  const getStackStatus = useAppStatusStore((state) => state.getStackStatus);
+  const status = getResolvedStatus(app.id);
+  const stackStatus = getStackStatus(app.id);
 
   const getStatusLabel = (): string => {
     switch (status) {

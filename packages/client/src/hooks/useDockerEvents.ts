@@ -15,18 +15,35 @@ export interface DockerEvent {
   timeNano: number;
 }
 
-export function useDockerEvents(callback: (event: DockerEvent) => void) {
+export function useDockerEvents(
+  callback: (event: DockerEvent) => void,
+  options?: { enabled?: boolean }
+) {
   const eventSourceRef = useRef<EventSource | null>(null);
   const callbackRef = useRef(callback);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const disposedRef = useRef(false);
   const { setConnected } = useConnectionStore();
+  const enabled = options?.enabled ?? true;
 
   useEffect(() => {
     callbackRef.current = callback;
   }, [callback]);
 
   useEffect(() => {
+    if (!enabled) {
+      disposedRef.current = true;
+      if (reconnectTimeoutRef.current !== null) {
+        window.clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+      setConnected("events", false);
+      return;
+    }
     disposedRef.current = false;
     const connect = () => {
       if (disposedRef.current) {
@@ -90,7 +107,7 @@ export function useDockerEvents(callback: (event: DockerEvent) => void) {
         setConnected("events", false);
       }
     };
-  }, [setConnected]);
+  }, [enabled, setConnected]);
 
   return;
 }

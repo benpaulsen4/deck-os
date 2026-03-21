@@ -4,7 +4,6 @@ import { useTRPC } from "../../trpc";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { trpcClient } from "../../trpc";
 import { useToastStore } from "../../stores/toast";
-import { useAppStatus } from "../../hooks/useAppStatus";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { AppRow } from "../../components/layout/AppRow";
 
@@ -16,9 +15,6 @@ function AppsPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { addToast } = useToastStore();
-
-  // Initialize app status listener
-  useAppStatus();
 
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
@@ -33,13 +29,6 @@ function AppsPage() {
   });
 
   const { data: apps } = useQuery(trpc.apps.list.queryOptions());
-  const appIds = apps?.map((a) => a.id) ?? [];
-  const { data: batchStatuses } = useQuery({
-    queryKey: ["stackStatusBatch", appIds],
-    queryFn: async () => await trpcClient.docker.getStatuses.query({ appIds }),
-    enabled: appIds.length > 0,
-    refetchInterval: 5000,
-  });
 
   const invalidateStatusQueries = async (appId: string) => {
     await Promise.all([
@@ -195,7 +184,6 @@ function AppsPage() {
                   <AppRow
                     key={app.id}
                     app={app}
-                    stackStatus={batchStatuses?.statuses[app.id] ?? null}
                     onAction={handleAction}
                     isActionPending={isActionPending}
                   />

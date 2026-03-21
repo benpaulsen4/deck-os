@@ -3,7 +3,6 @@ import { useTRPC } from "../trpc";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useMetricsStream } from "../hooks/useMetricsStream";
-import { useAppStatus } from "../hooks/useAppStatus";
 import { MetricsCard } from "../components/layout/MetricsCard";
 import { SystemInfoBar } from "../components/layout/SystemInfoBar";
 import { AppLauncherGrid } from "../components/layout/AppLauncherGrid";
@@ -23,8 +22,6 @@ function DashboardPage() {
   const metrics = useMetricsStream();
   const { data: apps } = useQuery(trpc.apps.list.queryOptions());
   const [showMoreMetrics, setShowMoreMetrics] = useState(false);
-
-  useAppStatus();
 
   type AppsList = App[];
 

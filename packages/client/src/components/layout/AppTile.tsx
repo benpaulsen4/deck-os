@@ -1,9 +1,6 @@
 import { type App } from "../../../../server/src/lib/schema.js";
 import { Link } from "@tanstack/react-router";
 import { useAppStatusStore } from "../../stores/appStatus";
-import { useQuery } from "@tanstack/react-query";
-import { trpcClient } from "../../trpc";
-import type { AppStatus } from "../../stores/appStatus";
 import { AppIcon } from "../ui/AppIcon";
 
 interface AppTileProps {
@@ -15,38 +12,10 @@ interface AppTileProps {
 }
 
 export function AppTile({ app, style, className, rootRef, rootProps }: AppTileProps) {
-  const appStatus = useAppStatusStore((state) => state.appStatuses);
+  const getResolvedStatus = useAppStatusStore((state) => state.getResolvedStatus);
   const flashStates = useAppStatusStore((state) => state.flashStates);
-
-  const { data: stackStatus } = useQuery({
-    queryKey: ["stackStatus", app.id],
-    queryFn: async () => await trpcClient.docker.getStatus.query({ appId: app.id }),
-    refetchInterval: 5000,
-  });
-
-  const liveStatus: AppStatus = appStatus[app.id] || "unknown";
   const isFlashing = flashStates[app.id];
-
-  const getActualStatus = (): AppStatus => {
-    if (liveStatus && liveStatus !== "unknown") {
-      return liveStatus;
-    }
-    if (!stackStatus) {
-      return "unknown";
-    }
-    if (stackStatus.running > 0) {
-      return "running";
-    }
-    if (stackStatus.restarting > 0) {
-      return "restarting";
-    }
-    if (stackStatus.stopped > 0 || (stackStatus.containers?.length ?? 0) === 0) {
-      return "stopped";
-    }
-    return "unknown";
-  };
-
-  const status = getActualStatus();
+  const status = getResolvedStatus(app.id);
 
   const safeUrl = (() => {
     const u = typeof app.metadata.url === "string" ? app.metadata.url.trim() : "";
