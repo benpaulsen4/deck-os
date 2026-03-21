@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { useConnectionStore } from "../../stores/connection";
+import { authFetch } from "../../lib/auth";
 
 interface LogEntry {
   timestamp?: string;
@@ -115,7 +116,7 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
           }
         }
 
-        const res = await fetch(`/api/logs/${containerId}?${params.toString()}`, {
+        const res = await authFetch(`/api/logs/${containerId}?${params.toString()}`, {
           signal: controller.signal,
           headers: { Accept: "text/event-stream" },
         });

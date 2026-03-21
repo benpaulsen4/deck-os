@@ -4,11 +4,14 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { ToastContainer } from "../components/layout/ToastContainer";
 import { useConnectionStore } from "../stores/connection";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Power, X } from "lucide-react";
+import { Lock, Power, X } from "lucide-react";
 import { RouteErrorComponent } from "../components/ui/RouteErrorComponent";
 import { useApiHealth } from "../hooks/useApiHealth";
 import { useToastStore } from "../stores/toast";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { PinEntry } from "../components/auth/PinEntry";
+import { Button } from "../components/ui/Button";
+import { authFetch, fetchAuthStatus, onUnauthorizedEvent } from "../lib/auth";
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -16,9 +19,132 @@ export const Route = createRootRoute({
 });
 
 function RootLayout() {
+  const [authChecking, setAuthChecking] = useState(true);
+  const [authEnabled, setAuthEnabled] = useState(false);
+  const [authUnlocked, setAuthUnlocked] = useState(true);
+  const [pin, setPin] = useState("");
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [unlocking, setUnlocking] = useState(false);
+  const [retryAfterMs, setRetryAfterMs] = useState(0);
+
+  const refreshAuth = async () => {
+    try {
+      const status = await fetchAuthStatus();
+      setAuthEnabled(status.enabled);
+      setAuthUnlocked(status.unlocked);
+    } finally {
+      setAuthChecking(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshAuth();
+    const unsubscribe = onUnauthorizedEvent(() => {
+      setAuthEnabled(true);
+      setAuthUnlocked(false);
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (retryAfterMs <= 0) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setRetryAfterMs((value) => Math.max(0, value - 1000));
+    }, 1000);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [retryAfterMs]);
+
+  const handleUnlock = async () => {
+    if (pin.length < 4 || unlocking || retryAfterMs > 0) {
+      return;
+    }
+    setUnlocking(true);
+    setUnlockError(null);
+    try {
+      const response = await authFetch("/api/auth/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passcode: pin }),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string; retryAfterMs?: number }
+          | null;
+        if (typeof payload?.retryAfterMs === "number" && payload.retryAfterMs > 0) {
+          setRetryAfterMs(payload.retryAfterMs);
+        }
+        throw new Error(payload?.error || "Unlock failed");
+      }
+      setPin("");
+      await refreshAuth();
+    } catch (error) {
+      setUnlockError(error instanceof Error ? error.message : "Unlock failed");
+      setAuthUnlocked(false);
+    } finally {
+      setUnlocking(false);
+    }
+  };
+
+  const handleLock = async () => {
+    await authFetch("/api/auth/lock", {
+      method: "POST",
+    });
+    setAuthUnlocked(false);
+  };
+
+  if (authChecking) {
+    return (
+      <div className="auth-screen">
+        <div className="auth-card">
+          <div className="label">LOADING SECURITY STATUS...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (authEnabled && !authUnlocked) {
+    return (
+      <div className="auth-screen">
+        <div className="auth-card">
+          <h1 className="auth-title">UNLOCK DECKOS</h1>
+          <div className="auth-subtitle">Enter your passcode to continue</div>
+          <PinEntry
+            value={pin}
+            onChange={setPin}
+            onSubmit={() => {
+              void handleUnlock();
+            }}
+            autoFocus
+            disabled={unlocking}
+          />
+          <div className="auth-actions">
+            <Button
+              onClick={() => {
+                void handleUnlock();
+              }}
+              disabled={pin.length < 4 || unlocking || retryAfterMs > 0}
+            >
+              {unlocking ? "UNLOCKING..." : "UNLOCK"}
+            </Button>
+          </div>
+          {retryAfterMs > 0 && (
+            <div className="auth-message auth-message--warning">
+              Retry in {Math.ceil(retryAfterMs / 1000)}s
+            </div>
+          )}
+          {unlockError && <div className="auth-message auth-message--error">{unlockError}</div>}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
-      <TopBar />
+      <TopBar authEnabled={authEnabled} onLock={handleLock} />
       <main className="app-content">
         <Outlet />
       </main>
@@ -27,7 +153,13 @@ function RootLayout() {
   );
 }
 
-function TopBar() {
+function TopBar({
+  authEnabled,
+  onLock,
+}: {
+  authEnabled: boolean;
+  onLock: () => Promise<void>;
+}) {
   const trpc = useTRPC();
   const { addToast } = useToastStore();
   const { data: systemInfo } = useQuery(trpc.system.getInfo.queryOptions());
@@ -200,6 +332,18 @@ function TopBar() {
               ☰
             </button>
             <div className="topbar-host">{hostname}</div>
+            {authEnabled && (
+              <button
+                className="topbar-lock-trigger"
+                onClick={() => {
+                  void onLock();
+                }}
+                aria-label="Lock session"
+                title="Lock session"
+              >
+                <Lock size={14} />
+              </button>
+            )}
             <div className="topbar-power-menu" ref={powerMenuRef}>
               <button
                 className="topbar-power-trigger"
@@ -316,6 +460,18 @@ function TopBar() {
           >
             Settings
           </Link>
+          {authEnabled && (
+            <button
+              className="topbar-menu-link"
+              style={{ textAlign: "left", background: "transparent", border: "none" }}
+              onClick={() => {
+                setMobileMenuOpen(false);
+                void onLock();
+              }}
+            >
+              Lock Session
+            </button>
+          )}
         </div>
       )}
 

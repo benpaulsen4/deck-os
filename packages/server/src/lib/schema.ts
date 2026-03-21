@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+const AUTH_SESSION_DURATION_MIN_MS = 60 * 60 * 1000;
+const AUTH_SESSION_DURATION_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+const AUTH_DEFAULT_SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
+
 const HttpUrlSchema = z
   .string()
   .url()
@@ -28,6 +32,14 @@ const AppIdSchema = z
   .min(1)
   .max(64)
   .regex(/^[a-z0-9][a-z0-9-]*$/, "Invalid app id");
+const PasscodeSchema = z
+  .string()
+  .regex(/^[0-9]{4,10}$/, "Passcode must be 4-10 digits");
+const SessionDurationMsSchema = z
+  .number()
+  .int()
+  .min(AUTH_SESSION_DURATION_MIN_MS)
+  .max(AUTH_SESSION_DURATION_MAX_MS);
 
 const AppMetadataSchema = z.object({
   id: AppIdSchema,
@@ -209,6 +221,11 @@ export {
   OptionalUrlSchema,
   OptionalUrlOrPathSchema,
   AppIdSchema,
+  PasscodeSchema,
+  SessionDurationMsSchema,
+  AUTH_SESSION_DURATION_MIN_MS,
+  AUTH_SESSION_DURATION_MAX_MS,
+  AUTH_DEFAULT_SESSION_DURATION_MS,
 };
 
 export type {

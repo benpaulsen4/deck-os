@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useMetricsStore } from "../stores/metrics";
 import { useConnectionStore } from "../stores/connection";
+import { emitUnauthorizedEvent, fetchAuthStatus } from "../lib/auth";
 
 export function useMetricsStream() {
   const { setMetrics, setConnected } = useMetricsStore();
@@ -17,9 +18,16 @@ export function useMetricsStream() {
       setConnection("metrics", true);
     };
 
-    eventSource.onerror = (_error) => {
+    eventSource.onerror = () => {
       setConnected(false);
       setConnection("metrics", false);
+      void fetchAuthStatus()
+        .then((status) => {
+          if (status.enabled && !status.unlocked) {
+            emitUnauthorizedEvent();
+          }
+        })
+        .catch(() => {});
     };
 
     eventSource.addEventListener("metrics", (event) => {

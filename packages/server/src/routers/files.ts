@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { router, publicProcedure } from "../trpc/trpc.js";
+import { router, protectedProcedure } from "../trpc/trpc.js";
 import * as filesService from "../services/files.js";
 
 function toTrpcError(error: unknown): TRPCError {
@@ -26,7 +26,7 @@ function toTrpcError(error: unknown): TRPCError {
 }
 
 export const filesRouter = router({
-  list: publicProcedure
+  list: protectedProcedure
     .input(
       z.object({
         path: z.string().max(4096).optional().default(""),
@@ -44,7 +44,7 @@ export const filesRouter = router({
         throw toTrpcError(error);
       }
     }),
-  getPins: publicProcedure.query(async () => {
+  getPins: protectedProcedure.query(async () => {
     try {
       const items = await filesService.getPins();
       return { items };
@@ -52,7 +52,7 @@ export const filesRouter = router({
       throw toTrpcError(error);
     }
   }),
-  getMeta: publicProcedure
+  getMeta: protectedProcedure
     .input(
       z.object({
         path: z.string().min(1).max(4096),
@@ -65,7 +65,7 @@ export const filesRouter = router({
         throw toTrpcError(error);
       }
     }),
-  readText: publicProcedure
+  readText: protectedProcedure
     .input(
       z.object({
         path: z.string().min(1).max(4096),
@@ -79,7 +79,7 @@ export const filesRouter = router({
         throw toTrpcError(error);
       }
     }),
-  writeText: publicProcedure
+  writeText: protectedProcedure
     .input(
       z.object({
         path: z.string().min(1).max(4096),
@@ -94,7 +94,7 @@ export const filesRouter = router({
         throw toTrpcError(error);
       }
     }),
-  setPins: publicProcedure
+  setPins: protectedProcedure
     .input(
       z.object({
         items: z.array(z.string().min(1).max(4096)).max(64),
@@ -108,7 +108,7 @@ export const filesRouter = router({
         throw toTrpcError(error);
       }
     }),
-  mkdir: publicProcedure
+  mkdir: protectedProcedure
     .input(
       z.object({
         path: z.string().min(1).max(4096),
@@ -122,7 +122,7 @@ export const filesRouter = router({
         throw toTrpcError(error);
       }
     }),
-  rename: publicProcedure
+  rename: protectedProcedure
     .input(
       z.object({
         sourcePath: z.string().min(1).max(4096),
@@ -137,7 +137,7 @@ export const filesRouter = router({
         throw toTrpcError(error);
       }
     }),
-  copy: publicProcedure
+  copy: protectedProcedure
     .input(
       z.object({
         sourcePath: z.string().min(1).max(4096),
@@ -152,7 +152,7 @@ export const filesRouter = router({
         throw toTrpcError(error);
       }
     }),
-  move: publicProcedure
+  move: protectedProcedure
     .input(
       z.object({
         sourcePath: z.string().min(1).max(4096),
@@ -167,7 +167,7 @@ export const filesRouter = router({
         throw toTrpcError(error);
       }
     }),
-  delete: publicProcedure
+  delete: protectedProcedure
     .input(
       z.object({
         path: z.string().min(1).max(4096),

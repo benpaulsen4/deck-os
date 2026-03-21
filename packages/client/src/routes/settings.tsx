@@ -4,13 +4,29 @@ import { trpcClient } from "../trpc";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToastStore } from "../stores/toast";
 import { Button } from "../components/ui/Button";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { authFetch, emitUnauthorizedEvent, fetchAuthStatus } from "../lib/auth";
+
+const SESSION_MIN_MS = 60 * 60 * 1000;
+const SESSION_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+const PASSCODE_REGEX = /^[0-9]{4,10}$/;
+
+function sessionHoursToMs(hours: number) {
+  return Math.round(hours * 60 * 60 * 1000);
+}
+
+function sessionMsToHours(ms: number) {
+  return Math.max(1, Math.min(168, Math.round(ms / (60 * 60 * 1000))));
+}
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
 });
 
 function SettingsPage() {
+  const [securityModal, setSecurityModal] = useState<
+    null | "enable" | "session" | "passcode" | "disable"
+  >(null);
   const normalizeVersion = (version: string) => version.trim().replace(/^v/i, "");
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -35,6 +51,35 @@ function SettingsPage() {
     isFetching: updateFetching,
   } = updateStatusQuery;
   const updateReloadIntervalRef = useRef<number | null>(null);
+  const authStatusQuery = useQuery({
+    queryKey: ["auth-status"],
+    queryFn: fetchAuthStatus,
+    refetchInterval: 30_000,
+  });
+  const [setupPasscode, setSetupPasscode] = useState("");
+  const [setupConfirmPasscode, setSetupConfirmPasscode] = useState("");
+  const [setupSessionHours, setSetupSessionHours] = useState(24);
+  const [manageCurrentPasscode, setManageCurrentPasscode] = useState("");
+  const [manageNextPasscode, setManageNextPasscode] = useState("");
+  const [manageConfirmNextPasscode, setManageConfirmNextPasscode] = useState("");
+  const [manageSessionHours, setManageSessionHours] = useState(24);
+
+  const securityInputStyle = {
+    width: "100%",
+    background: "var(--bg-primary)",
+    border: "1px solid var(--border-primary)",
+    color: "var(--text-primary)",
+    padding: "8px 10px",
+    fontSize: "var(--text-sm)",
+  };
+
+  useEffect(() => {
+    if (typeof authStatusQuery.data?.sessionDurationMs === "number") {
+      const hours = sessionMsToHours(authStatusQuery.data.sessionDurationMs);
+      setSetupSessionHours(hours);
+      setManageSessionHours(hours);
+    }
+  }, [authStatusQuery.data?.sessionDurationMs]);
 
   const stopUpdateReloadPolling = () => {
     if (updateReloadIntervalRef.current !== null) {
@@ -50,7 +95,7 @@ function SettingsPage() {
     const attemptReload = async () => {
       attempts += 1;
       try {
-        const response = await fetch(`/api/version?_=${Date.now()}`, {
+        const response = await authFetch(`/api/version?_=${Date.now()}`, {
           cache: "no-store",
         });
         if (response.ok) {
@@ -121,6 +166,126 @@ function SettingsPage() {
     },
   });
 
+  const configureAuthMutation = useMutation({
+    mutationFn: async (input: { passcode: string; sessionDurationMs: number }) => {
+      const response = await authFetch("/api/auth/configure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error || "Failed to configure passcode");
+      }
+      return await response.json();
+    },
+    onSuccess: () => {
+      addToast("Passcode enabled", "success");
+      setSetupPasscode("");
+      setSetupConfirmPasscode("");
+      setSecurityModal(null);
+      void authStatusQuery.refetch();
+      emitUnauthorizedEvent();
+    },
+    onError: (error: unknown) => {
+      addToast(
+        `Failed to enable passcode: ${error instanceof Error ? error.message : "Unknown error"}`,
+        "error"
+      );
+    },
+  });
+
+  const changePasscodeMutation = useMutation({
+    mutationFn: async (input: {
+      currentPasscode: string;
+      nextPasscode: string;
+      sessionDurationMs?: number;
+    }) => {
+      const response = await authFetch("/api/auth/change", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error || "Failed to change passcode");
+      }
+      return await response.json();
+    },
+    onSuccess: () => {
+      addToast("Passcode changed. Unlock again to continue.", "success");
+      setManageCurrentPasscode("");
+      setManageNextPasscode("");
+      setManageConfirmNextPasscode("");
+      setSecurityModal(null);
+      void authStatusQuery.refetch();
+      emitUnauthorizedEvent();
+    },
+    onError: (error: unknown) => {
+      addToast(
+        `Failed to change passcode: ${error instanceof Error ? error.message : "Unknown error"}`,
+        "error"
+      );
+    },
+  });
+
+  const updateSessionMutation = useMutation({
+    mutationFn: async (input: { currentPasscode: string; sessionDurationMs: number }) => {
+      const response = await authFetch("/api/auth/session-duration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error || "Failed to update session duration");
+      }
+      return await response.json();
+    },
+    onSuccess: () => {
+      addToast("Session duration updated. Unlock again to continue.", "success");
+      setManageCurrentPasscode("");
+      setSecurityModal(null);
+      void authStatusQuery.refetch();
+      emitUnauthorizedEvent();
+    },
+    onError: (error: unknown) => {
+      addToast(
+        `Failed to update session duration: ${error instanceof Error ? error.message : "Unknown error"}`,
+        "error"
+      );
+    },
+  });
+
+  const disableAuthMutation = useMutation({
+    mutationFn: async (input: { currentPasscode: string }) => {
+      const response = await authFetch("/api/auth/disable", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error || "Failed to disable passcode");
+      }
+      return await response.json();
+    },
+    onSuccess: () => {
+      addToast("Passcode disabled", "success");
+      setManageCurrentPasscode("");
+      setManageNextPasscode("");
+      setManageConfirmNextPasscode("");
+      setSecurityModal(null);
+      void authStatusQuery.refetch();
+    },
+    onError: (error: unknown) => {
+      addToast(
+        `Failed to disable passcode: ${error instanceof Error ? error.message : "Unknown error"}`,
+        "error"
+      );
+    },
+  });
+
   const formatUptime = (seconds: number): string => {
     const days = Math.floor(seconds / 86400);
     const hours = Math.floor((seconds % 86400) / 3600);
@@ -149,6 +314,84 @@ function SettingsPage() {
       );
     })
     .sort((a, b) => b.usePercent - a.usePercent);
+
+  const clampSessionHours = (value: number) =>
+    Math.max(
+      sessionMsToHours(SESSION_MIN_MS),
+      Math.min(sessionMsToHours(SESSION_MAX_MS), value)
+    );
+
+  const openSecurityModal = (modal: "enable" | "session" | "passcode" | "disable") => {
+    const currentHours = sessionMsToHours(authStatusQuery.data?.sessionDurationMs ?? 24 * 3600 * 1000);
+    if (modal === "enable") {
+      setSetupPasscode("");
+      setSetupConfirmPasscode("");
+      setSetupSessionHours(currentHours);
+    } else if (modal === "session") {
+      setManageCurrentPasscode("");
+      setManageSessionHours(currentHours);
+    } else if (modal === "passcode") {
+      setManageCurrentPasscode("");
+      setManageNextPasscode("");
+      setManageConfirmNextPasscode("");
+    } else {
+      setManageCurrentPasscode("");
+    }
+    setSecurityModal(modal);
+  };
+
+  const handleConfigureAuth = () => {
+    if (!PASSCODE_REGEX.test(setupPasscode)) {
+      addToast("Passcode must be 4-10 digits", "error");
+      return;
+    }
+    if (setupPasscode !== setupConfirmPasscode) {
+      addToast("Passcode confirmation does not match", "error");
+      return;
+    }
+    configureAuthMutation.mutate({
+      passcode: setupPasscode,
+      sessionDurationMs: sessionHoursToMs(clampSessionHours(setupSessionHours)),
+    });
+  };
+
+  const handleUpdateSessionDuration = () => {
+    if (!PASSCODE_REGEX.test(manageCurrentPasscode)) {
+      addToast("Current passcode must be 4-10 digits", "error");
+      return;
+    }
+    updateSessionMutation.mutate({
+      currentPasscode: manageCurrentPasscode,
+      sessionDurationMs: sessionHoursToMs(clampSessionHours(manageSessionHours)),
+    });
+  };
+
+  const handleChangePasscode = () => {
+    if (!PASSCODE_REGEX.test(manageCurrentPasscode)) {
+      addToast("Current passcode must be 4-10 digits", "error");
+      return;
+    }
+    if (!PASSCODE_REGEX.test(manageNextPasscode)) {
+      addToast("New passcode must be 4-10 digits", "error");
+      return;
+    }
+    if (manageNextPasscode !== manageConfirmNextPasscode) {
+      addToast("New passcode confirmation does not match", "error");
+      return;
+    }
+    changePasscodeMutation.mutate({
+      currentPasscode: manageCurrentPasscode,
+      nextPasscode: manageNextPasscode,
+    });
+  };
+
+  const handleDisableAuth = () => {
+    if (!PASSCODE_REGEX.test(manageCurrentPasscode)) {
+      addToast("Current passcode must be 4-10 digits", "error");
+      return;
+    }
+    disableAuthMutation.mutate({ currentPasscode: manageCurrentPasscode });
+  };
 
   return (
     <div className="page-container page-container--viewport">
@@ -355,6 +598,58 @@ function SettingsPage() {
 
             <div className="panel" style={{ padding: "var(--space-3)" }}>
               <div className="label" style={{ marginBottom: "var(--space-2)" }}>
+                SECURITY
+              </div>
+              {authStatusQuery.isLoading ? (
+                <div className="loading-scan" style={{ padding: "var(--space-2)" }}>
+                  <span className="label">LOADING...</span>
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: "var(--space-2)" }}>
+                  <div className="settings-kv">
+                    <span className="system-info-label">PASSCODE</span>
+                    <span className="system-info-value">
+                      {authStatusQuery.data?.enabled ? "ENABLED" : "DISABLED"}
+                    </span>
+                    <span className="system-info-label">SESSION</span>
+                    <span className="system-info-value">
+                      {authStatusQuery.data?.enabled
+                        ? `${sessionMsToHours(authStatusQuery.data.sessionDurationMs)} HOURS`
+                        : "N/A"}
+                    </span>
+                  </div>
+                  {authStatusQuery.data?.enabled ? (
+                    <>
+                      <Button
+                        variant="secondary"
+                        onClick={() => openSecurityModal("session")}
+                      >
+                        CHANGE SESSION TIMEOUT
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => openSecurityModal("passcode")}
+                      >
+                        CHANGE PASSCODE
+                      </Button>
+                      <Button
+                        variant="danger"
+                        onClick={() => openSecurityModal("disable")}
+                      >
+                        DISABLE PASSCODE
+                      </Button>
+                    </>
+                  ) : (
+                    <Button onClick={() => openSecurityModal("enable")}>
+                      ENABLE PASSCODE
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="panel" style={{ padding: "var(--space-3)" }}>
+              <div className="label" style={{ marginBottom: "var(--space-2)" }}>
                 ABOUT
               </div>
               <div style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
@@ -367,6 +662,234 @@ function SettingsPage() {
           </div>
         </div>
       </div>
+      {securityModal === "enable" && (
+        <div className="modal-overlay">
+          <div className="modal-backdrop" onClick={() => setSecurityModal(null)} />
+          <div className="modal-content">
+            <h2 className="modal-title">ENABLE PASSCODE</h2>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleConfigureAuth();
+              }}
+              style={{ display: "grid", gap: "var(--space-2)" }}
+            >
+              <label className="system-info-label">NEW PASSCODE</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={10}
+                value={setupPasscode}
+                onChange={(event) =>
+                  setSetupPasscode(event.currentTarget.value.replace(/\D/g, "").slice(0, 10))
+                }
+                style={securityInputStyle}
+              />
+              <label className="system-info-label">CONFIRM PASSCODE</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={10}
+                value={setupConfirmPasscode}
+                onChange={(event) =>
+                  setSetupConfirmPasscode(
+                    event.currentTarget.value.replace(/\D/g, "").slice(0, 10)
+                  )
+                }
+                style={securityInputStyle}
+              />
+              <label className="system-info-label">SESSION HOURS (1-168)</label>
+              <input
+                type="number"
+                min={1}
+                max={168}
+                value={setupSessionHours}
+                onChange={(event) => {
+                  const nextValue = Number(event.currentTarget.value);
+                  if (!Number.isFinite(nextValue)) return;
+                  setSetupSessionHours(clampSessionHours(nextValue));
+                }}
+                style={securityInputStyle}
+              />
+              <div className="modal-actions">
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={() => setSecurityModal(null)}
+                >
+                  CANCEL
+                </Button>
+                <Button type="submit" disabled={configureAuthMutation.isPending}>
+                  {configureAuthMutation.isPending ? "ENABLING..." : "ENABLE PASSCODE"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {securityModal === "session" && (
+        <div className="modal-overlay">
+          <div className="modal-backdrop" onClick={() => setSecurityModal(null)} />
+          <div className="modal-content">
+            <h2 className="modal-title">CHANGE SESSION TIMEOUT</h2>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleUpdateSessionDuration();
+              }}
+              style={{ display: "grid", gap: "var(--space-2)" }}
+            >
+              <label className="system-info-label">CURRENT PASSCODE</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={10}
+                value={manageCurrentPasscode}
+                onChange={(event) =>
+                  setManageCurrentPasscode(
+                    event.currentTarget.value.replace(/\D/g, "").slice(0, 10)
+                  )
+                }
+                style={securityInputStyle}
+              />
+              <label className="system-info-label">SESSION HOURS (1-168)</label>
+              <input
+                type="number"
+                min={1}
+                max={168}
+                value={manageSessionHours}
+                onChange={(event) => {
+                  const nextValue = Number(event.currentTarget.value);
+                  if (!Number.isFinite(nextValue)) return;
+                  setManageSessionHours(clampSessionHours(nextValue));
+                }}
+                style={securityInputStyle}
+              />
+              <div className="modal-actions">
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={() => setSecurityModal(null)}
+                >
+                  CANCEL
+                </Button>
+                <Button type="submit" disabled={updateSessionMutation.isPending}>
+                  {updateSessionMutation.isPending ? "SAVING..." : "UPDATE SESSION TIMEOUT"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {securityModal === "passcode" && (
+        <div className="modal-overlay">
+          <div className="modal-backdrop" onClick={() => setSecurityModal(null)} />
+          <div className="modal-content">
+            <h2 className="modal-title">CHANGE PASSCODE</h2>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleChangePasscode();
+              }}
+              style={{ display: "grid", gap: "var(--space-2)" }}
+            >
+              <label className="system-info-label">CURRENT PASSCODE</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={10}
+                value={manageCurrentPasscode}
+                onChange={(event) =>
+                  setManageCurrentPasscode(
+                    event.currentTarget.value.replace(/\D/g, "").slice(0, 10)
+                  )
+                }
+                style={securityInputStyle}
+              />
+              <label className="system-info-label">NEW PASSCODE</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={10}
+                value={manageNextPasscode}
+                onChange={(event) =>
+                  setManageNextPasscode(event.currentTarget.value.replace(/\D/g, "").slice(0, 10))
+                }
+                style={securityInputStyle}
+              />
+              <label className="system-info-label">CONFIRM NEW PASSCODE</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={10}
+                value={manageConfirmNextPasscode}
+                onChange={(event) =>
+                  setManageConfirmNextPasscode(
+                    event.currentTarget.value.replace(/\D/g, "").slice(0, 10)
+                  )
+                }
+                style={securityInputStyle}
+              />
+              <div className="modal-actions">
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={() => setSecurityModal(null)}
+                >
+                  CANCEL
+                </Button>
+                <Button type="submit" disabled={changePasscodeMutation.isPending}>
+                  {changePasscodeMutation.isPending ? "UPDATING..." : "CHANGE PASSCODE"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {securityModal === "disable" && (
+        <div className="modal-overlay">
+          <div className="modal-backdrop" onClick={() => setSecurityModal(null)} />
+          <div className="modal-content">
+            <h2 className="modal-title">DISABLE PASSCODE</h2>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleDisableAuth();
+              }}
+              style={{ display: "grid", gap: "var(--space-2)" }}
+            >
+              <div className="system-info-value">
+                Enter your current passcode to disable authentication.
+              </div>
+              <label className="system-info-label">CURRENT PASSCODE</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={10}
+                value={manageCurrentPasscode}
+                onChange={(event) =>
+                  setManageCurrentPasscode(
+                    event.currentTarget.value.replace(/\D/g, "").slice(0, 10)
+                  )
+                }
+                style={securityInputStyle}
+              />
+              <div className="modal-actions">
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={() => setSecurityModal(null)}
+                >
+                  CANCEL
+                </Button>
+                <Button variant="danger" type="submit" disabled={disableAuthMutation.isPending}>
+                  {disableAuthMutation.isPending ? "DISABLING..." : "DISABLE PASSCODE"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

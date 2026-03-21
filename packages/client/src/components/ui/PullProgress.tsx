@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { authFetch } from "../../lib/auth";
 
 interface PullProgressProps {
   isOpen: boolean;
@@ -102,7 +103,7 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
 
     const start = async () => {
       try {
-        const startRes = await fetch(
+        const startRes = await authFetch(
           `/api/apps/${encodeURIComponent(appId)}/pull/start`,
           { method: "POST", signal: controller.signal }
         );
@@ -122,7 +123,7 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
         const poll = async () => {
           if (finished) return;
           try {
-            const res = await fetch(`/api/pull/${encodeURIComponent(jobId)}`, {
+            const res = await authFetch(`/api/pull/${encodeURIComponent(jobId)}`, {
               signal: controller.signal,
             });
             if (!res.ok) {

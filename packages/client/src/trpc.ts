@@ -1,6 +1,7 @@
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { createTRPCContext } from "@trpc/tanstack-react-query";
 import type { AppRouter } from "../../server/src/trpc/router.js";
+import { emitUnauthorizedEvent } from "./lib/auth";
 
 const getApiUrl = (): string => {
   if (typeof window !== "undefined") {
@@ -14,6 +15,13 @@ export const trpcClient = createTRPCClient<AppRouter>({
   links: [
     httpBatchLink({
       url: getApiUrl(),
+      fetch: async (input, init) => {
+        const response = await fetch(input, init);
+        if (response.status === 401) {
+          emitUnauthorizedEvent();
+        }
+        return response;
+      },
     }),
   ],
 });

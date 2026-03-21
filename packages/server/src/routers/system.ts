@@ -1,4 +1,4 @@
-import { router, publicProcedure } from "../trpc/trpc.js";
+import { router, protectedProcedure } from "../trpc/trpc.js";
 import si from "systeminformation";
 import { z } from "zod";
 import { spawn } from "node:child_process";
@@ -126,11 +126,11 @@ export async function runPowerAction(
 }
 
 export const systemRouter = router({
-  getDataDir: publicProcedure.query(async () => {
+  getDataDir: protectedProcedure.query(async () => {
     return { dataDir: DATA_DIR };
   }),
 
-  ping: publicProcedure.query(() => {
+  ping: protectedProcedure.query(() => {
     return {
       status: "ok" as const,
       timestamp: new Date().toISOString(),
@@ -138,7 +138,7 @@ export const systemRouter = router({
     };
   }),
 
-  getInfo: publicProcedure.query(async () => {
+  getInfo: protectedProcedure.query(async () => {
     const [osInfo, time] = await Promise.all([si.osInfo(), si.time()]);
 
     let dockerVersion: string | null = null;
@@ -165,25 +165,25 @@ export const systemRouter = router({
     };
   }),
 
-  getMetrics: publicProcedure.query(async () => {
+  getMetrics: protectedProcedure.query(async () => {
     return await metricsService.getOneShotMetrics();
   }),
 
-  getUpdateStatus: publicProcedure.query(async () => {
+  getUpdateStatus: protectedProcedure.query(async () => {
     return await getUpdateStatus();
   }),
 
-  checkForUpdates: publicProcedure.input(z.object({})).mutation(async () => {
+  checkForUpdates: protectedProcedure.input(z.object({})).mutation(async () => {
     return await checkForUpdatesNow();
   }),
 
-  applyUpdate: publicProcedure
+  applyUpdate: protectedProcedure
     .input(z.object({ version: z.string().optional() }))
     .mutation(async ({ input }) => {
       return await applyUpdate(input.version);
     }),
 
-  powerAction: publicProcedure
+  powerAction: protectedProcedure
     .input(z.object({ action: z.enum(["shutdown", "restart"]) }))
     .mutation(async ({ input }) => {
       await runPowerAction(input.action);

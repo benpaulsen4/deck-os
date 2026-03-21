@@ -1,4 +1,4 @@
-import { router, publicProcedure } from "../trpc/trpc.js";
+import { router, protectedProcedure } from "../trpc/trpc.js";
 import { z } from "zod";
 import * as appsService from "../services/apps.js";
 import * as dockerService from "../services/docker.js";
@@ -11,11 +11,11 @@ import {
 import { AppNotFoundError, getErrorMessage } from "../lib/errors.js";
 
 export const appsRouter = router({
-  list: publicProcedure.query(async () => {
+  list: protectedProcedure.query(async () => {
     return await appsService.listApps();
   }),
 
-  get: publicProcedure.input(z.object({ id: AppIdSchema })).query(async ({ input }) => {
+  get: protectedProcedure.input(z.object({ id: AppIdSchema })).query(async ({ input }) => {
     const app = await appsService.getApp(input.id);
     if (!app) {
       throw new AppNotFoundError(input.id);
@@ -23,7 +23,7 @@ export const appsRouter = router({
     return app;
   }),
 
-  validateCompose: publicProcedure
+  validateCompose: protectedProcedure
     .input(z.object({ composeYaml: z.string() }))
     .mutation(async ({ input }) => {
       try {
@@ -42,7 +42,7 @@ export const appsRouter = router({
       }
     }),
 
-  create: publicProcedure
+  create: protectedProcedure
     .input(
       z.object({
         name: z.string().min(1),
@@ -62,7 +62,7 @@ export const appsRouter = router({
       );
     }),
 
-  update: publicProcedure
+  update: protectedProcedure
     .input(
       z.object({
         id: AppIdSchema,
@@ -86,7 +86,7 @@ export const appsRouter = router({
       return app;
     }),
 
-  updateCompose: publicProcedure
+  updateCompose: protectedProcedure
     .input(
       z.object({
         id: AppIdSchema,
@@ -101,7 +101,7 @@ export const appsRouter = router({
       return app;
     }),
 
-  delete: publicProcedure
+  delete: protectedProcedure
     .input(z.object({ id: AppIdSchema }))
     .mutation(async ({ input }) => {
       try {
@@ -116,7 +116,7 @@ export const appsRouter = router({
       return { success: true };
     }),
 
-  reorder: publicProcedure
+  reorder: protectedProcedure
     .input(z.object({ orderedIds: z.array(AppIdSchema) }))
     .mutation(async ({ input }) => {
       await appsService.reorderApps(input.orderedIds);

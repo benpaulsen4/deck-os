@@ -1,4 +1,4 @@
-import { router, publicProcedure } from "../trpc/trpc.js";
+import { router, protectedProcedure } from "../trpc/trpc.js";
 import { z } from "zod";
 import * as templatesService from "../services/templates.js";
 import { OptionalUrlOrPathSchema, OptionalUrlSchema } from "../lib/schema.js";
@@ -28,7 +28,7 @@ const TemplateDetailSchema = TemplateSummarySchema.extend({
 });
 
 export const templatesRouter = router({
-  list: publicProcedure
+  list: protectedProcedure
     .input(
       z
         .object({
@@ -54,12 +54,12 @@ export const templatesRouter = router({
       };
     }),
 
-  get: publicProcedure.input(z.object({ id: z.string() })).query(async ({ input }) => {
+  get: protectedProcedure.input(z.object({ id: z.string() })).query(async ({ input }) => {
     const tpl = await templatesService.getTemplate(input.id);
     return TemplateDetailSchema.parse(tpl);
   }),
 
-  deploy: publicProcedure
+  deploy: protectedProcedure
     .input(
       z.object({
         templateId: z.string(),

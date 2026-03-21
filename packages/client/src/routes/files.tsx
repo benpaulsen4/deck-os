@@ -40,6 +40,7 @@ import { Input } from "../components/ui/Input";
 import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { CodeEditor } from "../components/ui/CodeEditor";
 import { useToastStore } from "../stores/toast";
+import { authFetch } from "../lib/auth";
 
 export const Route = createFileRoute("/files")({
   component: FilesPage,
@@ -778,7 +779,7 @@ function FilesPage() {
       formData.append("files", file);
     }
     try {
-      const response = await fetch(
+      const response = await authFetch(
         `/api/files/upload?path=${encodeURIComponent(currentPath)}`,
         {
           method: "POST",

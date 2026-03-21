@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useConnectionStore } from "../stores/connection";
+import { emitUnauthorizedEvent, fetchAuthStatus } from "../lib/auth";
 
 export interface DockerEvent {
   Type: string;
@@ -60,6 +61,13 @@ export function useDockerEvents(callback: (event: DockerEvent) => void) {
         }
         console.error("Docker events SSE error:", error);
         setConnected("events", false);
+        void fetchAuthStatus()
+          .then((status) => {
+            if (status.enabled && !status.unlocked) {
+              emitUnauthorizedEvent();
+            }
+          })
+          .catch(() => {});
         eventSource.close();
         if (reconnectTimeoutRef.current !== null) {
           window.clearTimeout(reconnectTimeoutRef.current);
