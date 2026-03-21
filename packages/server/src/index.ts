@@ -16,11 +16,15 @@ import * as authService from "./services/auth.js";
 import { LOG_HISTORY_SIZE } from "./lib/config.js";
 import { AppIdSchema } from "./lib/schema.js";
 import { getCurrentVersion } from "./lib/version.js";
-import { readFileSync, existsSync, createReadStream } from "fs";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { getDirectClientIp } from "./lib/clientIp.js";
+import { mapFilesError } from "./lib/filesErrors.js";
+import { readFileSync, existsSync, createReadStream, createWriteStream } from "fs";
+import { readFile, stat, unlink } from "node:fs/promises";
 import { join, dirname, basename } from "path";
 import { fileURLToPath } from "url";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import Busboy from "busboy";
 import type Dockerode from "dockerode";
 
 dockerService.getDocker();
@@ -50,32 +54,22 @@ function isSafeUploadName(fileName: string): boolean {
   return true;
 }
 
-type FilesHttpStatusCode = 400 | 403 | 404 | 409 | 413 | 500;
+class UploadRequestError extends Error {
+  status: 400 | 413;
 
-function toFilesHttpErrorResponse(
-  error: unknown,
-  fallbackMessage: string
-): { status: FilesHttpStatusCode; message: string } {
-  const message = error instanceof Error ? error.message : fallbackMessage;
-  if (error instanceof filesService.FilesAccessDeniedError) {
-    return { status: 403, message };
+  constructor(status: 400 | 413, message: string) {
+    super(message);
+    this.status = status;
+    this.name = "UploadRequestError";
   }
-  if (error instanceof filesService.FilesNotFoundError) {
-    return { status: 404, message };
+}
+
+function toNodeHeaders(headers: Headers): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, value] of headers.entries()) {
+    result[key.toLowerCase()] = value;
   }
-  if (
-    error instanceof filesService.FilesNotDirectoryError ||
-    error instanceof filesService.FilesNotFileError
-  ) {
-    return { status: 400, message };
-  }
-  if (error instanceof filesService.FilesAlreadyExistsError) {
-    return { status: 409, message };
-  }
-  if (error instanceof Error && (error as NodeJS.ErrnoException).code === "EEXIST") {
-    return { status: 409, message: "One or more files already exist" };
-  }
-  return { status: 500, message };
+  return result;
 }
 
 let fatalExitScheduled = false;
@@ -180,8 +174,7 @@ app.get("/api/auth/status", async (c) => {
 app.post("/api/auth/unlock", async (c) => {
   const body = await c.req.json().catch(() => null);
   const passcode = typeof body?.passcode === "string" ? body.passcode : "";
-  const forwardedFor = c.req.header("x-forwarded-for");
-  const ip = forwardedFor?.split(",")[0].trim() || c.req.header("x-real-ip") || "unknown";
+  const ip = getDirectClientIp(c);
   try {
     const result = await authService.unlock({ passcode, ip });
     setSessionCookie(c, result.token, result.sessionDurationMs);
@@ -405,56 +398,134 @@ app.post("/api/files/upload", async (c) => {
   try {
     const destinationPath =
       await filesService.resolveExistingDirectoryPath(destinationParam);
-
-    const formData = await c.req.raw.formData();
-    const allEntries = formData.getAll("files");
-    const allFiles: Array<{ name: string; arrayBuffer: () => Promise<ArrayBuffer> }> = [];
-    for (const entry of allEntries) {
-      if (typeof entry !== "object" || entry === null) {
-        continue;
-      }
-      const candidate = entry as { name?: unknown; arrayBuffer?: unknown };
-      if (
-        typeof candidate.name === "string" &&
-        typeof candidate.arrayBuffer === "function"
-      ) {
-        allFiles.push(entry as { name: string; arrayBuffer: () => Promise<ArrayBuffer> });
-      }
+    const contentType = c.req.header("content-type") ?? "";
+    if (!contentType.toLowerCase().includes("multipart/form-data")) {
+      return c.json({ error: "Content-Type must be multipart/form-data" }, 400);
     }
-
-    if (allFiles.length === 0) {
-      return c.json({ error: "No files uploaded" }, 400);
+    if (!c.req.raw.body) {
+      return c.json({ error: "Empty request body" }, 400);
     }
-    if (allFiles.length > MAX_UPLOAD_FILES) {
-      return c.json({ error: `Too many files. Maximum is ${MAX_UPLOAD_FILES}.` }, 400);
-    }
-
+    const requestStream = Readable.fromWeb(
+      c.req.raw.body as unknown as ReadableStream<Uint8Array>
+    );
+    const parser = Busboy({
+      headers: toNodeHeaders(c.req.raw.headers),
+    });
     const uploaded: string[] = [];
     let totalBytes = 0;
-    for (const file of allFiles) {
-      const safeName = basename(file.name);
-      if (!isSafeUploadName(file.name) || !safeName) {
-        return c.json({ error: `Invalid file name: ${file.name}` }, 400);
+    let uploadError: unknown = null;
+    let filesCount = 0;
+    let hasFile = false;
+    const fileTasks: Promise<void>[] = [];
+
+    const setUploadError = (error: unknown) => {
+      if (uploadError) {
+        return;
       }
-      const targetPath = await filesService.resolveTargetPath(
-        join(destinationPath, safeName)
+      uploadError = error;
+      requestStream.destroy(
+        error instanceof Error
+          ? error
+          : new Error(typeof error === "string" ? error : "Upload failed")
       );
-      const arrayBuffer = await file.arrayBuffer();
-      const fileBytes = arrayBuffer.byteLength;
-      totalBytes += fileBytes;
-      if (fileBytes > MAX_UPLOAD_FILE_BYTES) {
-        return c.json({ error: `File too large: ${safeName}` }, 413);
+    };
+
+    parser.on("file", (fieldName, stream, info) => {
+      if (fieldName !== "files") {
+        stream.resume();
+        return;
       }
-      if (totalBytes > MAX_UPLOAD_TOTAL_BYTES) {
-        return c.json({ error: "Total upload size exceeded" }, 413);
+
+      hasFile = true;
+      filesCount += 1;
+      if (filesCount > MAX_UPLOAD_FILES) {
+        setUploadError(
+          new UploadRequestError(400, `Too many files. Maximum is ${MAX_UPLOAD_FILES}.`)
+        );
+        stream.resume();
+        return;
       }
-      await writeFile(targetPath, Buffer.from(arrayBuffer), { flag: "wx" });
-      uploaded.push(safeName);
+
+      const safeName = basename(info.filename ?? "");
+      if (!isSafeUploadName(info.filename ?? "") || !safeName) {
+        setUploadError(
+          new UploadRequestError(400, `Invalid file name: ${info.filename}`)
+        );
+        stream.resume();
+        return;
+      }
+
+      const task = (async () => {
+        const targetPath = await filesService.resolveTargetPath(
+          join(destinationPath, safeName)
+        );
+        let fileBytes = 0;
+        const limiter = new Transform({
+          transform(chunk, _encoding, callback) {
+            const chunkSize = Buffer.isBuffer(chunk)
+              ? chunk.length
+              : Buffer.byteLength(chunk as string);
+            fileBytes += chunkSize;
+            totalBytes += chunkSize;
+            if (fileBytes > MAX_UPLOAD_FILE_BYTES) {
+              callback(new UploadRequestError(413, `File too large: ${safeName}`));
+              return;
+            }
+            if (totalBytes > MAX_UPLOAD_TOTAL_BYTES) {
+              callback(new UploadRequestError(413, "Total upload size exceeded"));
+              return;
+            }
+            callback(null, chunk);
+          },
+        });
+
+        try {
+          await pipeline(stream, limiter, createWriteStream(targetPath, { flags: "wx" }));
+          uploaded.push(safeName);
+        } catch (error) {
+          await unlink(targetPath).catch(() => undefined);
+          throw error;
+        }
+      })();
+
+      fileTasks.push(task);
+      task.catch((error) => {
+        setUploadError(error);
+      });
+    });
+
+    parser.on("error", (error) => {
+      setUploadError(error);
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      parser.once("finish", () => {
+        resolve();
+      });
+      requestStream.once("error", (error) => {
+        reject(error);
+      });
+      parser.once("error", (error) => {
+        reject(error);
+      });
+      requestStream.pipe(parser);
+    });
+
+    await Promise.all(fileTasks);
+    if (uploadError) {
+      throw uploadError;
     }
+    if (!hasFile) {
+      return c.json({ error: "No files uploaded" }, 400);
+    }
+
     return c.json({ uploaded });
   } catch (error: unknown) {
-    const response = toFilesHttpErrorResponse(error, "Upload failed");
-    return c.json({ error: response.message }, response.status);
+    if (error instanceof UploadRequestError) {
+      return c.json({ error: error.message }, error.status);
+    }
+    const mapped = mapFilesError(error, "Upload failed");
+    return c.json({ error: mapped.message }, mapped.status);
   }
 });
 
@@ -472,8 +543,8 @@ app.get("/api/files/download", async (c) => {
     c.header("X-Content-Type-Options", "nosniff");
     return c.body(toWebStream(createReadStream(filePath)));
   } catch (error: unknown) {
-    const response = toFilesHttpErrorResponse(error, "Download failed");
-    return c.json({ error: response.message }, response.status);
+    const mapped = mapFilesError(error, "Download failed");
+    return c.json({ error: mapped.message }, mapped.status);
   }
 });
 
@@ -534,8 +605,8 @@ app.get("/api/files/content", async (c) => {
     c.header("Content-Length", String(chunkSize));
     return c.body(toWebStream(createReadStream(filePath, { start, end })), 206);
   } catch (error: unknown) {
-    const response = toFilesHttpErrorResponse(error, "Content read failed");
-    return c.json({ error: response.message }, response.status);
+    const mapped = mapFilesError(error, "Content read failed");
+    return c.json({ error: mapped.message }, mapped.status);
   }
 });
 

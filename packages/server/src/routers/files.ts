@@ -2,27 +2,14 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc/trpc.js";
 import * as filesService from "../services/files.js";
+import { mapFilesError } from "../lib/filesErrors.js";
 
 function toTrpcError(error: unknown): TRPCError {
-  if (error instanceof filesService.FilesAccessDeniedError) {
-    return new TRPCError({ code: "FORBIDDEN", message: error.message });
-  }
-  if (error instanceof filesService.FilesNotFoundError) {
-    return new TRPCError({ code: "NOT_FOUND", message: error.message });
-  }
-  if (error instanceof filesService.FilesNotDirectoryError) {
-    return new TRPCError({ code: "BAD_REQUEST", message: error.message });
-  }
-  if (error instanceof filesService.FilesNotFileError) {
-    return new TRPCError({ code: "BAD_REQUEST", message: error.message });
-  }
-  if (error instanceof filesService.FilesAlreadyExistsError) {
-    return new TRPCError({ code: "CONFLICT", message: error.message });
-  }
-  if (error instanceof Error) {
-    return new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
-  }
-  return new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: String(error) });
+  const mapped = mapFilesError(error, "Files operation failed");
+  return new TRPCError({
+    code: mapped.trpcCode,
+    message: mapped.message,
+  });
 }
 
 export const filesRouter = router({
