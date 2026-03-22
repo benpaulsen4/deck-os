@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import fs from "fs-extra";
 import os from "node:os";
 import path from "node:path";
@@ -32,17 +31,17 @@ test("listDirectory returns mime metadata and supports directoriesOnly mode", as
   });
   const fileEntry = allEntries.entries.find((entry) => entry.path === textPath);
   const dirEntry = allEntries.entries.find((entry) => entry.path === nestedDir);
-  assert.ok(fileEntry);
-  assert.equal(fileEntry.mimeType, "text/plain");
-  assert.ok(dirEntry);
-  assert.equal(dirEntry.mimeType, null);
+  expect(fileEntry).toBeDefined();
+  expect(fileEntry?.mimeType).toBe("text/plain");
+  expect(dirEntry).toBeDefined();
+  expect(dirEntry?.mimeType).toBe(null);
 
   const dirsOnly = await listDirectory(root, {
     showHidden: false,
     directoriesOnly: true,
   });
-  assert.ok(dirsOnly.entries.length > 0);
-  assert.ok(dirsOnly.entries.every((entry) => entry.type === "directory"));
+  expect(dirsOnly.entries.length).toBeGreaterThan(0);
+  expect(dirsOnly.entries.every((entry) => entry.type === "directory")).toBe(true);
 
   await fs.remove(root);
 });
@@ -54,8 +53,8 @@ test("readText truncates large files safely", async () => {
   await fs.writeFile(largePath, payload, "utf8");
 
   const result = await readText(largePath, false);
-  assert.equal(result.truncated, true);
-  assert.equal(result.content.length, 2 * 1024 * 1024);
+  expect(result.truncated).toBe(true);
+  expect(result.content.length).toBe(2 * 1024 * 1024);
 
   await fs.remove(root);
 });
@@ -67,10 +66,12 @@ test("resolveExistingFilePath and resolveExistingDirectoryPath enforce expected 
   await fs.ensureDir(nestedDir);
   await fs.writeFile(textPath, "ok", "utf8");
 
-  assert.equal(await resolveExistingFilePath(textPath), textPath);
-  assert.equal(await resolveExistingDirectoryPath(nestedDir), nestedDir);
-  await assert.rejects(resolveExistingFilePath(nestedDir), FilesNotFileError);
-  await assert.rejects(resolveExistingDirectoryPath(textPath), FilesNotDirectoryError);
+  expect(await resolveExistingFilePath(textPath)).toBe(textPath);
+  expect(await resolveExistingDirectoryPath(nestedDir)).toBe(nestedDir);
+  await expect(resolveExistingFilePath(nestedDir)).rejects.toBeInstanceOf(FilesNotFileError);
+  await expect(resolveExistingDirectoryPath(textPath)).rejects.toBeInstanceOf(
+    FilesNotDirectoryError
+  );
 
   await fs.remove(root);
 });
@@ -78,11 +79,10 @@ test("resolveExistingFilePath and resolveExistingDirectoryPath enforce expected 
 test("denylist protection blocks protected system paths", async () => {
   if (process.platform === "win32") {
     const systemDrive = process.env.SystemDrive || "C:";
-    await assert.rejects(
+    await expect(
       resolveExistingPath(path.join(systemDrive, "Windows")),
-      FilesAccessDeniedError
-    );
+    ).rejects.toBeInstanceOf(FilesAccessDeniedError);
     return;
   }
-  await assert.rejects(resolveExistingPath("/proc"), FilesAccessDeniedError);
+  await expect(resolveExistingPath("/proc")).rejects.toBeInstanceOf(FilesAccessDeniedError);
 });

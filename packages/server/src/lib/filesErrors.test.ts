@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import {
   FilesAccessDeniedError,
   FilesAlreadyExistsError,
@@ -10,27 +9,27 @@ import {
 import { mapFilesError } from "./filesErrors.js";
 
 test("mapFilesError maps files domain errors consistently", () => {
-  assert.deepEqual(mapFilesError(new FilesAccessDeniedError("/secret"), "fallback"), {
+  expect(mapFilesError(new FilesAccessDeniedError("/secret"), "fallback")).toEqual({
     status: 403,
     trpcCode: "FORBIDDEN",
     message: "Access denied for protected path: /secret",
   });
-  assert.deepEqual(mapFilesError(new FilesNotFoundError("/missing"), "fallback"), {
+  expect(mapFilesError(new FilesNotFoundError("/missing"), "fallback")).toEqual({
     status: 404,
     trpcCode: "NOT_FOUND",
     message: "Path not found: /missing",
   });
-  assert.deepEqual(mapFilesError(new FilesNotDirectoryError("/file"), "fallback"), {
+  expect(mapFilesError(new FilesNotDirectoryError("/file"), "fallback")).toEqual({
     status: 400,
     trpcCode: "BAD_REQUEST",
     message: "Path is not a directory: /file",
   });
-  assert.deepEqual(mapFilesError(new FilesNotFileError("/dir"), "fallback"), {
+  expect(mapFilesError(new FilesNotFileError("/dir"), "fallback")).toEqual({
     status: 400,
     trpcCode: "BAD_REQUEST",
     message: "Path is not a file: /dir",
   });
-  assert.deepEqual(mapFilesError(new FilesAlreadyExistsError("/exists"), "fallback"), {
+  expect(mapFilesError(new FilesAlreadyExistsError("/exists"), "fallback")).toEqual({
     status: 409,
     trpcCode: "CONFLICT",
     message: "Path already exists: /exists",
@@ -40,7 +39,7 @@ test("mapFilesError maps files domain errors consistently", () => {
 test("mapFilesError maps eexist into conflict", () => {
   const err = new Error("boom") as NodeJS.ErrnoException;
   err.code = "EEXIST";
-  assert.deepEqual(mapFilesError(err, "fallback"), {
+  expect(mapFilesError(err, "fallback")).toEqual({
     status: 409,
     trpcCode: "CONFLICT",
     message: "One or more files already exist",
@@ -50,13 +49,13 @@ test("mapFilesError maps eexist into conflict", () => {
 test("mapFilesError maps oversized payload and unknown errors to fallback messages", () => {
   const largeFile = new Error("filesystem payload too large") as NodeJS.ErrnoException;
   largeFile.code = "EFBIG";
-  assert.deepEqual(mapFilesError(largeFile, "Upload failed"), {
+  expect(mapFilesError(largeFile, "Upload failed")).toEqual({
     status: 413,
     trpcCode: "PAYLOAD_TOO_LARGE",
     message: "Upload failed",
   });
 
-  assert.deepEqual(mapFilesError(new Error("raw internal"), "Files operation failed"), {
+  expect(mapFilesError(new Error("raw internal"), "Files operation failed")).toEqual({
     status: 500,
     trpcCode: "INTERNAL_SERVER_ERROR",
     message: "Files operation failed",

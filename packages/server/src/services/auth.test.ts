@@ -1,5 +1,4 @@
-import test, { after } from "node:test";
-import assert from "node:assert/strict";
+import { test, expect, afterAll } from "vitest";
 import fs from "fs-extra";
 import os from "node:os";
 import path from "node:path";
@@ -23,8 +22,8 @@ test("auth defaults to disabled and unlock is not required", async () => {
   const root = await createTempDir("deckos-auth-default-");
   setAuthStoragePathForTests(root);
   const status = await getAuthStatus(null);
-  assert.equal(status.enabled, false);
-  assert.equal(status.unlocked, true);
+  expect(status.enabled).toBe(false);
+  expect(status.unlocked).toBe(true);
   await fs.remove(root);
 });
 
@@ -37,13 +36,13 @@ test("configureAuth enables auth and unlock accepts correct passcode", async () 
   });
 
   const lockedStatus = await getAuthStatus(null);
-  assert.equal(lockedStatus.enabled, true);
-  assert.equal(lockedStatus.unlocked, false);
+  expect(lockedStatus.enabled).toBe(true);
+  expect(lockedStatus.unlocked).toBe(false);
 
   const unlocked = await unlock({ passcode: "1234", ip: "10.0.0.5" });
   const unlockedStatus = await getAuthStatus(unlocked.token);
-  assert.equal(unlockedStatus.enabled, true);
-  assert.equal(unlockedStatus.unlocked, true);
+  expect(unlockedStatus.enabled).toBe(true);
+  expect(unlockedStatus.unlocked).toBe(true);
   await fs.remove(root);
 });
 
@@ -56,15 +55,13 @@ test("unlock enforces per-IP cooldown after repeated failures", async () => {
   });
 
   for (let index = 0; index < 5; index += 1) {
-    await assert.rejects(
-      unlock({ passcode: "0000", ip: "10.0.0.9" }),
+    await expect(unlock({ passcode: "0000", ip: "10.0.0.9" })).rejects.toBeInstanceOf(
       AuthInvalidPasscodeError
     );
   }
 
-  await assert.rejects(
-    unlock({ passcode: "5678", ip: "10.0.0.9" }),
-    (error: unknown) => error instanceof AuthRateLimitedError
+  await expect(unlock({ passcode: "5678", ip: "10.0.0.9" })).rejects.toBeInstanceOf(
+    AuthRateLimitedError
   );
   await fs.remove(root);
 });
@@ -77,22 +74,21 @@ test("updateSessionDuration and disableAuth require the current passcode", async
     sessionDurationMs: 2 * 60 * 60 * 1000,
   });
 
-  await assert.rejects(
+  await expect(
     updateSessionDuration({
       currentPasscode: "9999",
       sessionDurationMs: 3 * 60 * 60 * 1000,
-    }),
-    AuthInvalidPasscodeError
-  );
-  await assert.rejects(disableAuth("9999"), AuthInvalidPasscodeError);
+    })
+  ).rejects.toBeInstanceOf(AuthInvalidPasscodeError);
+  await expect(disableAuth("9999")).rejects.toBeInstanceOf(AuthInvalidPasscodeError);
 
   await disableAuth("4321");
   const status = await getAuthStatus(null);
-  assert.equal(status.enabled, false);
-  assert.equal(status.unlocked, true);
+  expect(status.enabled).toBe(false);
+  expect(status.unlocked).toBe(true);
   await fs.remove(root);
 });
 
-after(() => {
+afterAll(() => {
   resetAuthStateForTests();
 });

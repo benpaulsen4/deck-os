@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { EventEmitter } from "node:events";
 import type { spawn } from "node:child_process";
 import { runPowerAction } from "./system.js";
@@ -38,9 +37,9 @@ test("runPowerAction uses sudo first for non-root linux commands", async () => {
     uid: 1001,
   });
 
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].command, "sudo");
-  assert.deepEqual(calls[0].args, ["-n", "/usr/bin/systemctl", "poweroff"]);
+  expect(calls).toHaveLength(1);
+  expect(calls[0].command).toBe("sudo");
+  expect(calls[0].args).toEqual(["-n", "/usr/bin/systemctl", "poweroff"]);
 });
 
 test("runPowerAction falls back to direct command when sudo attempt fails", async () => {
@@ -59,10 +58,10 @@ test("runPowerAction falls back to direct command when sudo attempt fails", asyn
     uid: 1001,
   });
 
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0].command, "sudo");
-  assert.equal(calls[1].command, "/usr/bin/systemctl");
-  assert.deepEqual(calls[1].args, ["reboot"]);
+  expect(calls).toHaveLength(2);
+  expect(calls[0].command).toBe("sudo");
+  expect(calls[1].command).toBe("/usr/bin/systemctl");
+  expect(calls[1].args).toEqual(["reboot"]);
 });
 
 test("runPowerAction rejects when command exits non-zero", async () => {
@@ -81,13 +80,12 @@ test("runPowerAction rejects when command exits non-zero", async () => {
     calls
   );
 
-  await assert.rejects(
+  await expect(
     runPowerAction("shutdown", {
       spawnImpl: spawnStub,
       platform: "linux",
       uid: 1001,
-    }),
-    /Unable to execute shutdown command/
-  );
-  assert.ok(calls.length >= 2);
+    })
+  ).rejects.toThrow(/Unable to execute shutdown command/);
+  expect(calls.length).toBeGreaterThanOrEqual(2);
 });
