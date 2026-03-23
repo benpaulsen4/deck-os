@@ -1110,6 +1110,28 @@
 }
 
 @media (max-width: 767px) {
+  .new-app-layout.page-container--viewport,
+  .template-deploy-layout.page-container--viewport {
+    height: auto;
+    min-height: calc(100vh - 48px);
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .new-app-layout .page-body,
+  .new-app-layout .page-grid-2col,
+  .new-app-layout .page-col,
+  .template-deploy-layout .page-body,
+  .template-deploy-layout .page-grid-2col,
+  .template-deploy-layout .page-col {
+    min-height: auto;
+  }
+
+  .new-app-layout .page-grid-2col,
+  .template-deploy-layout .page-grid-2col {
+    height: auto;
+  }
+
   .app-detail-layout.page-container--viewport {
     height: auto;
     min-height: calc(100vh - 48px);

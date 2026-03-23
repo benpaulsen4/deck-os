@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { trpcClient } from "../../trpc";
 import { useMutation } from "@tanstack/react-query";
@@ -112,9 +112,12 @@ function NewAppPage() {
   };
 
   return (
-    <div className="page-container page-container--viewport">
+    <div className="page-container page-container--viewport new-app-layout">
       <div className="page-header">
         <h1 className="page-title">New App</h1>
+        <Link to="/apps" className="page-header-action">
+          BACK TO APPS
+        </Link>
       </div>
 
       <div className="page-body">
