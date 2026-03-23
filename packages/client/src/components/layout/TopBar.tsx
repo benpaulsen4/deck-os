@@ -115,6 +115,11 @@ export function TopBar({
       ? "Restart the host system now?"
       : "Shut down the host system now?";
   const confirmText = pendingPowerAction === "restart" ? "RESTART" : "SHUTDOWN";
+  const requestPowerAction = (action: "shutdown" | "restart") => {
+    setPowerMenuOpen(false);
+    setMobileMenuOpen(false);
+    setPendingPowerAction(action);
+  };
 
   return (
     <>
@@ -155,13 +160,13 @@ export function TopBar({
               Settings
             </Link>
           </nav>
-          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+          <div className="topbar-actions">
             {updateStatus?.updateAvailable && (
               <Link to="/settings" className="topbar-update">
                 UPDATE
               </Link>
             )}
-            <div style={connectionStyle}>
+            <div className="topbar-connection" style={connectionStyle}>
               <div
                 title={
                   apiStatus.connected
@@ -219,9 +224,9 @@ export function TopBar({
                   <button
                     className="topbar-power-item"
                     role="menuitem"
+                    type="button"
                     onClick={() => {
-                      setPowerMenuOpen(false);
-                      setPendingPowerAction("restart");
+                      requestPowerAction("restart");
                     }}
                   >
                     RESTART
@@ -229,9 +234,9 @@ export function TopBar({
                   <button
                     className="topbar-power-item topbar-power-item--danger"
                     role="menuitem"
+                    type="button"
                     onClick={() => {
-                      setPowerMenuOpen(false);
-                      setPendingPowerAction("shutdown");
+                      requestPowerAction("shutdown");
                     }}
                   >
                     SHUTDOWN
@@ -246,16 +251,7 @@ export function TopBar({
       {mobileMenuOpen && (
         <div className="topbar-menu-overlay">
           <button
-            style={{
-              position: "absolute",
-              top: "8px",
-              right: "8px",
-              background: "transparent",
-              border: "1px solid var(--border-primary)",
-              color: "var(--text-secondary)",
-              padding: "8px",
-              cursor: "pointer",
-            }}
+            className="topbar-menu-close"
             onClick={() => setMobileMenuOpen(false)}
             aria-label="Close menu"
           >
@@ -323,8 +319,7 @@ export function TopBar({
           </Link>
           {authEnabled && (
             <button
-              className="topbar-menu-link"
-              style={{ textAlign: "left", background: "transparent", border: "none" }}
+              className="topbar-menu-link topbar-menu-button"
               onClick={() => {
                 setMobileMenuOpen(false);
                 void onLock();
@@ -333,6 +328,24 @@ export function TopBar({
               Lock Session
             </button>
           )}
+          <button
+            className="topbar-menu-link topbar-menu-button"
+            type="button"
+            onClick={() => {
+              requestPowerAction("restart");
+            }}
+          >
+            Restart System
+          </button>
+          <button
+            className="topbar-menu-link topbar-menu-button topbar-menu-button--danger"
+            type="button"
+            onClick={() => {
+              requestPowerAction("shutdown");
+            }}
+          >
+            Shutdown System
+          </button>
         </div>
       )}
 

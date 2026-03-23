@@ -32,7 +32,13 @@ import {
   Table,
   Clipboard,
   ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Eye,
+  EyeOff,
   Save,
+  PanelLeft,
+  X,
 } from "lucide-react";
 import { useTRPC, trpcClient } from "../trpc";
 import { Button } from "../components/ui/Button";
@@ -369,6 +375,7 @@ function FilesPage() {
   const [editorContent, setEditorContent] = useState("");
   const [editorBaseline, setEditorBaseline] = useState("");
   const [editorDirty, setEditorDirty] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
   const gridScrollRef = useRef<HTMLDivElement | null>(null);
@@ -573,10 +580,18 @@ function FilesPage() {
   };
 
   const handleNavigate = (nextPath: string) => {
+    setMobileSidebarOpen(false);
     setRequestedPath(nextPath);
   };
 
-  const handleItemClick = (targetPath: string, event: React.MouseEvent) => {
+  const handleItemClick = (
+    entry: {
+      path: string;
+      type: "directory" | "file" | "symlink" | "other";
+    },
+    event: React.MouseEvent
+  ) => {
+    const targetPath = entry.path;
     if (event.shiftKey) {
       const anchorPath =
         selectionAnchorPath ?? selectedPaths[selectedPaths.length - 1] ?? targetPath;
@@ -605,6 +620,15 @@ function FilesPage() {
         return [...previous, targetPath];
       });
       setSelectionAnchorPath(targetPath);
+      return;
+    }
+
+    if (selectedPaths.length === 1 && selectedPaths[0] === targetPath) {
+      if (entry.type === "directory") {
+        handleNavigate(targetPath);
+      } else {
+        openFileViewer(targetPath);
+      }
       return;
     }
 
@@ -944,9 +968,38 @@ function FilesPage() {
     <div className="page-container page-container--viewport">
       <div className="page-header">
         <h1 className="page-title">Files</h1>
+        <div className="files-page-header-actions">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setMobileSidebarOpen(true)}
+          >
+            <PanelLeft size={14} />
+            <span>Browse</span>
+          </Button>
+        </div>
       </div>
-      <div className="page-body files-layout">
+      <div
+        className={`page-body files-layout ${mobileSidebarOpen ? "files-layout--mobile-sidebar-open" : ""}`}
+      >
+        <button
+          type="button"
+          className="files-sidebar-backdrop"
+          onClick={() => setMobileSidebarOpen(false)}
+          aria-label="Close navigation"
+        />
         <aside className="panel files-sidebar">
+          <div className="files-sidebar-mobile-head">
+            <div className="files-section-title">Navigation</div>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setMobileSidebarOpen(false)}
+            >
+              <X size={14} />
+              <span>Close</span>
+            </Button>
+          </div>
           <div className="files-sidebar-section">
             <div className="files-section-title">Pinned</div>
             <div className="files-pins-list">
@@ -1010,35 +1063,39 @@ function FilesPage() {
                 value={pathInput}
                 onChange={(event) => setPathInput(event.target.value)}
               />
-              <Button type="submit" variant="secondary">
-                Go
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => parentPath && handleNavigate(parentPath)}
-                disabled={!parentPath}
-              >
-                Up
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={togglePin}
-                disabled={!currentPath}
-              >
-                {isPinned ? (
-                  <>
-                    <PinOff size={14} />
-                    <span>Unpin</span>
-                  </>
-                ) : (
-                  <>
-                    <Pin size={14} />
-                    <span>Pin</span>
-                  </>
-                )}
-              </Button>
+              <div className="files-path-actions">
+                <Button type="submit" variant="secondary">
+                  <ArrowRight size={14} />
+                  <span>Go</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => parentPath && handleNavigate(parentPath)}
+                  disabled={!parentPath}
+                >
+                  <ArrowUp size={14} />
+                  <span>Up</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={togglePin}
+                  disabled={!currentPath}
+                >
+                  {isPinned ? (
+                    <>
+                      <PinOff size={14} />
+                      <span>Unpin</span>
+                    </>
+                  ) : (
+                    <>
+                      <Pin size={14} />
+                      <span>Pin</span>
+                    </>
+                  )}
+                </Button>
+              </div>
             </form>
             <div className="files-toolbar-actions">
               <Button
@@ -1118,7 +1175,17 @@ function FilesPage() {
                 variant="secondary"
                 onClick={() => setShowHidden((v) => !v)}
               >
-                {showHidden ? "Hide Hidden" : "Show Hidden"}
+                {showHidden ? (
+                  <>
+                    <EyeOff size={14} />
+                    <span>Hidden</span>
+                  </>
+                ) : (
+                  <>
+                    <Eye size={14} />
+                    <span>Hidden</span>
+                  </>
+                )}
               </Button>
             </div>
           </div>
@@ -1218,7 +1285,7 @@ function FilesPage() {
                       <tr
                         key={entry.path}
                         className={`files-row ${selectedPathSet.has(entry.path) ? "files-row--selected" : ""}`}
-                        onClick={(event) => handleItemClick(entry.path, event)}
+                        onClick={(event) => handleItemClick(entry, event)}
                         onMouseDown={(event) => {
                           if (event.shiftKey) {
                             event.preventDefault();
@@ -1262,7 +1329,7 @@ function FilesPage() {
                   <button
                     key={entry.path}
                     className={`files-grid-item ${selectedPathSet.has(entry.path) ? "files-grid-item--selected" : ""}`}
-                    onClick={(event) => handleItemClick(entry.path, event)}
+                    onClick={(event) => handleItemClick(entry, event)}
                     onMouseDown={(event) => {
                       if (event.shiftKey) {
                         event.preventDefault();

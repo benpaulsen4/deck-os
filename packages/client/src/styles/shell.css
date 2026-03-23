@@ -122,6 +122,12 @@
   color: var(--text-muted);
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .topbar-power-menu {
   position: relative;
 }
@@ -224,7 +230,11 @@
   background: transparent;
   border: 1px solid var(--border-primary);
   color: var(--text-primary);
-  padding: 8px;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   cursor: pointer;
   font-size: 20px;
 }
@@ -263,6 +273,36 @@
   border-left: 2px solid var(--accent-primary);
 }
 
+.topbar-menu-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.topbar-menu-button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  border-bottom: 1px solid var(--border-primary);
+  cursor: pointer;
+}
+
+.topbar-menu-button--danger {
+  color: var(--status-stopped);
+}
+
 @media (max-width: 768px) {
   .topbar-inner {
     padding: 0 var(--space-2);
@@ -274,6 +314,7 @@
 
   .topbar-hamburger {
     display: block;
+    order: 2;
   }
 
   .topbar-link {
@@ -282,6 +323,19 @@
 
   .topbar-host {
     display: none;
+  }
+
+  .topbar-lock-trigger,
+  .topbar-power-menu {
+    display: none;
+  }
+
+  .topbar-actions {
+    margin-left: auto;
+  }
+
+  .topbar-connection {
+    order: 1;
   }
 
   .metrics-grid {
@@ -348,7 +402,7 @@
 
 @media (max-width: 767px) {
   .metrics-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
@@ -478,6 +532,33 @@
   font-size: var(--text-sm);
   color: var(--text-primary);
   font-weight: 500;
+}
+
+.dashboard-system-info {
+  display: block;
+}
+
+@media (max-width: 767px) {
+  .dashboard-system-info {
+    display: none;
+  }
+
+  .metric-card {
+    gap: var(--space-1);
+    padding: var(--space-2);
+  }
+
+  .metric-card-value {
+    font-size: var(--text-xl);
+  }
+
+  .metric-card-sparkline {
+    display: none;
+  }
+
+  .metrics-controls {
+    display: none;
+  }
 }
 
 .settings-kv {
@@ -988,6 +1069,28 @@
   z-index: 1;
 }
 
+.container-table-scroll {
+  width: 100%;
+  overflow-x: visible;
+  overflow-y: hidden;
+}
+
+.container-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+@media (max-width: 1023px) {
+  .container-table-scroll {
+    overflow-x: auto;
+  }
+
+  .container-table {
+    width: max-content;
+    min-width: 100%;
+  }
+}
+
 .app-detail-modifier-note {
   margin-top: var(--space-2);
   font-size: var(--text-xs);
@@ -1004,6 +1107,63 @@
   margin-top: var(--space-3);
   display: flex;
   justify-content: center;
+}
+
+@media (max-width: 767px) {
+  .new-app-layout.page-container--viewport,
+  .template-deploy-layout.page-container--viewport {
+    height: auto;
+    min-height: calc(100vh - 48px);
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .new-app-layout .page-body,
+  .new-app-layout .page-grid-2col,
+  .new-app-layout .page-col,
+  .template-deploy-layout .page-body,
+  .template-deploy-layout .page-grid-2col,
+  .template-deploy-layout .page-col {
+    min-height: auto;
+  }
+
+  .new-app-layout .page-grid-2col,
+  .template-deploy-layout .page-grid-2col {
+    height: auto;
+  }
+
+  .app-detail-layout.page-container--viewport {
+    height: auto;
+    min-height: calc(100vh - 48px);
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .app-detail-layout .page-body,
+  .app-detail-layout .page-grid-2col,
+  .app-detail-layout .page-col,
+  .app-detail-layout .page-col-scroll,
+  .app-detail-layout .app-detail-containers {
+    min-height: auto;
+  }
+
+  .app-detail-layout .page-grid-2col {
+    height: auto;
+  }
+
+  .app-detail-layout .page-col-scroll {
+    flex: none;
+    overflow: visible;
+  }
+
+  .app-detail-layout .app-detail-containers {
+    flex: none;
+  }
+
+  .app-detail-layout .app-detail-containers-panel {
+    max-height: none;
+    overflow: visible;
+  }
 }
 
 /* ---- Modal / Overlay ---- */

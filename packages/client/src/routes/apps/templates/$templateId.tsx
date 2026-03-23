@@ -97,7 +97,7 @@ function TemplateDetailPage() {
   });
 
   return (
-    <div className="page-container page-container--viewport">
+    <div className="page-container page-container--viewport template-deploy-layout">
       <div className="page-header">
         <h1 className="page-title">{tpl?.title || "Template"}</h1>
         <Link to="/apps/templates" className="page-header-action">
