@@ -155,13 +155,13 @@ export function TopBar({
               Settings
             </Link>
           </nav>
-          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+          <div className="topbar-actions">
             {updateStatus?.updateAvailable && (
               <Link to="/settings" className="topbar-update">
                 UPDATE
               </Link>
             )}
-            <div style={connectionStyle}>
+            <div className="topbar-connection" style={connectionStyle}>
               <div
                 title={
                   apiStatus.connected
@@ -246,16 +246,7 @@ export function TopBar({
       {mobileMenuOpen && (
         <div className="topbar-menu-overlay">
           <button
-            style={{
-              position: "absolute",
-              top: "8px",
-              right: "8px",
-              background: "transparent",
-              border: "1px solid var(--border-primary)",
-              color: "var(--text-secondary)",
-              padding: "8px",
-              cursor: "pointer",
-            }}
+            className="topbar-menu-close"
             onClick={() => setMobileMenuOpen(false)}
             aria-label="Close menu"
           >
@@ -323,8 +314,7 @@ export function TopBar({
           </Link>
           {authEnabled && (
             <button
-              className="topbar-menu-link"
-              style={{ textAlign: "left", background: "transparent", border: "none" }}
+              className="topbar-menu-link topbar-menu-button"
               onClick={() => {
                 setMobileMenuOpen(false);
                 void onLock();
@@ -333,6 +323,24 @@ export function TopBar({
               Lock Session
             </button>
           )}
+          <button
+            className="topbar-menu-link topbar-menu-button"
+            onClick={() => {
+              setMobileMenuOpen(false);
+              setPendingPowerAction("restart");
+            }}
+          >
+            Restart System
+          </button>
+          <button
+            className="topbar-menu-link topbar-menu-button topbar-menu-button--danger"
+            onClick={() => {
+              setMobileMenuOpen(false);
+              setPendingPowerAction("shutdown");
+            }}
+          >
+            Shutdown System
+          </button>
         </div>
       )}
 

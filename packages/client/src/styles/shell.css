@@ -122,6 +122,12 @@
   color: var(--text-muted);
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .topbar-power-menu {
   position: relative;
 }
@@ -224,7 +230,11 @@
   background: transparent;
   border: 1px solid var(--border-primary);
   color: var(--text-primary);
-  padding: 8px;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   cursor: pointer;
   font-size: 20px;
 }
@@ -263,6 +273,36 @@
   border-left: 2px solid var(--accent-primary);
 }
 
+.topbar-menu-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.topbar-menu-button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  border-bottom: 1px solid var(--border-primary);
+  cursor: pointer;
+}
+
+.topbar-menu-button--danger {
+  color: var(--status-stopped);
+}
+
 @media (max-width: 768px) {
   .topbar-inner {
     padding: 0 var(--space-2);
@@ -274,6 +314,7 @@
 
   .topbar-hamburger {
     display: block;
+    order: 2;
   }
 
   .topbar-link {
@@ -282,6 +323,19 @@
 
   .topbar-host {
     display: none;
+  }
+
+  .topbar-lock-trigger,
+  .topbar-power-menu {
+    display: none;
+  }
+
+  .topbar-actions {
+    margin-left: auto;
+  }
+
+  .topbar-connection {
+    order: 1;
   }
 
   .metrics-grid {
