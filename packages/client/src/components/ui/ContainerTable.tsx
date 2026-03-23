@@ -121,7 +121,6 @@ export function ContainerTable({ containers }: ContainerTableProps) {
   };
 
   const tableStyle: React.CSSProperties = {
-    width: "100%",
     borderCollapse: "collapse",
   };
 
@@ -191,102 +190,104 @@ export function ContainerTable({ containers }: ContainerTableProps) {
   }
 
   return (
-    <table style={tableStyle}>
-      <thead>
-        <tr style={{ borderBottom: "1px solid var(--border-primary)" }}>
-          <th style={thStyle}>Name</th>
-          <th style={thStyle}>Image</th>
-          <th style={thStyle}>Status</th>
-          <th style={thStyle}>CPU</th>
-          <th style={thStyle}>Memory</th>
-          <th style={thStyle}>Ports</th>
-        </tr>
-      </thead>
-      <tbody>
-        {containers.map((container) => {
-          const stats = containerStats[container.id];
-          const cpu = stats?.cpu || 0;
-          const memory = stats?.memory || 0;
-          const memoryBytes = stats?.memoryBytes || 0;
+    <div className="container-table-scroll">
+      <table className="container-table" style={tableStyle}>
+        <thead>
+          <tr style={{ borderBottom: "1px solid var(--border-primary)" }}>
+            <th style={thStyle}>Name</th>
+            <th style={thStyle}>Image</th>
+            <th style={thStyle}>Status</th>
+            <th style={thStyle}>CPU</th>
+            <th style={thStyle}>Memory</th>
+            <th style={thStyle}>Ports</th>
+          </tr>
+        </thead>
+        <tbody>
+          {containers.map((container) => {
+            const stats = containerStats[container.id];
+            const cpu = stats?.cpu || 0;
+            const memory = stats?.memory || 0;
+            const memoryBytes = stats?.memoryBytes || 0;
 
-          return (
-            <tr
-              key={container.id}
-              style={{
-                borderBottom: "1px solid var(--border-primary)",
-                transition: "background-color 80ms linear",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = "var(--bg-tertiary)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = "";
-              }}
-            >
-              <td style={nameStyle}>{container.names[0]?.replace(/^\//, "") || "—"}</td>
-              <td style={imageStyle} title={container.image}>
-                {container.image}
-              </td>
-              <td style={statusStyle}>
-                <span style={{ color: getStatusColor(container.state.running) }}>
-                  {getStatusText(container.state.status)}
-                </span>
-              </td>
-              <td style={cellStyle}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span
-                    style={{
-                      fontSize: "var(--text-xs)",
-                      color: "var(--text-secondary)",
-                      minWidth: "32px",
-                    }}
-                  >
-                    {container.state.running ? `${cpu}%` : "—"}
+            return (
+              <tr
+                key={container.id}
+                style={{
+                  borderBottom: "1px solid var(--border-primary)",
+                  transition: "background-color 80ms linear",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = "var(--bg-tertiary)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "";
+                }}
+              >
+                <td style={nameStyle}>{container.names[0]?.replace(/^\//, "") || "—"}</td>
+                <td style={imageStyle} title={container.image}>
+                  {container.image}
+                </td>
+                <td style={statusStyle}>
+                  <span style={{ color: getStatusColor(container.state.running) }}>
+                    {getStatusText(container.state.status)}
                   </span>
-                  {container.state.running && (
-                    <div style={resourceBarContainer}>
-                      <div
-                        style={{
-                          ...resourceBarFill,
-                          width: `${Math.min(100, cpu)}%`,
-                          backgroundColor: "var(--meter-cpu)",
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
-              </td>
-              <td style={cellStyle}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span
-                    style={{
-                      fontSize: "var(--text-xs)",
-                      color: "var(--text-secondary)",
-                      minWidth: "32px",
-                    }}
-                  >
-                    {container.state.running ? `${formatBytes(memoryBytes)}` : "—"}
-                  </span>
-                  {container.state.running && (
-                    <div style={resourceBarContainer}>
-                      <div
-                        style={{
-                          ...resourceBarFill,
-                          width: `${Math.min(100, memory)}%`,
-                          backgroundColor: "var(--meter-memory)",
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
-              </td>
-              <td style={{ ...cellStyle, fontSize: "var(--text-xs)" }}>
-                {portsFromList(container.ports)}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+                </td>
+                <td style={cellStyle}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span
+                      style={{
+                        fontSize: "var(--text-xs)",
+                        color: "var(--text-secondary)",
+                        minWidth: "32px",
+                      }}
+                    >
+                      {container.state.running ? `${cpu}%` : "—"}
+                    </span>
+                    {container.state.running && (
+                      <div style={resourceBarContainer}>
+                        <div
+                          style={{
+                            ...resourceBarFill,
+                            width: `${Math.min(100, cpu)}%`,
+                            backgroundColor: "var(--meter-cpu)",
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </td>
+                <td style={cellStyle}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span
+                      style={{
+                        fontSize: "var(--text-xs)",
+                        color: "var(--text-secondary)",
+                        minWidth: "32px",
+                      }}
+                    >
+                      {container.state.running ? `${formatBytes(memoryBytes)}` : "—"}
+                    </span>
+                    {container.state.running && (
+                      <div style={resourceBarContainer}>
+                        <div
+                          style={{
+                            ...resourceBarFill,
+                            width: `${Math.min(100, memory)}%`,
+                            backgroundColor: "var(--meter-memory)",
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </td>
+                <td style={{ ...cellStyle, fontSize: "var(--text-xs)" }}>
+                  {portsFromList(container.ports)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

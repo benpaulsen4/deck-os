@@ -1069,6 +1069,28 @@
   z-index: 1;
 }
 
+.container-table-scroll {
+  width: 100%;
+  overflow-x: visible;
+  overflow-y: hidden;
+}
+
+.container-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+@media (max-width: 1023px) {
+  .container-table-scroll {
+    overflow-x: auto;
+  }
+
+  .container-table {
+    width: max-content;
+    min-width: 100%;
+  }
+}
+
 .app-detail-modifier-note {
   margin-top: var(--space-2);
   font-size: var(--text-xs);
@@ -1085,6 +1107,41 @@
   margin-top: var(--space-3);
   display: flex;
   justify-content: center;
+}
+
+@media (max-width: 767px) {
+  .app-detail-layout.page-container--viewport {
+    height: auto;
+    min-height: calc(100vh - 48px);
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .app-detail-layout .page-body,
+  .app-detail-layout .page-grid-2col,
+  .app-detail-layout .page-col,
+  .app-detail-layout .page-col-scroll,
+  .app-detail-layout .app-detail-containers {
+    min-height: auto;
+  }
+
+  .app-detail-layout .page-grid-2col {
+    height: auto;
+  }
+
+  .app-detail-layout .page-col-scroll {
+    flex: none;
+    overflow: visible;
+  }
+
+  .app-detail-layout .app-detail-containers {
+    flex: none;
+  }
+
+  .app-detail-layout .app-detail-containers-panel {
+    max-height: none;
+    overflow: visible;
+  }
 }
 
 /* ---- Modal / Overlay ---- */
