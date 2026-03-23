@@ -115,6 +115,11 @@ export function TopBar({
       ? "Restart the host system now?"
       : "Shut down the host system now?";
   const confirmText = pendingPowerAction === "restart" ? "RESTART" : "SHUTDOWN";
+  const requestPowerAction = (action: "shutdown" | "restart") => {
+    setPowerMenuOpen(false);
+    setMobileMenuOpen(false);
+    setPendingPowerAction(action);
+  };
 
   return (
     <>
@@ -219,9 +224,9 @@ export function TopBar({
                   <button
                     className="topbar-power-item"
                     role="menuitem"
+                    type="button"
                     onClick={() => {
-                      setPowerMenuOpen(false);
-                      setPendingPowerAction("restart");
+                      requestPowerAction("restart");
                     }}
                   >
                     RESTART
@@ -229,9 +234,9 @@ export function TopBar({
                   <button
                     className="topbar-power-item topbar-power-item--danger"
                     role="menuitem"
+                    type="button"
                     onClick={() => {
-                      setPowerMenuOpen(false);
-                      setPendingPowerAction("shutdown");
+                      requestPowerAction("shutdown");
                     }}
                   >
                     SHUTDOWN
@@ -325,18 +330,18 @@ export function TopBar({
           )}
           <button
             className="topbar-menu-link topbar-menu-button"
+            type="button"
             onClick={() => {
-              setMobileMenuOpen(false);
-              setPendingPowerAction("restart");
+              requestPowerAction("restart");
             }}
           >
             Restart System
           </button>
           <button
             className="topbar-menu-link topbar-menu-button topbar-menu-button--danger"
+            type="button"
             onClick={() => {
-              setMobileMenuOpen(false);
-              setPendingPowerAction("shutdown");
+              requestPowerAction("shutdown");
             }}
           >
             Shutdown System
