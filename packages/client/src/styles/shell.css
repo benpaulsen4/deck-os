@@ -402,7 +402,7 @@
 
 @media (max-width: 767px) {
   .metrics-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
@@ -532,6 +532,33 @@
   font-size: var(--text-sm);
   color: var(--text-primary);
   font-weight: 500;
+}
+
+.dashboard-system-info {
+  display: block;
+}
+
+@media (max-width: 767px) {
+  .dashboard-system-info {
+    display: none;
+  }
+
+  .metric-card {
+    gap: var(--space-1);
+    padding: var(--space-2);
+  }
+
+  .metric-card-value {
+    font-size: var(--text-xl);
+  }
+
+  .metric-card-sparkline {
+    display: none;
+  }
+
+  .metrics-controls {
+    display: none;
+  }
 }
 
 .settings-kv {

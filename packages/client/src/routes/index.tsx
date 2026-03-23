@@ -181,7 +181,9 @@ function DashboardPage() {
       <div className="page-body">
         <div className="page-grid-2col">
           <div className="page-col">
-            <SystemInfoBar />
+            <div className="dashboard-system-info">
+              <SystemInfoBar />
+            </div>
             <div className="page-col-scroll">
               <div className="metrics-grid">
                 {metrics.metrics ? (

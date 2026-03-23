@@ -2,7 +2,8 @@ import { useState, useCallback } from "react";
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   useDraggable,
@@ -57,7 +58,7 @@ function DraggableAppTile({ app, isDragging }: DraggableAppTileProps) {
         opacity: isDragging ? 0.5 : 1,
         cursor: "grab",
         userSelect: "none",
-        touchAction: "none",
+        touchAction: "pan-y",
         transform: transform
           ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
           : undefined,
@@ -70,9 +71,15 @@ export function AppLauncherGrid({ apps, onReorder }: AppLauncherGridProps) {
   const [draggedApp, setDraggedApp] = useState<App | null>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(MouseSensor, {
       activationConstraint: {
-        distance: 5,
+        distance: 8,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 180,
+        tolerance: 10,
       },
     })
   );
