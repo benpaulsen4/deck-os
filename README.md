@@ -142,6 +142,33 @@ This builds both the client and server, outputting to:
 
 Production releases are packaged by CI into a tarball that includes the build outputs plus production dependencies, so end users don’t need to run `pnpm build` on the server.
 
+### Front-End Testing
+
+Run client unit/integration suites:
+
+```bash
+pnpm --filter @deckos/client test
+```
+
+Run client coverage:
+
+```bash
+pnpm --filter @deckos/client test:coverage
+```
+
+Run E2E smoke specs:
+
+```bash
+pnpm --filter @deckos/client test:e2e
+```
+
+Front-end contributors should add tests for:
+
+- route behavior for affected user flows
+- hook/store state transitions and side effects
+- shared component interaction and error states
+- responsive or accessibility-sensitive UI behavior
+
 ## Usage
 
 ### Creating an App

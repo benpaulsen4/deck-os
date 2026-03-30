@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  server-tests:
+  quality-and-tests:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -34,6 +34,12 @@ jobs:
 
       - name: Run all server tests
         run: pnpm --filter @deckos/server test
+
+      - name: Run all client tests
+        run: pnpm --filter @deckos/client test
+
+      - name: Build
+        run: pnpm build
 
   server-coverage:
     runs-on: ubuntu-24.04
@@ -61,3 +67,30 @@ jobs:
         with:
           name: server-coverage
           path: packages/server/coverage
+
+  client-coverage:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate client coverage
+        run: pnpm --filter @deckos/client test:coverage
+
+      - name: Upload client coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-coverage
+          path: packages/client/coverage

@@ -1,13 +1,13 @@
-- [ ] Client test harness exists in `packages/client` with Vitest + jsdom + Testing Library setup.
-- [ ] Shared test utilities exist for router rendering, API mocking, and event-stream mocking.
-- [ ] Hook suites exist: `useAuthGate`, `useDockerEvents`, `useMetricsStream`, `useAppStatus`, `useApiHealth`, `useTRPCErrors`.
-- [ ] Store suites exist: `appStatus`, `connection`, `metrics`, and `toast`.
-- [ ] Shared component suites exist: `PinEntry`, `AuthGateScreen`, `TopBar`, `ConfirmDialog`, `ErrorBoundary`, `RouteErrorComponent`, `Toast`, `ToastContainer`.
-- [ ] Route suites exist for `__root`, `index`, `apps/index`, `apps/new`, `apps/$appId`, `apps/templates/index`, `apps/templates/$templateId`, `files`, and `settings`.
-- [ ] Files route tests verify read-only large-file behavior, selection/open interactions, upload, and confirmation-gated delete.
-- [ ] Settings route tests verify passcode validation, session lock-event emission, and update flow states.
-- [ ] E2E smoke tests verify auth unlock, template deploy with app lifecycle action, files flow, and settings passcode flow.
-- [ ] CI workflow runs client tests and client build in pull requests.
-- [ ] Release workflow includes client tests as a required quality gate.
-- [ ] Client coverage is generated and published as CI artifact.
-- [ ] Contributor documentation defines required scenario coverage for new front-end features.
+- [x] Client test harness exists in `packages/client` with Vitest + jsdom + Testing Library setup.
+- [x] Shared test utilities exist for router rendering, API mocking, and event-stream mocking.
+- [x] Hook suites exist: `useAuthGate`, `useDockerEvents`, `useMetricsStream`, `useAppStatus`, `useApiHealth`, `useTRPCErrors`.
+- [x] Store suites exist: `appStatus`, `connection`, `metrics`, and `toast`.
+- [x] Shared component suites exist: `PinEntry`, `AuthGateScreen`, `TopBar`, `ConfirmDialog`, `ErrorBoundary`, `RouteErrorComponent`, `Toast`, `ToastContainer`.
+- [x] Route suites exist for `__root`, `index`, `apps/index`, `apps/new`, `apps/$appId`, `apps/templates/index`, `apps/templates/$templateId`, `files`, and `settings`.
+- [x] Files route tests verify read-only large-file behavior, selection/open interactions, upload, and confirmation-gated delete.
+- [x] Settings route tests verify passcode validation, session lock-event emission, and update flow states.
+- [x] E2E smoke tests verify auth unlock, template deploy with app lifecycle action, files flow, and settings passcode flow.
+- [x] CI workflow runs client tests and client build in pull requests.
+- [x] Release workflow includes client tests as a required quality gate.
+- [x] Client coverage is generated and published as CI artifact.
+- [x] Contributor documentation defines required scenario coverage for new front-end features.

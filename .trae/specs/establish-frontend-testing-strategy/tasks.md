@@ -14,24 +14,24 @@
   - [x] SubTask 3.2: Add layout and dialog tests (`TopBar.test.tsx`, `ErrorBoundary.test.tsx`, `ConfirmDialog.test.tsx`, `RouteErrorComponent.test.tsx`).
   - [x] SubTask 3.3: Add toast behavior tests (`Toast.test.tsx`, `ToastContainer.test.tsx`).
 
-- [ ] Task 4: Implement route suites for dashboard and apps workflows.
-  - [ ] SubTask 4.1: Add `src/routes/__tests__/root.auth-gate.test.tsx` and `dashboard.route.test.tsx`.
-  - [ ] SubTask 4.2: Add `apps.list.route.test.tsx`, `apps.new.route.test.tsx`, and `apps.detail.route.test.tsx`.
-  - [ ] SubTask 4.3: Add `templates.store.route.test.tsx` and `templates.detail.route.test.tsx`.
+- [x] Task 4: Implement route suites for dashboard and apps workflows.
+  - [x] SubTask 4.1: Add `src/routes/__tests__/root.auth-gate.test.tsx` and `dashboard.route.test.tsx`.
+  - [x] SubTask 4.2: Add `apps.list.route.test.tsx`, `apps.new.route.test.tsx`, and `apps.detail.route.test.tsx`.
+  - [x] SubTask 4.3: Add `templates.store.route.test.tsx` and `templates.detail.route.test.tsx`.
 
-- [ ] Task 5: Implement route suites for files and settings workflows.
-  - [ ] SubTask 5.1: Add `src/routes/__tests__/files.route.test.tsx` covering selection, copy/cut/paste, upload, delete confirmation, and read-only editor behavior.
-  - [ ] SubTask 5.2: Add `src/routes/__tests__/settings.route.test.tsx` covering passcode validation, lock-event emission, and update flow states.
+- [x] Task 5: Implement route suites for files and settings workflows.
+  - [x] SubTask 5.1: Add `src/routes/__tests__/files.route.test.tsx` covering selection, copy/cut/paste, upload, delete confirmation, and read-only editor behavior.
+  - [x] SubTask 5.2: Add `src/routes/__tests__/settings.route.test.tsx` covering passcode validation, lock-event emission, and update flow states.
 
-- [ ] Task 6: Add critical E2E smoke journeys.
-  - [ ] SubTask 6.1: Add auth unlock and shell-access smoke test.
-  - [ ] SubTask 6.2: Add template deploy and app start/stop smoke test.
-  - [ ] SubTask 6.3: Add files upload/delete and settings passcode smoke test.
+- [x] Task 6: Add critical E2E smoke journeys.
+  - [x] SubTask 6.1: Add auth unlock and shell-access smoke test.
+  - [x] SubTask 6.2: Add template deploy and app start/stop smoke test.
+  - [x] SubTask 6.3: Add files upload/delete and settings passcode smoke test.
 
-- [ ] Task 7: Enforce CI gates and document contributor workflow.
-  - [ ] SubTask 7.1: Update `.github/workflows/ci.yml` to run client tests, client build, and client coverage artifact upload.
-  - [ ] SubTask 7.2: Update `.github/workflows/release.yml` to include client tests in release gating.
-  - [ ] SubTask 7.3: Document local/CI front-end testing workflow and required scenario coverage rules.
+- [x] Task 7: Enforce CI gates and document contributor workflow.
+  - [x] SubTask 7.1: Update `.github/workflows/ci.yml` to run client tests, client build, and client coverage artifact upload.
+  - [x] SubTask 7.2: Update `.github/workflows/release.yml` to include client tests in release gating.
+  - [x] SubTask 7.3: Document local/CI front-end testing workflow and required scenario coverage rules.
 
 # Task Dependencies
 - Task 2 depends on Task 1.
