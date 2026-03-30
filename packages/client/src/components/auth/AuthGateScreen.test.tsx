@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AuthGateScreen } from "./AuthGateScreen";
@@ -43,7 +43,9 @@ describe("AuthGateScreen", () => {
     const onPinChange = vi.fn();
     renderAuthGateScreen({ pin: "1234", onUnlock, onPinChange });
 
-    fireEvent.change(screen.getAllByRole("textbox")[0], { target: { value: "5" } });
+    const firstPinBox = screen.getAllByRole("textbox")[0];
+    await user.click(firstPinBox);
+    await user.paste("5");
     expect(onPinChange).toHaveBeenCalledWith("5234");
 
     await user.click(screen.getByRole("button", { name: "UNLOCK" }));
