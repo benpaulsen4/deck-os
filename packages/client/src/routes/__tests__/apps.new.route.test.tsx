@@ -84,13 +84,13 @@ describe("apps new route", () => {
   });
 
   it("disables create when required fields missing", () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     expect(screen.getByRole("button", { name: "CREATE & DEPLOY" })).toBeDisabled();
   });
 
   it("rolls back app on pull failure", async () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     fireEvent.change(screen.getByLabelText("APP NAME"), { target: { value: "My App" } });
     fireEvent.click(screen.getByRole("button", { name: "CREATE & DEPLOY" }));
@@ -100,7 +100,7 @@ describe("apps new route", () => {
   });
 
   it("navigates to app detail after successful create pull and deploy", async () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     fireEvent.change(screen.getByLabelText("APP NAME"), { target: { value: "My App" } });
     fireEvent.click(screen.getByRole("button", { name: "CREATE & DEPLOY" }));

@@ -88,7 +88,7 @@ describe("apps list route", () => {
   });
 
   it("dispatches start action mutation", () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     fireEvent.click(screen.getByText("START"));
     expect(startSpy).toHaveBeenCalledWith({ appId: "app-1" });
@@ -97,7 +97,7 @@ describe("apps list route", () => {
   });
 
   it("opens delete confirmation and deletes only after confirm", () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     fireEvent.click(screen.getByText("DELETE_ACTION"));
     expect(deleteSpy).not.toHaveBeenCalled();
@@ -106,7 +106,7 @@ describe("apps list route", () => {
   });
 
   it("navigates users to template and custom creation links", () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     expect(screen.getByText("+ TEMPLATED APP")).toBeInTheDocument();
     expect(screen.getByText("+ CUSTOM APP")).toBeInTheDocument();

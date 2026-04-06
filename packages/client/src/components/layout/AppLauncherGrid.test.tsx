@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AppLauncherGrid } from "./AppLauncherGrid";
@@ -9,7 +10,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock("@dnd-kit/core", () => ({
   DndContext: (props: {
-    children: unknown;
+    children: ReactNode;
     onDragStart: (event: { active: { id: string } }) => void;
     onDragEnd: (event: { active: { id: string }; over: { id: string } | null }) => void;
   }) => (
@@ -28,7 +29,7 @@ vi.mock("@dnd-kit/core", () => ({
       {props.children}
     </div>
   ),
-  DragOverlay: (props: { children: unknown }) => <div>{props.children as never}</div>,
+  DragOverlay: (props: { children: ReactNode }) => <div>{props.children}</div>,
   MouseSensor: function MouseSensor() {},
   TouchSensor: function TouchSensor() {},
   useSensor: () => ({}),

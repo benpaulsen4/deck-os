@@ -48,7 +48,7 @@ describe("root auth gate route", () => {
     authState.authEnabled = true;
     authState.authUnlocked = false;
     authState.authChecking = false;
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     expect(screen.getByText("AUTH_GATE")).toBeInTheDocument();
   });
@@ -57,7 +57,7 @@ describe("root auth gate route", () => {
     authState.authEnabled = true;
     authState.authUnlocked = true;
     authState.authChecking = false;
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     expect(screen.getByText("TOP_BAR")).toBeInTheDocument();
     expect(screen.getByText("OUTLET")).toBeInTheDocument();

@@ -4,7 +4,7 @@ import { Route } from "../apps/templates/$templateId";
 
 const { navigateSpy, deploySpy, deleteSpy, startSpy, addToastSpy, state } = vi.hoisted(() => ({
   navigateSpy: vi.fn(),
-  deploySpy: vi.fn(async () => ({ id: "app1" })),
+  deploySpy: vi.fn(async (_input: unknown) => ({ id: "app1" })),
   deleteSpy: vi.fn(async () => ({})),
   startSpy: vi.fn(async () => ({})),
   addToastSpy: vi.fn(),
@@ -110,7 +110,7 @@ describe("template detail route", () => {
   });
 
   it("renders template detail shell", () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     expect(screen.getByText("Template One")).toBeInTheDocument();
     expect(screen.getByText("COMPOSE")).toBeInTheDocument();
@@ -118,7 +118,7 @@ describe("template detail route", () => {
   });
 
   it("rolls back app creation on deploy-and-start failure", async () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     fireEvent.click(screen.getByRole("button", { name: "DEPLOY & START" }));
     fireEvent.click(await screen.findByText("FAIL_PULL"));
@@ -127,7 +127,7 @@ describe("template detail route", () => {
   });
 
   it("navigates directly in deploy-only mode", async () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     fireEvent.click(screen.getByRole("button", { name: "DEPLOY" }));
     await waitFor(() =>
@@ -140,11 +140,14 @@ describe("template detail route", () => {
   });
 
   it("sends composeOverride only when editing is enabled", async () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     fireEvent.click(screen.getByRole("button", { name: "DEPLOY" }));
     await waitFor(() => expect(deploySpy).toHaveBeenCalledTimes(1));
-    expect(deploySpy.mock.calls[0][0].composeOverride).toBeUndefined();
+    const firstDeployInput = deploySpy.mock.calls[0]?.[0] as
+      | { composeOverride?: string | undefined }
+      | undefined;
+    expect(firstDeployInput?.composeOverride).toBeUndefined();
 
     fireEvent.click(screen.getByRole("button", { name: "EDIT COMPOSE" }));
     fireEvent.change(screen.getByLabelText("compose-editor"), {
@@ -152,6 +155,9 @@ describe("template detail route", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "DEPLOY" }));
     await waitFor(() => expect(deploySpy).toHaveBeenCalledTimes(2));
-    expect(deploySpy.mock.calls[1][0].composeOverride).toContain("alpine");
+    const secondDeployInput = deploySpy.mock.calls[1]?.[0] as
+      | { composeOverride?: string | undefined }
+      | undefined;
+    expect(secondDeployInput?.composeOverride).toContain("alpine");
   });
 });

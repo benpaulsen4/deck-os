@@ -129,13 +129,13 @@ describe("files route", () => {
   });
 
   it("renders files page shell", () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     expect(screen.getByText("Files")).toBeInTheDocument();
   });
 
   it("enforces large-text read-only mode until explicit enable editing", async () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     fireEvent.doubleClick(screen.getByText("note.txt"));
     expect(await screen.findByText("Enable Editing")).toBeInTheDocument();
@@ -145,7 +145,7 @@ describe("files route", () => {
   });
 
   it("preserves row interaction semantics for selection and open", async () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     fireEvent.click(screen.getByText("note.txt"));
     expect(screen.getByText("Selected: 1")).toBeInTheDocument();
@@ -154,7 +154,7 @@ describe("files route", () => {
   });
 
   it("handles upload and confirmation-gated delete flows", async () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     const { container } = render(<Component />);
     const dropTarget = container.querySelector(".files-main") as HTMLElement;
     const file = new File(["abc"], "hello.txt", { type: "text/plain" });
@@ -171,7 +171,7 @@ describe("files route", () => {
   });
 
   it("validates copy cut paste behaviors including same-path protection", async () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     fireEvent.click(screen.getByText("note.txt"));
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));

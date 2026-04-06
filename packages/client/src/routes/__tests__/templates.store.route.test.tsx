@@ -2,6 +2,20 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Route } from "../apps/templates/index";
 
+type TemplateStoreItem = {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  categories: string[];
+};
+
+type TemplateStoreData = {
+  items: TemplateStoreItem[];
+  total: number;
+  categories: string[];
+};
+
 vi.mock("@tanstack/react-router", async () => {
   const actual = await vi.importActual("@tanstack/react-router");
   return {
@@ -19,7 +33,7 @@ const { listQueryOptionsSpy, state } = vi.hoisted(() => ({
     queryKey: ["templates.list", input],
   })),
   state: {
-    data: { items: [], total: 0, categories: [] as string[] },
+    data: { items: [], total: 0, categories: [] } as TemplateStoreData,
   },
 }));
 
@@ -58,7 +72,7 @@ describe("templates storefront route", () => {
   });
 
   it("shows empty state and debounces query text", () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     expect(screen.getByText("NO TEMPLATES FOUND")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("SEARCH"), { target: { value: " jelly " } });
@@ -72,7 +86,7 @@ describe("templates storefront route", () => {
       total: 100,
       categories: ["media"],
     };
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     fireEvent.change(screen.getByLabelText("SEARCH"), { target: { value: "reset me" } });
     vi.advanceTimersByTime(260);
@@ -96,7 +110,7 @@ describe("templates storefront route", () => {
       total: 1,
       categories: [],
     };
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     const { container } = render(<Component />);
     const link = container.querySelector("[data-template-id='tpl-99']");
     expect(link).toBeTruthy();

@@ -95,7 +95,7 @@ describe("dashboard route", () => {
   });
 
   it("invokes reorder mutation from app launcher", async () => {
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     fireEvent.click(screen.getByText("REORDER"));
     await waitFor(() => expect(reorderSpy).toHaveBeenCalledWith({ orderedIds: ["a"] }));
@@ -103,7 +103,7 @@ describe("dashboard route", () => {
 
   it("shows empty-state CTA to /apps/templates when no apps", () => {
     appsData.splice(0, appsData.length);
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     expect(screen.getByText("BROWSE TEMPLATES")).toBeInTheDocument();
     expect(screen.getByText("NO APPS INSTALLED")).toBeInTheDocument();
@@ -111,7 +111,7 @@ describe("dashboard route", () => {
 
   it("rolls back optimistic reorder on mutation error", async () => {
     reorderSpy.mockRejectedValueOnce(new Error("network failed"));
-    const Component = Route.options.component;
+    const Component = Route.options.component!;
     render(<Component />);
     fireEvent.click(screen.getByText("REORDER"));
     await waitFor(() => expect(addToastSpy).toHaveBeenCalled());
