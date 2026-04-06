@@ -55,6 +55,9 @@ jobs:
       - name: Test server
         run: pnpm --filter @deckos/server test
 
+      - name: Test client
+        run: pnpm --filter @deckos/client test
+
       - name: Build
         run: pnpm build
 
