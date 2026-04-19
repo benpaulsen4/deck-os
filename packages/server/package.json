@@ -14,15 +14,15 @@
     "import-templates": "tsx scripts/import-casaos-templates.ts"
   },
   "dependencies": {
-    "@hono/node-server": "^1.14.1",
+    "@hono/node-server": "^1.19.13",
     "@hono/trpc-server": "^0.4.2",
     "@trpc/server": "^11.9.0",
     "busboy": "^1.6.0",
     "dockerode": "^4.0.9",
     "fs-extra": "^11.3.3",
-    "hono": "^4.11.9",
-    "systeminformation": "^5.30.7",
-    "yaml": "^2.8.2",
+    "hono": "^4.12.14",
+    "systeminformation": "^5.30.8",
+    "yaml": "^2.8.3",
     "zod": "^3.24.2"
   },
   "devDependencies": {
