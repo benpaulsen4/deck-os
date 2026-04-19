@@ -61,6 +61,80 @@ describe("updates service", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  test("prefers anonymous release checks even when a token is configured", async () => {
+    process.env.DECKOS_GITHUB_OWNER = "deckos";
+    process.env.DECKOS_GITHUB_REPO = "deckos";
+    process.env.DECKOS_GITHUB_TOKEN = "stale-token";
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        tag_name: "v0.3.0",
+        name: "0.3.0",
+        prerelease: false,
+        draft: false,
+        html_url: "https://example/release",
+        published_at: "2026-01-01T00:00:00.000Z",
+        assets: [],
+      }),
+    } as Response);
+
+    const updates = await import("./updates.js");
+    const status = await updates.getUpdateStatus();
+
+    expect(status.latestVersion).toBe("0.3.0");
+    expect(status.error).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]).not.toMatchObject({
+      headers: expect.objectContaining({
+        Authorization: expect.any(String),
+      }),
+    });
+  });
+
+  test("falls back to token when anonymous release checks are rejected", async () => {
+    process.env.DECKOS_GITHUB_OWNER = "deckos";
+    process.env.DECKOS_GITHUB_REPO = "deckos";
+    process.env.DECKOS_GITHUB_TOKEN = "token";
+    const fetchMock = vi.mocked(fetch);
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        text: async () => "",
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          tag_name: "v0.3.0",
+          name: "0.3.0",
+          prerelease: false,
+          draft: false,
+          html_url: "https://example/release",
+          published_at: "2026-01-01T00:00:00.000Z",
+          assets: [],
+        }),
+      } as Response);
+
+    const updates = await import("./updates.js");
+    const status = await updates.getUpdateStatus();
+
+    expect(status.latestVersion).toBe("0.3.0");
+    expect(status.error).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[1]).not.toMatchObject({
+      headers: expect.objectContaining({
+        Authorization: expect.any(String),
+      }),
+    });
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      headers: expect.objectContaining({
+        Authorization: "Bearer token",
+      }),
+    });
+  });
+
   test("returns safe error status on GitHub API failure", async () => {
     process.env.DECKOS_GITHUB_OWNER = "deckos";
     process.env.DECKOS_GITHUB_REPO = "deckos";
@@ -79,6 +153,25 @@ describe("updates service", () => {
     expect(status.updateAvailable).toBe(false);
     expect(status.latestVersion).toBeNull();
     expect(status.error).toContain("GitHub API error 500");
+  });
+
+  test("returns a helpful auth hint when private release checks fail without a token", async () => {
+    process.env.DECKOS_GITHUB_OWNER = "deckos";
+    process.env.DECKOS_GITHUB_REPO = "deckos";
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: "Not Found",
+      text: async () => "",
+    } as Response);
+
+    const updates = await import("./updates.js");
+    const status = await updates.checkForUpdatesNow();
+
+    expect(status.updateAvailable).toBe(false);
+    expect(status.error).toContain("GitHub API error 404");
+    expect(status.error).toContain("token may still be required");
   });
 
   test("coalesces concurrent checks into a single fetch call", async () => {

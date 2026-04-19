@@ -1,4 +1,5 @@
 import { getCurrentVersion } from "../lib/version.js";
+import { createGithubApiError, requestGithubRelease } from "./githubReleaseApi.js";
 
 type UpdateStatus = {
   enabled: boolean;
@@ -55,31 +56,21 @@ function compareSemver(a: string, b: string): number {
 function getGithubConfig() {
   const owner = process.env.DECKOS_GITHUB_OWNER?.trim() || "";
   const repo = process.env.DECKOS_GITHUB_REPO?.trim() || "";
-  const token = process.env.DECKOS_GITHUB_TOKEN?.trim() || "";
-  const apiBase = (
-    process.env.DECKOS_GITHUB_API_BASE?.trim() || "https://api.github.com"
-  ).replace(/\/+$/, "");
-  return { owner, repo, token, apiBase };
+  return { owner, repo };
 }
 
 async function fetchLatestRelease(): Promise<GithubRelease> {
-  const { owner, repo, token, apiBase } = getGithubConfig();
-  const url = `${apiBase}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases/latest`;
-
-  const res = await fetch(url, {
+  const { response, tokenConfigured } = await requestGithubRelease("releases/latest", {
     headers: {
       Accept: "application/vnd.github+json",
-      "User-Agent": "deckos",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`GitHub API error ${res.status}: ${text || res.statusText}`);
+  if (!response.ok) {
+    throw await createGithubApiError(response, tokenConfigured);
   }
 
-  const json = (await res.json()) as GithubRelease;
+  const json = (await response.json()) as GithubRelease;
   if (!json || typeof json.tag_name !== "string") {
     throw new Error("Invalid GitHub API response");
   }

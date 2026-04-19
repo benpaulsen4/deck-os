@@ -7,6 +7,7 @@ import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import { execFile as execFileCb } from "node:child_process";
 import { getUpdateStatus } from "./updates.js";
+import { createGithubApiError, requestGithubRelease } from "./githubReleaseApi.js";
 
 type GithubReleaseAsset = {
   id: number;
@@ -29,16 +30,6 @@ const execFile = promisify(execFileCb);
 
 let updateInProgress = false;
 
-function getGithubConfig() {
-  const owner = process.env.DECKOS_GITHUB_OWNER?.trim() || "";
-  const repo = process.env.DECKOS_GITHUB_REPO?.trim() || "";
-  const token = process.env.DECKOS_GITHUB_TOKEN?.trim() || "";
-  const apiBase = (
-    process.env.DECKOS_GITHUB_API_BASE?.trim() || "https://api.github.com"
-  ).replace(/\/+$/, "");
-  return { owner, repo, token, apiBase };
-}
-
 function getInstallRoot(): string {
   return (process.env.DECKOS_INSTALL_ROOT?.trim() || "/opt/deckos").replace(/\/+$/, "");
 }
@@ -52,67 +43,49 @@ function normalizeVersion(v: string): string {
 }
 
 async function fetchReleaseByTag(tag: string): Promise<GithubRelease> {
-  const { owner, repo, token, apiBase } = getGithubConfig();
-  if (!owner || !repo) throw new Error("GitHub updates are not configured");
-  if (!token) throw new Error("GitHub token is not configured");
-
-  const url = `${apiBase}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases/tags/${encodeURIComponent(tag)}`;
-  const res = await fetch(url, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "User-Agent": "deckos",
-      Authorization: `Bearer ${token}`,
-    },
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`GitHub API error ${res.status}: ${text || res.statusText}`);
+  const { response, tokenConfigured } = await requestGithubRelease(
+    `releases/tags/${encodeURIComponent(tag)}`,
+    {
+      headers: {
+        Accept: "application/vnd.github+json",
+      },
+    }
+  );
+  if (!response.ok) {
+    throw await createGithubApiError(response, tokenConfigured);
   }
-  return (await res.json()) as GithubRelease;
+  return (await response.json()) as GithubRelease;
 }
 
 async function fetchLatestRelease(): Promise<GithubRelease> {
-  const { owner, repo, token, apiBase } = getGithubConfig();
-  if (!owner || !repo) throw new Error("GitHub updates are not configured");
-  if (!token) throw new Error("GitHub token is not configured");
-
-  const url = `${apiBase}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases/latest`;
-  const res = await fetch(url, {
+  const { response, tokenConfigured } = await requestGithubRelease("releases/latest", {
     headers: {
       Accept: "application/vnd.github+json",
-      "User-Agent": "deckos",
-      Authorization: `Bearer ${token}`,
     },
   });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`GitHub API error ${res.status}: ${text || res.statusText}`);
+  if (!response.ok) {
+    throw await createGithubApiError(response, tokenConfigured);
   }
-  return (await res.json()) as GithubRelease;
+  return (await response.json()) as GithubRelease;
 }
 
 async function downloadReleaseAsset(assetId: number, destPath: string): Promise<void> {
-  const { owner, repo, token, apiBase } = getGithubConfig();
-  const url = `${apiBase}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases/assets/${assetId}`;
+  const { response, tokenConfigured } = await requestGithubRelease(
+    `releases/assets/${assetId}`,
+    {
+      headers: {
+        Accept: "application/octet-stream",
+      },
+      redirect: "follow",
+    }
+  );
 
-  const res = await fetch(url, {
-    headers: {
-      Accept: "application/octet-stream",
-      "User-Agent": "deckos",
-      Authorization: `Bearer ${token}`,
-    },
-    redirect: "follow",
-  });
-
-  if (!res.ok || !res.body) {
-    const text = await res.text().catch(() => "");
-    throw new Error(
-      `Failed to download asset ${assetId}: ${res.status} ${text || res.statusText}`
-    );
+  if (!response.ok || !response.body) {
+    throw await createGithubApiError(response, tokenConfigured);
   }
 
   await pipeline(
-    res.body as unknown as NodeJS.ReadableStream,
+    response.body as unknown as NodeJS.ReadableStream,
     createWriteStream(destPath)
   );
 }
