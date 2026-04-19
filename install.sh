@@ -22,6 +22,85 @@ debug() {
   fi
 }
 
+is_auth_retry_status() {
+  case "$1" in
+    401|403|404) return 0;;
+    *) return 1;;
+  esac
+}
+
+github_api_error_hint() {
+  local status="$1"
+  if ! is_auth_retry_status "$status"; then
+    return 0
+  fi
+
+  if [[ -n "$TOKEN" ]]; then
+    echo " Check repository visibility and GitHub token configuration."
+  else
+    echo " A GitHub token may still be required while releases remain private."
+  fi
+}
+
+github_fetch_to_file() {
+  local accept="$1"
+  local url="$2"
+  local dest="$3"
+  local tmp status
+  tmp="$(mktemp "${DOWNLOAD_TMP_DIR}/github-fetch.XXXXXX")"
+
+  if ! status="$(
+    curl -sS -L \
+      -H "User-Agent: deckos-installer" \
+      -H "Accept: ${accept}" \
+      -o "$tmp" \
+      -w "%{http_code}" \
+      "$url"
+  )"; then
+    rm -f "$tmp"
+    echo "Failed to contact GitHub: ${url}" >&2
+    exit 1
+  fi
+
+  if [[ ! "$status" =~ ^2 ]] && [[ -n "$TOKEN" ]] && is_auth_retry_status "$status"; then
+    debug "Retrying GitHub request with token after HTTP ${status}: ${url}"
+    if ! status="$(
+      curl -sS -L \
+        -H "User-Agent: deckos-installer" \
+        -H "Accept: ${accept}" \
+        -H "Authorization: Bearer ${TOKEN}" \
+        -o "$tmp" \
+        -w "%{http_code}" \
+        "$url"
+    )"; then
+      rm -f "$tmp"
+      echo "Failed to contact GitHub with token: ${url}" >&2
+      exit 1
+    fi
+  fi
+
+  if [[ ! "$status" =~ ^2 ]]; then
+    local detail
+    detail="$(<"$tmp")"
+    detail="${detail//$'\r'/}"
+    detail="${detail:0:600}"
+    rm -f "$tmp"
+    echo "GitHub API error ${status}: ${detail:-Request failed}$(github_api_error_hint "$status")" >&2
+    exit 1
+  fi
+
+  mv "$tmp" "$dest"
+}
+
+github_fetch_json() {
+  local url="$1"
+  local tmp
+  tmp="$(mktemp "${DOWNLOAD_TMP_DIR}/github-json.XXXXXX")"
+  github_fetch_to_file "application/vnd.github+json" "$url" "$tmp"
+  cat "$tmp"
+  rm -f "$tmp"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --owner) OWNER="${2:-}"; shift 2;;
@@ -45,8 +124,8 @@ REPO="$(echo -n "$REPO" | xargs)"
 TOKEN="$(echo -n "$TOKEN" | tr -d ' \t\n\r')"
 REQUESTED_VERSION="$(echo -n "$REQUESTED_VERSION" | xargs)"
 
-if [[ -z "$OWNER" || -z "$REPO" || -z "$TOKEN" ]]; then
-  echo "Missing required: --owner, --repo, --token (or DECKOS_GITHUB_OWNER/REPO/TOKEN env vars)" >&2
+if [[ -z "$OWNER" || -z "$REPO" ]]; then
+  echo "Missing required: --owner, --repo (or DECKOS_GITHUB_OWNER/REPO env vars)" >&2
   exit 1
 fi
 
@@ -186,15 +265,15 @@ DECKOS_DATA_DIR=${DATA_DIR}
 DECKOS_INSTALL_ROOT=${INSTALL_ROOT}
 DECKOS_GITHUB_OWNER=${OWNER}
 DECKOS_GITHUB_REPO=${REPO}
-DECKOS_GITHUB_TOKEN=${TOKEN}
+DECKOS_GITHUB_API_BASE=${GITHUB_API_BASE}
 EOF
+if [[ -n "$TOKEN" ]]; then
+  echo "DECKOS_GITHUB_TOKEN=${TOKEN}" >> "$ENV_FILE"
+fi
 chmod 600 "$ENV_FILE"
 
 step "Fetching release metadata from GitHub"
 API="${GITHUB_API_BASE%/}/repos/${OWNER}/${REPO}"
-AUTH_BASE=(-H "Authorization: Bearer ${TOKEN}" -H "User-Agent: deckos-installer")
-AUTH_JSON=("${AUTH_BASE[@]}" -H "Accept: application/vnd.github+json")
-AUTH_BIN=("${AUTH_BASE[@]}" -H "Accept: application/octet-stream")
 
 if [[ "$REQUESTED_VERSION" == "latest" ]]; then
   RELEASE_URL="${API}/releases/latest"
@@ -205,7 +284,7 @@ fi
 
 step "GET ${RELEASE_URL}"
 debug "GET (shell-escaped) $(printf '%q' "$RELEASE_URL")"
-RELEASE_JSON="$(curl -fsSL "${AUTH_JSON[@]}" "${RELEASE_URL}")"
+RELEASE_JSON="$(github_fetch_json "${RELEASE_URL}")"
 
 TAG_NAME="$(echo "$RELEASE_JSON" | jq -r '.tag_name')"
 VER="${TAG_NAME#v}"
@@ -223,7 +302,7 @@ ASSET_URL="${API}/releases/assets/${ASSET_ID}"
 step "Downloading release asset"
 step "GET ${ASSET_URL}"
 debug "GET (shell-escaped) $(printf '%q' "$ASSET_URL")"
-curl -fL "${AUTH_BIN[@]}" "${ASSET_URL}" -o "$TAR_PATH"
+github_fetch_to_file "application/octet-stream" "${ASSET_URL}" "$TAR_PATH"
 
 TARGET_DIR="${INSTALL_ROOT}/releases/${VER}"
 rm -rf "${TARGET_DIR}.tmp"

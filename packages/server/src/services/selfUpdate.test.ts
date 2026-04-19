@@ -67,7 +67,6 @@ describe("selfUpdate service", () => {
     Object.defineProperty(process, "platform", { value: "linux" });
     process.env.DECKOS_GITHUB_OWNER = "deckos";
     process.env.DECKOS_GITHUB_REPO = "deckos";
-    process.env.DECKOS_GITHUB_TOKEN = "token";
 
     updatesMock.getUpdateStatus.mockResolvedValue({
       enabled: true,
@@ -103,7 +102,6 @@ describe("selfUpdate service", () => {
     Object.defineProperty(process, "platform", { value: "linux" });
     process.env.DECKOS_GITHUB_OWNER = "deckos";
     process.env.DECKOS_GITHUB_REPO = "deckos";
-    process.env.DECKOS_GITHUB_TOKEN = "token";
 
     updatesMock.getUpdateStatus.mockResolvedValue({
       enabled: true,
@@ -153,7 +151,6 @@ describe("selfUpdate service", () => {
     Object.defineProperty(process, "platform", { value: "linux" });
     process.env.DECKOS_GITHUB_OWNER = "deckos";
     process.env.DECKOS_GITHUB_REPO = "deckos";
-    process.env.DECKOS_GITHUB_TOKEN = "token";
     process.env.DECKOS_INSTALL_ROOT = "/opt/deckos";
     process.env.DECKOS_UPDATE_TMP_DIR = "/tmp";
 
@@ -231,11 +228,101 @@ describe("selfUpdate service", () => {
     vi.useRealTimers();
   });
 
-  test("throws when no update is available for implicit latest install", async () => {
+  test("falls back to token when private release metadata and assets require auth", async () => {
+    vi.useFakeTimers();
     Object.defineProperty(process, "platform", { value: "linux" });
     process.env.DECKOS_GITHUB_OWNER = "deckos";
     process.env.DECKOS_GITHUB_REPO = "deckos";
     process.env.DECKOS_GITHUB_TOKEN = "token";
+    process.env.DECKOS_INSTALL_ROOT = "/opt/deckos";
+    process.env.DECKOS_UPDATE_TMP_DIR = "/tmp";
+
+    updatesMock.getUpdateStatus.mockResolvedValue({
+      enabled: true,
+      updateAvailable: true,
+      error: null,
+    });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        text: async () => "",
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          tag_name: "v0.4.1",
+          draft: false,
+          prerelease: false,
+          assets: [{ id: 84, name: "deckos-linux-x64.tar.gz" }],
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        text: async () => "",
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        body: {} as ReadableStream<Uint8Array>,
+      } as Response);
+
+    fsPromisesMock.readlink.mockResolvedValue("/opt/deckos/releases/0.4.0");
+    fsPromisesMock.stat.mockImplementation(async (p: string) => {
+      const normalized = p.replace(/\\/g, "/");
+      if (normalized.endsWith("/releases/0.4.1/packages/server/dist/index.js")) {
+        throw new Error("ENOENT");
+      }
+      if (normalized.endsWith("/releases/0.4.1.tmp/packages/server/dist/index.js")) {
+        return {} as any;
+      }
+      throw new Error("ENOENT");
+    });
+    fsPromisesMock.readdir.mockResolvedValue([
+      { name: "0.4.0", isDirectory: () => true },
+      { name: "0.4.1", isDirectory: () => true },
+    ] as any);
+    const exitSpy = vi
+      .spyOn(process, "exit")
+      .mockImplementation(((() => undefined) as unknown) as never);
+
+    const { applyUpdate } = await importSelfUpdate();
+    const result = await applyUpdate();
+
+    expect(result).toEqual({ targetVersion: "0.4.1", restarting: true });
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]).not.toMatchObject({
+      headers: expect.objectContaining({
+        Authorization: expect.any(String),
+      }),
+    });
+    expect(vi.mocked(fetch).mock.calls[1]?.[1]).toMatchObject({
+      headers: expect.objectContaining({
+        Authorization: "Bearer token",
+      }),
+    });
+    expect(vi.mocked(fetch).mock.calls[2]?.[1]).not.toMatchObject({
+      headers: expect.objectContaining({
+        Authorization: expect.any(String),
+      }),
+    });
+    expect(vi.mocked(fetch).mock.calls[3]?.[1]).toMatchObject({
+      headers: expect.objectContaining({
+        Authorization: "Bearer token",
+      }),
+    });
+
+    vi.runAllTimers();
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    vi.useRealTimers();
+  });
+
+  test("throws when no update is available for implicit latest install", async () => {
+    Object.defineProperty(process, "platform", { value: "linux" });
+    process.env.DECKOS_GITHUB_OWNER = "deckos";
+    process.env.DECKOS_GITHUB_REPO = "deckos";
 
     updatesMock.getUpdateStatus.mockResolvedValue({
       enabled: true,
@@ -262,7 +349,6 @@ describe("selfUpdate service", () => {
     Object.defineProperty(process, "platform", { value: "linux" });
     process.env.DECKOS_GITHUB_OWNER = "deckos";
     process.env.DECKOS_GITHUB_REPO = "deckos";
-    process.env.DECKOS_GITHUB_TOKEN = "token";
 
     updatesMock.getUpdateStatus.mockResolvedValue({
       enabled: true,
@@ -284,5 +370,28 @@ describe("selfUpdate service", () => {
     const { applyUpdate } = await importSelfUpdate();
     await expect(applyUpdate("0.5.0")).rejects.toThrow("No .tar.gz release asset found");
     expect(vi.mocked(fetch).mock.calls[0]?.[0]).toContain("/releases/tags/v0.5.0");
+  });
+
+  test("returns a helpful error when private release metadata is inaccessible without a token", async () => {
+    Object.defineProperty(process, "platform", { value: "linux" });
+    process.env.DECKOS_GITHUB_OWNER = "deckos";
+    process.env.DECKOS_GITHUB_REPO = "deckos";
+
+    updatesMock.getUpdateStatus.mockResolvedValue({
+      enabled: true,
+      updateAvailable: true,
+      error: null,
+    });
+    vi.mocked(fetch).mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: "Not Found",
+      text: async () => "",
+    } as Response);
+    fsPromisesMock.readlink.mockResolvedValue("/opt/deckos/releases/0.2.3");
+    fsPromisesMock.stat.mockRejectedValue(new Error("ENOENT"));
+
+    const { applyUpdate } = await importSelfUpdate();
+    await expect(applyUpdate()).rejects.toThrow("token may still be required");
   });
 });

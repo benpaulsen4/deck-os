@@ -6,22 +6,23 @@ This checklist tracks the work needed before making the DeckOS repository public
 
 Goal: ship one private release that preserves updates for already-deployed private instances, then remove private-only GitHub assumptions in a later release.
 
-- [ ] Audit the current update flow end to end (`release checks`, `download`, `upgrade`, and failure handling).
-- [ ] Confirm the exact behavior when `DECKOS_GITHUB_TOKEN` is missing for release checks and update downloads.
-- [ ] Update release-check logic to support public GitHub Releases without requiring a token.
-- [ ] Keep token support working for existing private deployments during the transition release.
+- [x] Audit the current update flow end to end (`release checks`, `download`, `upgrade`, and failure handling).
+- [x] Confirm the exact behavior when `DECKOS_GITHUB_TOKEN` is missing for release checks and update downloads.
+- [x] Update release-check logic to support public GitHub Releases without requiring a token.
+- [x] Keep token support working for existing private deployments during the transition release.
 - [ ] Verify that deployed private instances can still check for and install the transitional private release.
-- [ ] Add explicit fallback behavior: anonymous GitHub access first when possible, token only when needed.
+- [x] Add explicit fallback behavior: anonymous GitHub access first when possible, token only when needed.
 - [ ] Decide whether private-release download/install should continue requiring a token until the public cutover release.
 - [ ] Ship a private transition release that introduces token-optional release checking.
 - [ ] After that release is deployed, remove private-repo-only mechanisms in a separate release.
 - [ ] Remove token-dependent wording from install/update docs only after the public-release behavior is live.
-- [ ] Add regression coverage for update checks with and without `DECKOS_GITHUB_TOKEN`.
+- [x] Add regression coverage for update checks with and without `DECKOS_GITHUB_TOKEN`.
 
 Verification:
+
 - [ ] Existing deployed private instances still detect updates correctly.
-- [ ] Public-release checks work with no token configured.
-- [ ] Failure messages are clear when authentication is actually required.
+- [x] Public-release checks work with no token configured.
+- [x] Failure messages are clear when authentication is actually required.
 
 ## 2. Vulnerabilities
 
@@ -35,6 +36,7 @@ Goal: get automated dependency maintenance in place and clean up security issues
 - [ ] Review shipped templates for hardcoded secrets/default credentials and decide whether to fix them before public launch.
 
 Verification:
+
 - [ ] Dependabot is enabled and opening update PRs.
 - [ ] Critical/high production advisories are resolved or consciously accepted.
 
@@ -49,6 +51,7 @@ Goal: make sure breakage is caught even if code lands without a pull request.
 - [ ] Confirm release workflow expectations still match CI behavior.
 
 Verification:
+
 - [ ] A direct push to the default branch triggers CI.
 - [ ] CI status remains green for lint, typecheck, tests, and build.
 
@@ -67,6 +70,7 @@ Goal: replace internal/design-oriented docs with public-facing user documentatio
 - [ ] Review all docs for private-repo language, internal assumptions, and stale implementation details.
 
 Verification:
+
 - [ ] `README.md` stands on its own for first-time users.
 - [ ] `docs/` contains only user-facing content you are comfortable publishing.
 
@@ -82,6 +86,7 @@ Goal: finish the public-facing repository polish after the functional work above
 - [ ] Add repository metadata such as homepage, bugs URL, and license fields where appropriate.
 
 Verification:
+
 - [ ] The repo has the minimum public-facing legal and contribution files you want before launch.
 
 ## Pre-Public Go/No-Go
