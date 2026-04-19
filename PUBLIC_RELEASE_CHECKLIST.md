@@ -59,20 +59,20 @@ Verification:
 
 Goal: replace internal/design-oriented docs with public-facing user documentation.
 
-- [ ] Remove the current design/planning docs from `docs/`.
-- [ ] Define the structure for a small user wiki in `docs/`.
-- [ ] Rewrite the root `README.md` for public users.
-- [ ] Document installation for the public-release path.
-- [ ] Document updating, rollback, and uninstall in public-facing terms.
-- [ ] Document security expectations clearly, especially Docker socket access and trusted-network assumptions.
-- [ ] Add user-facing guides for common workflows such as creating an app, managing containers, and using templates.
-- [ ] Add troubleshooting pages for common install and runtime problems.
-- [ ] Review all docs for private-repo language, internal assumptions, and stale implementation details.
+- [x] Remove the current design/planning docs from `docs/`.
+- [x] Define the structure for a small user wiki in `docs/`.
+- [x] Rewrite the root `README.md` for public users.
+- [x] Document installation for the public-release path.
+- [x] Document updating, rollback, and uninstall in public-facing terms.
+- [x] Document security expectations clearly, especially Docker socket access and trusted-network assumptions.
+- [x] Add user-facing guides for common workflows such as creating an app, managing containers, and using templates.
+- [x] Add troubleshooting pages for common install and runtime problems.
+- [x] Review all docs for private-repo language, internal assumptions, and stale implementation details.
 
 Verification:
 
-- [ ] `README.md` stands on its own for first-time users.
-- [ ] `docs/` contains only user-facing content you are comfortable publishing.
+- [x] `README.md` stands on its own for first-time users.
+- [x] `docs/` contains only user-facing content you are comfortable publishing.
 
 ## 5. License And Public Repo Files
 

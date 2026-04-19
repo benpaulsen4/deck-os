@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OWNER="${DECKOS_GITHUB_OWNER:-}"
-REPO="${DECKOS_GITHUB_REPO:-}"
+OWNER="${DECKOS_GITHUB_OWNER:-benpaulsen4}"
+REPO="${DECKOS_GITHUB_REPO:-console-three}"
 TOKEN="${DECKOS_GITHUB_TOKEN:-}"
 REQUESTED_VERSION="${DECKOS_VERSION:-latest}"
 INSTALL_ROOT="${DECKOS_INSTALL_ROOT:-/opt/deckos}"
@@ -125,7 +125,7 @@ TOKEN="$(echo -n "$TOKEN" | tr -d ' \t\n\r')"
 REQUESTED_VERSION="$(echo -n "$REQUESTED_VERSION" | xargs)"
 
 if [[ -z "$OWNER" || -z "$REPO" ]]; then
-  echo "Missing required: --owner, --repo (or DECKOS_GITHUB_OWNER/REPO env vars)" >&2
+  echo "Missing required repository information. Set --owner/--repo or DECKOS_GITHUB_OWNER/DECKOS_GITHUB_REPO." >&2
   exit 1
 fi
 
