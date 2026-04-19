@@ -44,11 +44,11 @@ Verification:
 
 Goal: make sure breakage is caught even if code lands without a pull request.
 
-- [ ] Add `push` handling to the CI workflow for the default branch.
-- [ ] Confirm that CI still runs on pull requests and manual dispatch.
-- [ ] Decide whether Node support is truly `20+` or `24`, then align CI with the supported version policy.
-- [ ] Decide whether `test:e2e` belongs in CI now or later.
-- [ ] Confirm release workflow expectations still match CI behavior.
+- [x] Add `push` handling to the CI workflow for the default branch.
+- [x] Confirm that CI still runs on pull requests and manual dispatch.
+- [x] Decide whether Node support is truly `20+` or `24`, then align CI with the supported version policy.
+- [x] Decide whether `test:e2e` belongs in CI now or later.
+- [x] Confirm release workflow expectations still match CI behavior.
 
 Verification:
 

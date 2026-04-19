@@ -89,7 +89,7 @@ sudo ./uninstall.sh
 
 ### Prerequisites
 
-- Node.js 20 or higher
+- Node.js 24 or higher
 - pnpm 9 or higher
 - Docker (optional - for Docker features)
 
@@ -156,12 +156,6 @@ Run client coverage:
 pnpm --filter @deckos/client test:coverage
 ```
 
-Run E2E smoke specs:
-
-```bash
-pnpm --filter @deckos/client test:e2e
-```
-
 Front-end contributors should add tests for:
 
 - route behavior for affected user flows
@@ -192,7 +186,7 @@ From the dashboard or Apps page, you can:
 ## Architecture
 
 - **Frontend**: React 19 + Vite 6 (SPA)
-- **Backend**: Hono (Node.js 20)
+- **Backend**: Hono (Node.js 24)
 - **API**: tRPC for type-safe client-server communication
 - **State**: Zustand
 - **Routing**: TanStack Router

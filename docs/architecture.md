@@ -100,7 +100,7 @@ deckos/
 | Validation     | Zod                                | Runtime type validation, integrates natively with tRPC                                         |
 | Styling        | Vanilla CSS + component styles     | No framework overhead, full control for the brutalist aesthetic                                |
 | Code Editor    | CodeMirror 6                       | YAML editing with syntax highlighting for compose files                                        |
-| Runtime        | Node.js 20 LTS                     | Stable, wide compatibility                                                                     |
+| Runtime        | Node.js 24 LTS                     | Stable, aligned with CI and release packaging                                                  |
 | Package Mgr    | pnpm                               | Fast, disk-efficient, excellent workspace support                                              |
 
 ## Key Architecture Decisions
