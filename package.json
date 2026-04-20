@@ -21,18 +21,28 @@
     "release:cut": "node scripts/cut-release.mjs"
   },
   "devDependencies": {
-    "@eslint/js": "^9.22.0",
+    "@eslint/js": "^10.0.1",
     "concurrently": "^9.1.2",
-    "eslint": "^9.22.0",
+    "eslint": "^10.2.1",
     "prettier": "^3.5.3",
     "typescript": "^5.7.3",
-    "typescript-eslint": "^8.26.0",
+    "typescript-eslint": "^8.58.2",
     "vitest": "^3.2.4",
-    "wait-on": "^9.0.4"
+    "wait-on": "^9.0.5"
   },
   "engines": {
     "node": ">=24.0.0",
     "pnpm": ">=9.0.0"
   },
-  "packageManager": "pnpm@9.15.4"
+  "packageManager": "pnpm@9.15.4",
+  "pnpm": {
+    "overrides": {
+      "brace-expansion": "5.0.5",
+      "flatted": "3.4.2",
+      "follow-redirects": "1.16.0",
+      "minimatch": "10.2.5",
+      "picomatch": "4.0.4",
+      "protobufjs": "7.5.5"
+    }
+  }
 }
