@@ -160,7 +160,7 @@ async function loadDiskLibrary(): Promise<TemplateDetail[]> {
     }
     if (!json || typeof json.id !== "string" || typeof json.title !== "string") continue;
 
-    let composeTemplate = "";
+    let composeTemplate: string;
     try {
       composeTemplate = await fs.readFile(composePath, "utf-8");
     } catch {

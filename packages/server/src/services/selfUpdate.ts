@@ -140,7 +140,7 @@ async function pruneReleases(
   releasesDir: string,
   keepVersions: ReadonlySet<string>
 ): Promise<void> {
-  let entries: Dirent[] = [];
+  let entries: Dirent[];
   try {
     entries = await readdir(releasesDir, { withFileTypes: true, encoding: "utf8" });
   } catch {

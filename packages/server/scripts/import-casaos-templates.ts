@@ -430,18 +430,18 @@ async function main() {
 
     const rawCompose = await fs.readFile(composePath, "utf-8");
     const composeMeta = extractCasaOSMetaFromCompose(rawCompose);
-    let composeTemplate = "";
-    let parameters: TemplateParameter[] = [];
-    let webUrlTemplate = "";
-    try {
-      const converted = convertCasaOSComposeToTemplate(rawCompose);
-      composeTemplate = converted.composeTemplate;
-      parameters = converted.parameters;
-      webUrlTemplate = converted.webUrlTemplate;
-    } catch {
+    const converted = (() => {
+      try {
+        return convertCasaOSComposeToTemplate(rawCompose);
+      } catch {
+        return null;
+      }
+    })();
+    if (!converted) {
       skipped++;
       continue;
     }
+    const { composeTemplate, parameters, webUrlTemplate } = converted;
 
     if (!description) {
       const picked =

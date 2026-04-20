@@ -504,13 +504,14 @@ export async function readText(
   }
   const fileHandle = await openFile(fileMeta.path, "r");
   const buffer = Buffer.alloc(MAX_TEXT_READ_BYTES + 1);
-  let bytesRead = 0;
-  try {
-    const result = await fileHandle.read(buffer, 0, MAX_TEXT_READ_BYTES + 1, 0);
-    bytesRead = result.bytesRead;
-  } finally {
-    await fileHandle.close();
-  }
+  const bytesRead = await (async () => {
+    try {
+      const result = await fileHandle.read(buffer, 0, MAX_TEXT_READ_BYTES + 1, 0);
+      return result.bytesRead;
+    } finally {
+      await fileHandle.close();
+    }
+  })();
   const truncated = bytesRead > MAX_TEXT_READ_BYTES;
   const contentBuffer = truncated
     ? buffer.subarray(0, MAX_TEXT_READ_BYTES)

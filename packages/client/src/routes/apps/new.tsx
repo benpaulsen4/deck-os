@@ -65,13 +65,10 @@ function NewAppPage() {
       navigate({ to: "/apps/$appId", params: { appId } });
     },
     onError: async (err: unknown, appId: string) => {
-      let rollbackOk = false;
-      try {
-        await trpcClient.apps.delete.mutate({ id: appId });
-        rollbackOk = true;
-      } catch {
-        rollbackOk = false;
-      }
+      const rollbackOk = await trpcClient.apps.delete
+        .mutate({ id: appId })
+        .then(() => true)
+        .catch(() => false);
       const reason = err instanceof Error ? err.message : "Deploy failed";
       addToast(
         rollbackOk
@@ -243,13 +240,10 @@ function NewAppPage() {
           if (!deployAppId) return;
 
           if (!result.ok) {
-            let rollbackOk = false;
-            try {
-              await trpcClient.apps.delete.mutate({ id: deployAppId });
-              rollbackOk = true;
-            } catch {
-              rollbackOk = false;
-            }
+          const rollbackOk = await trpcClient.apps.delete
+            .mutate({ id: deployAppId })
+            .then(() => true)
+            .catch(() => false);
             addToast(
               rollbackOk
                 ? `Failed to pull images: ${result.error || "Pull failed"} (rolled back)`
