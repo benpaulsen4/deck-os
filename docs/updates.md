@@ -35,17 +35,23 @@ sudo systemctl restart deckos
 
 ## Uninstall
 
-1. Run the uninstall script from the repo root. Use the same custom paths or service name you used at install time if you changed them.
+1. Run the hosted uninstall script on the DeckOS host. Use the same custom paths or service name you used at install time if you changed them.
 
 ```bash
-sudo ./uninstall.sh
+curl -fsSL https://script.benpaulsen.tech/uninstall-deckos | sudo bash
 ```
 
-2. Expect the uninstall script to remove the DeckOS service, `/etc/deckos`, the install root, and the DeckOS data directory. It leaves Docker and Node.js installed.
+2. If you installed with custom values, pass them through `bash -s --`:
+
+```bash
+curl -fsSL https://script.benpaulsen.tech/uninstall-deckos | sudo bash -s -- --install-root /opt/deckos --data-dir /var/lib/deckos --service-name deckos
+```
+
+3. Expect the uninstall script to remove the DeckOS service, `/etc/deckos`, the install root, and the DeckOS data directory. It leaves Docker and Node.js installed.
 
 ## Important Uninstall Note
 
-If you installed DeckOS with custom values such as `--install-root`, `--data-dir`, or `--service-name`, use the same values when running `uninstall.sh`. Otherwise, you may remove the wrong service or leave part of the installation behind.
+If you installed DeckOS with custom values such as `--install-root`, `--data-dir`, or `--service-name`, use the same values when running the uninstall command. Otherwise, you may remove the wrong service or leave part of the installation behind.
 
 ## Before You Update Or Remove DeckOS
 

@@ -21,14 +21,19 @@ The installer can:
 
 ## Install Command
 
-1. Clone or download the DeckOS repository onto the Ubuntu host you want to manage. The provided installer is designed around that host-native flow and should be run from the repo root.
-2. Run the installer with no arguments for the normal path:
+1. Run the hosted installer on the Ubuntu host you want to manage. This is the preferred install path.
 
 ```bash
-sudo ./install.sh
+curl -fsSL https://script.benpaulsen.tech/install-deckos | sudo bash
 ```
 
-3. Add optional flags only if you need to change the defaults:
+2. Add optional flags only if you need to change the defaults. Pass them through `bash -s --`:
+
+```bash
+curl -fsSL https://script.benpaulsen.tech/install-deckos | sudo bash -s -- --port 8080
+```
+
+3. Available optional flags:
 
 - `--owner <github-owner>`
 - `--repo <github-repo>`
@@ -40,6 +45,7 @@ sudo ./install.sh
 - `--service-name deckos`
 
 The installer points at `benpaulsen4/deck-os` by default. Use `--owner` and `--repo` only when you want to install from a different fork or release source.
+If you want to inspect the installer before running it, download the script first and review it locally.
 
 ## When A Token Is Needed
 

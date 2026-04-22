@@ -29,10 +29,10 @@ DeckOS installs as a host-native service, not as a container. Releases are unpac
 The install script targets `benpaulsen4/deck-os` by default, so a normal install does not need repository arguments.
 You only need to pass `--owner` or `--repo` if you are installing from a different fork or release source.
 
-From the repo root:
+Preferred install command:
 
 ```bash
-sudo ./install.sh
+curl -fsSL https://script.benpaulsen.tech/install-deckos | sudo bash
 ```
 
 Optional flags:
@@ -45,6 +45,12 @@ Optional flags:
 - `--data-dir /var/lib/deckos`
 - `--install-root /opt/deckos`
 - `--service-name deckos`
+
+Pass optional flags through the hosted installer with `bash -s --`, for example:
+
+```bash
+curl -fsSL https://script.benpaulsen.tech/install-deckos | sudo bash -s -- --port 8080
+```
 
 Open DeckOS at `http://<host>/`.
 
