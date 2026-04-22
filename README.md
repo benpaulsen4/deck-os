@@ -26,7 +26,7 @@ DeckOS is built for people running a headless Linux server at home or in a priva
 ### Install
 
 DeckOS installs as a host-native service, not as a container. Releases are unpacked under `/opt/deckos` and managed through `systemd`.
-The install script targets `benpaulsen4/console-three` by default, so a normal install does not need repository arguments.
+The install script targets `benpaulsen4/deck-os` by default, so a normal install does not need repository arguments.
 You only need to pass `--owner` or `--repo` if you are installing from a different fork or release source.
 
 From the repo root:
@@ -41,12 +41,12 @@ Optional flags:
 - `--repo <github-repo>`
 - `--token <github-token>`
 - `--version 0.1.0`
-- `--port 3000`
+- `--port 80`
 - `--data-dir /var/lib/deckos`
 - `--install-root /opt/deckos`
 - `--service-name deckos`
 
-Open DeckOS at `http://<host>:3000`.
+Open DeckOS at `http://<host>/`.
 
 ### GitHub Token Note
 

@@ -34,12 +34,12 @@ sudo ./install.sh
 - `--repo <github-repo>`
 - `--token <github-token>`
 - `--version 0.1.0`
-- `--port 3000`
+- `--port 80`
 - `--data-dir /var/lib/deckos`
 - `--install-root /opt/deckos`
 - `--service-name deckos`
 
-The installer points at `benpaulsen4/console-three` by default. Use `--owner` and `--repo` only when you want to install from a different fork or release source.
+The installer points at `benpaulsen4/deck-os` by default. Use `--owner` and `--repo` only when you want to install from a different fork or release source.
 
 ## When A Token Is Needed
 
@@ -54,7 +54,7 @@ The installer can fetch release metadata and assets without a token when the sel
 
 ## After Installation
 
-1. Open DeckOS at `http://<host>:3000`, or use the custom port you supplied during install.
+1. Open DeckOS at `http://<host>/`, or use the custom port you supplied during install.
 2. Confirm the service is reachable and the first page loads cleanly.
 3. Move to the getting-started guide once you can access the UI.
 

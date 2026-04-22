@@ -28,7 +28,7 @@ Useful commands:
 
 ```bash
 sudo systemctl status deckos --no-pager
-sudo ss -ltnp | grep 3000
+sudo ss -ltnp | grep 80
 ```
 
 Adjust the port in the second command if you changed `PORT`.

@@ -7,11 +7,11 @@ DeckOS reads its runtime configuration from `/etc/deckos/deckos.env`. Most peopl
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `NODE_ENV` | `production` | Runtime mode |
-| `PORT` | `3000` | Web UI and API listen port |
+| `PORT` | `80` | Web UI and API listen port |
 | `DECKOS_DATA_DIR` | `/var/lib/deckos` | Base directory for persistent DeckOS data |
 | `DECKOS_INSTALL_ROOT` | `/opt/deckos` | Release installation root |
 | `DECKOS_GITHUB_OWNER` | `benpaulsen4` | GitHub owner or organization for updates |
-| `DECKOS_GITHUB_REPO` | `console-three` | GitHub repository name for updates |
+| `DECKOS_GITHUB_REPO` | `deck-os` | GitHub repository name for updates |
 | `DECKOS_GITHUB_TOKEN` | none | Optional token for private releases |
 | `DECKOS_GITHUB_API_BASE` | `https://api.github.com` | GitHub API base URL |
 
@@ -32,7 +32,7 @@ Other DeckOS data, such as security configuration, also lives under the data dir
 
 ## Update Configuration
 
-1. Leave `DECKOS_GITHUB_OWNER` and `DECKOS_GITHUB_REPO` alone if you are using the default DeckOS release source. The installer writes `benpaulsen4` and `console-three` automatically.
+1. Leave `DECKOS_GITHUB_OWNER` and `DECKOS_GITHUB_REPO` alone if you are using the default DeckOS release source. The installer writes `benpaulsen4` and `deck-os` automatically.
 2. Set `DECKOS_GITHUB_TOKEN` only if your chosen release source requires authentication. Public releases do not require it.
 3. Restart the service after changing update-related values so DeckOS picks up the new configuration cleanly.
 

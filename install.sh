@@ -2,12 +2,12 @@
 set -euo pipefail
 
 OWNER="${DECKOS_GITHUB_OWNER:-benpaulsen4}"
-REPO="${DECKOS_GITHUB_REPO:-console-three}"
+REPO="${DECKOS_GITHUB_REPO:-deck-os}"
 TOKEN="${DECKOS_GITHUB_TOKEN:-}"
 REQUESTED_VERSION="${DECKOS_VERSION:-latest}"
 INSTALL_ROOT="${DECKOS_INSTALL_ROOT:-/opt/deckos}"
 DATA_DIR="${DECKOS_DATA_DIR:-/var/lib/deckos}"
-PORT="${PORT:-3000}"
+PORT="${PORT:-80}"
 SERVICE_NAME="${DECKOS_SERVICE_NAME:-deckos}"
 DEBUG="${DECKOS_INSTALL_DEBUG:-0}"
 GITHUB_API_BASE="${DECKOS_GITHUB_API_BASE:-https://api.github.com}"
@@ -340,6 +340,8 @@ Type=simple
 User=deckos
 Group=deckos
 SupplementaryGroups=docker
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 EnvironmentFile=/etc/deckos/deckos.env
 WorkingDirectory=${INSTALL_ROOT}/current
 ExecStartPre=+/usr/local/bin/deckos-fix-cpu-power-perms
@@ -355,4 +357,8 @@ systemctl daemon-reload
 systemctl enable --now "${SERVICE_NAME}.service"
 systemctl status "${SERVICE_NAME}.service" --no-pager || true
 
-echo "Installed DeckOS ${VER} to ${INSTALL_ROOT}. Open: http://<host>:${PORT}/"
+if [[ "$PORT" == "80" ]]; then
+  echo "Installed DeckOS ${VER} to ${INSTALL_ROOT}. Open: http://<host>/"
+else
+  echo "Installed DeckOS ${VER} to ${INSTALL_ROOT}. Open: http://<host>:${PORT}/"
+fi
