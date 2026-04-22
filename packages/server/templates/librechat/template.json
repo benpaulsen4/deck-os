@@ -2,7 +2,9 @@
   "id": "librechat",
   "title": "LibreChat",
   "description": "A full-featured, open-source AI chat interface",
-  "categories": ["AI"],
+  "categories": [
+    "AI"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -53,6 +55,42 @@
       "label": "LIBRECHAT-VECTORDB /VAR/LIB/POSTGRESQL/DATA",
       "type": "path",
       "defaultValue": "./postgresql/data",
+      "required": true
+    },
+    {
+      "key": "ASSISTANTS_API_KEY",
+      "label": "ASSISTANTS API KEY",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "OPENAI_API_KEY",
+      "label": "OPENAI API KEY",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "ANTHROPIC_API_KEY",
+      "label": "ANTHROPIC API KEY",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "JWT_SECRET",
+      "label": "JWT SECRET",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "JWT_REFRESH_SECRET",
+      "label": "JWT REFRESH SECRET",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "POSTGRES_PASSWORD",
+      "label": "POSTGRES PASSWORD",
+      "type": "string",
       "required": true
     }
   ]

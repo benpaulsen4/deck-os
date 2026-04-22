@@ -12,7 +12,7 @@ services:
       SERVER_PORT: 8443
       USER_NAME: mc
       USER_UID: 1000
-      USER_PASSWORD: root
+      USER_PASSWORD: {{USER_PASSWORD}}
     ports:
       - "{{WEB_PORT}}:8443/tcp"
       - "{{PORT_MINEOS_25565_25570_TCP}}:25565-25570/tcp"

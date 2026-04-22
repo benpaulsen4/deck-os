@@ -2,8 +2,23 @@
   "id": "twingate",
   "title": "Twingate",
   "description": "It's a connector for Twingate",
-  "categories": ["Network"],
+  "categories": [
+    "Network"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "",
-  "parameters": []
+  "parameters": [
+    {
+      "key": "TWINGATE_ACCESS_TOKEN",
+      "label": "TWINGATE ACCESS TOKEN",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "TWINGATE_REFRESH_TOKEN",
+      "label": "TWINGATE REFRESH TOKEN",
+      "type": "string",
+      "required": true
+    }
+  ]
 }

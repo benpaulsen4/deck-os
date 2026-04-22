@@ -14,7 +14,7 @@ services:
       - LOG_PATH=/root/.flowise/logs
       - BLOB_STORAGE_PATH=/root/.flowise/storage
       - FLOWISE_USERNAME=casaos
-      - FLOWISE_PASSWORD=casaos
+      - FLOWISE_PASSWORD={{FLOWISE_PASSWORD}}
     ports:
       - "{{WEB_PORT}}:3025"
     volumes:

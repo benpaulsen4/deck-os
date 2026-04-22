@@ -2,7 +2,9 @@
   "id": "postgresql",
   "title": "PostgreSQL",
   "description": "PostgreSQL is an advanced, enterprise-class, and open-source relational database system. PostgreSQL supports both SQL (relational) and JSON (non-relational) querying.",
-  "categories": ["Developer"],
+  "categories": [
+    "Developer"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -39,6 +41,12 @@
       "label": "POSTGRESQL /VAR/LIB/POSTGRESQL/DATA",
       "type": "path",
       "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "POSTGRES_PASSWORD",
+      "label": "POSTGRES PASSWORD",
+      "type": "string",
       "required": true
     }
   ]

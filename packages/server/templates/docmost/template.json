@@ -2,7 +2,9 @@
   "id": "docmost",
   "title": "Docmost",
   "description": "A modern wiki and knowledge base for teams",
-  "categories": ["Notes"],
+  "categories": [
+    "Notes"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -32,6 +34,18 @@
       "label": "DOCMOST-REDIS /DATA",
       "type": "path",
       "defaultValue": "./redis",
+      "required": true
+    },
+    {
+      "key": "APP_SECRET",
+      "label": "APP SECRET",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "POSTGRES_PASSWORD",
+      "label": "POSTGRES PASSWORD",
+      "type": "string",
       "required": true
     }
   ]

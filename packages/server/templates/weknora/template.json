@@ -2,7 +2,9 @@
   "id": "weknora",
   "title": "WeKnora",
   "description": "WeKnora is an LLM-powered framework designed for deep document understanding and semantic retrieval, especially for handling complex, heterogeneous documents.",
-  "categories": ["AI"],
+  "categories": [
+    "AI"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -158,6 +160,60 @@
       "label": "QDRANT /QDRANT/STORAGE",
       "type": "path",
       "defaultValue": "./storage",
+      "required": true
+    },
+    {
+      "key": "QDRANT_API_KEY",
+      "label": "QDRANT API KEY",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "MINIO_SECRET_ACCESS_KEY",
+      "label": "MINIO SECRET ACCESS KEY",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "DB_PASSWORD",
+      "label": "DB PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "REDIS_PASSWORD",
+      "label": "REDIS PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "TENANT_AES_KEY",
+      "label": "TENANT AES KEY",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "JWT_SECRET",
+      "label": "JWT SECRET",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "POSTGRES_PASSWORD",
+      "label": "POSTGRES PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "MINIO_ROOT_PASSWORD",
+      "label": "MINIO ROOT PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "NEO4J_PASSWORD",
+      "label": "NEO4J PASSWORD",
+      "type": "string",
       "required": true
     }
   ]

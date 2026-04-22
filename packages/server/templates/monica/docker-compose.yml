@@ -20,7 +20,7 @@ services:
       APP_KEY: ChangeMeBy32KeyLengthOrGenerated
       DB_HOST: monica-db
       DB_USERNAME: monicauser
-      DB_PASSWORD: monicasecret
+      DB_PASSWORD: {{DB_PASSWORD}}
     networks:
       - monica_network
     depends_on:
@@ -39,7 +39,7 @@ services:
       MARIADB_RANDOM_ROOT_PASSWORD: true
       MARIADB_DATABASE: monica
       MARIADB_USER: monicauser
-      MARIADB_PASSWORD: monicasecret
+      MARIADB_PASSWORD: {{MARIADB_PASSWORD}}
     restart: unless-stopped
     networks:
       - monica_network

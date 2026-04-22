@@ -20,7 +20,7 @@ services:
         target: /home/nonroot/pdfding/media
     environment:
       - HOST_NAME=*
-      - SECRET_KEY=your_secret_key_here
+      - SECRET_KEY={{SECRET_KEY}}
       - CSRF_COOKIE_SECURE=FALSE
       - SESSION_COOKIE_SECURE=FALSE
       - DEBUG=FALSE

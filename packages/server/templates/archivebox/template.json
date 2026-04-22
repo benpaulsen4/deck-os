@@ -2,7 +2,9 @@
   "id": "archivebox",
   "title": "ArchiveBox",
   "description": "Self-hosted internet archiving solution",
-  "categories": ["Utilities"],
+  "categories": [
+    "Utilities"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -40,6 +42,18 @@
       "type": "port",
       "defaultValue": "18082",
       "required": false
+    },
+    {
+      "key": "ADMIN_PASSWORD",
+      "label": "ADMIN PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "SEARCH_BACKEND_PASSWORD",
+      "label": "SEARCH BACKEND PASSWORD",
+      "type": "string",
+      "required": true
     }
   ]
 }

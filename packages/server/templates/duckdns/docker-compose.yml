@@ -7,7 +7,7 @@ services:
       - PGID=1000
       - TZ=Etc/UTC
       - SUBDOMAINS=subdomain1,subdomain2
-      - TOKEN=token
+      - TOKEN={{TOKEN}}
       - UPDATE_IP=ipv6
       - LOG_FILE=false
     volumes:

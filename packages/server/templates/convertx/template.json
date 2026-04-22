@@ -2,7 +2,9 @@
   "id": "convertx",
   "title": "ConvertX",
   "description": "A versatile file conversion tool that supports multiple formats.",
-  "categories": ["Utilities"],
+  "categories": [
+    "Utilities"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -18,6 +20,12 @@
       "label": "CONVERTX /APP/DATA",
       "type": "path",
       "defaultValue": "./data",
+      "required": true
+    },
+    {
+      "key": "JWT_SECRET",
+      "label": "JWT SECRET",
+      "type": "string",
       "required": true
     }
   ]

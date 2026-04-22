@@ -60,7 +60,7 @@ services:
         reservations:
           memory: 3G
     environment:
-      - ELASTIC_PASSWORD=infini_rag_flow
+      - ELASTIC_PASSWORD={{ELASTIC_PASSWORD}}
       - TZ=$TZ
       - bootstrap.memory_lock=false
       - cluster.routing.allocation.disk.watermark.flood_stage=2gb
@@ -142,7 +142,7 @@ services:
         reservations:
           memory: 512M
     environment:
-      - MINIO_ROOT_PASSWORD=infini_rag_flow
+      - MINIO_ROOT_PASSWORD={{MINIO_ROOT_PASSWORD}}
       - MINIO_ROOT_USER=rag_flow
       - TZ=$TZ
     healthcheck:
@@ -184,8 +184,8 @@ services:
         reservations:
           memory: 512M
     environment:
-      - MYSQL_PASSWORD=infini_rag_flow
-      - MYSQL_ROOT_PASSWORD=mysql
+      - MYSQL_PASSWORD={{MYSQL_PASSWORD}}
+      - MYSQL_ROOT_PASSWORD={{MYSQL_ROOT_PASSWORD}}
       - TZ=$TZ
     healthcheck:
       test:
@@ -218,8 +218,8 @@ services:
         reservations:
           memory: 2G
     environment:
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=infini_rag_flow_OS_01
-      - OPENSEARCH_PASSWORD=infini_rag_flow_OS_01
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD={{OPENSEARCH_INITIAL_ADMIN_PASSWORD}}
+      - OPENSEARCH_PASSWORD={{OPENSEARCH_PASSWORD}}
       - TZ=$TZ
       - bootstrap.memory_lock=false
       - cluster.routing.allocation.disk.watermark.flood_stage=2gb

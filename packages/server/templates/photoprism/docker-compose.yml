@@ -1,7 +1,7 @@
 services:
   photoprism:
     environment:
-      PHOTOPRISM_ADMIN_PASSWORD: casaos
+      PHOTOPRISM_ADMIN_PASSWORD: {{PHOTOPRISM_ADMIN_PASSWORD}}
       PHOTOPRISM_UPLOAD_NSFW: "true"
       TZ: "{{TZ}}"
     image: photoprism/photoprism:latest

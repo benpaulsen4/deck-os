@@ -2,7 +2,7 @@ services:
   pihole:
     environment:
       TZ: "{{TZ}}"
-      FTLCONF_webserver_api_password: casaos
+      FTLCONF_webserver_api_password: {{FTLCONF_WEBSERVER_API_PASSWORD}}
       FTLCONF_dns_listeningMode: all
     image: pihole/pihole:latest
     deploy:

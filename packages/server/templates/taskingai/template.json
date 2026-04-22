@@ -2,7 +2,9 @@
   "id": "taskingai",
   "title": "TaskingAI",
   "description": "The developer-friendly cloud platform for building and running LLM agents for AI-native applications.",
-  "categories": ["Chat"],
+  "categories": [
+    "Chat"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -53,6 +55,36 @@
       "label": "NGINX /VAR/CACHE/NGINX",
       "type": "path",
       "defaultValue": "./data/nginx_cache",
+      "required": true
+    },
+    {
+      "key": "AES_ENCRYPTION_KEY",
+      "label": "AES ENCRYPTION KEY",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "JWT_SECRET_KEY",
+      "label": "JWT SECRET KEY",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "DEFAULT_ADMIN_PASSWORD",
+      "label": "DEFAULT ADMIN PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "POSTGRES_PASSWORD",
+      "label": "POSTGRES PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "REDIS_PASSWORD",
+      "label": "REDIS PASSWORD",
+      "type": "string",
       "required": true
     }
   ]

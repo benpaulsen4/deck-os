@@ -11,7 +11,7 @@ services:
     networks:
       - langflow-net
     environment:
-      - LANGFLOW_DATABASE_URL=postgresql://langflow:langflow@langflow-postgres:5432/langflow
+      - LANGFLOW_DATABASE_URL=postgresql://langflow:{{POSTGRES_PASSWORD}}@langflow-postgres:5432/langflow
       - LANGFLOW_CONFIG_DIR=/app/langflow
     volumes:
       - "{{VOLUME_LANGFLOW__APP_LANGFLOW}}:/app/langflow"
@@ -19,7 +19,7 @@ services:
     image: postgres:latest
     environment:
       - POSTGRES_USER=langflow
-      - POSTGRES_PASSWORD=langflow
+      - POSTGRES_PASSWORD={{POSTGRES_PASSWORD}}
       - POSTGRES_DB=langflow
     networks:
       - langflow-net

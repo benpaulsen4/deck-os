@@ -2,7 +2,9 @@
   "id": "ztnet",
   "title": "ZTnet",
   "description": "Self-hosted ZeroTier network controller with web UI for centralized management.",
-  "categories": ["Network"],
+  "categories": [
+    "Network"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -25,6 +27,18 @@
       "label": "ZTNET-POSTGRES /VAR/LIB/POSTGRESQL/DATA",
       "type": "path",
       "defaultValue": "./postgres-data",
+      "required": true
+    },
+    {
+      "key": "POSTGRES_PASSWORD",
+      "label": "POSTGRES PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "NEXTAUTH_SECRET",
+      "label": "NEXTAUTH SECRET",
+      "type": "string",
       "required": true
     }
   ]

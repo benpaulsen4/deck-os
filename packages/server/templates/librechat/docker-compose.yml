@@ -10,10 +10,10 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
     environment:
-      - ASSISTANTS_API_KEY=user_provided
-      - OPENAI_API_KEY=user_provided
+      - ASSISTANTS_API_KEY={{ASSISTANTS_API_KEY}}
+      - OPENAI_API_KEY={{OPENAI_API_KEY}}
       - GOOGLE_KEY=user_provided
-      - ANTHROPIC_API_KEY=user_provided
+      - ANTHROPIC_API_KEY={{ANTHROPIC_API_KEY}}
       - HOST=0.0.0.0
       - PORT=3080
       - DOMAIN_CLIENT=http://0.0.0.0:3080
@@ -64,8 +64,8 @@ services:
       - ALLOW_UNVERIFIED_EMAIL_LOGIN=true
       - SESSION_EXPIRY=1000 * 60 * 15
       - REFRESH_TOKEN_EXPIRY=(1000 * 60 * 60 * 24) * 7
-      - JWT_SECRET=16f8c0ef4a5d391b26034086c628469d3f9f497f08163ab9b40137092f2909ef
-      - JWT_REFRESH_SECRET=eaa5191f2914e30b9387fd84e254e4ba6fc51b4654968a9b0803b456a54b8418
+      - JWT_SECRET={{JWT_SECRET}}
+      - JWT_REFRESH_SECRET={{JWT_REFRESH_SECRET}}
       - CREDS_KEY=f34be427ebb29de8d88c107a71546019685ed8b241d8f2ed00c3df97ad2566f0
       - CREDS_IV=e2341419ec3dd3d19b13a1a87fafcbfb
       - DEBUG_PLUGINS=true
@@ -121,7 +121,7 @@ services:
     environment:
       POSTGRES_DB: mydatabase
       POSTGRES_USER: myuser
-      POSTGRES_PASSWORD: mypassword
+      POSTGRES_PASSWORD: {{POSTGRES_PASSWORD}}
     restart: unless-stopped
     volumes:
       - "{{VOLUME_LIBRECHAT_VECTORDB__VAR_LIB_POSTGRESQL_DATA}}:/var/lib/postgr\

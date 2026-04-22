@@ -2,7 +2,9 @@
   "id": "ragflow",
   "title": "RagFlow",
   "description": "RagFlow is an open-source RAG engine based on deep document understanding.",
-  "categories": ["AI"],
+  "categories": [
+    "AI"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -179,6 +181,42 @@
       "label": "RAGFLOW-SANDBOX-EXECUTOR-MANAGER /VAR/RUN/DOCKER.SOCK",
       "type": "path",
       "defaultValue": "./docker-sock",
+      "required": true
+    },
+    {
+      "key": "ELASTIC_PASSWORD",
+      "label": "ELASTIC PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "MINIO_ROOT_PASSWORD",
+      "label": "MINIO ROOT PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "MYSQL_PASSWORD",
+      "label": "MYSQL PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "MYSQL_ROOT_PASSWORD",
+      "label": "MYSQL ROOT PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "OPENSEARCH_INITIAL_ADMIN_PASSWORD",
+      "label": "OPENSEARCH INITIAL ADMIN PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "OPENSEARCH_PASSWORD",
+      "label": "OPENSEARCH PASSWORD",
+      "type": "string",
       "required": true
     }
   ]

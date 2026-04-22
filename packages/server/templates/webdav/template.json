@@ -2,7 +2,9 @@
   "id": "webdav",
   "title": "WebDAV",
   "description": "A web-based file sharing and management protocol",
-  "categories": ["Utilities"],
+  "categories": [
+    "Utilities"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -18,6 +20,12 @@
       "label": "WEBDAV /MEDIA",
       "type": "path",
       "defaultValue": "./media",
+      "required": true
+    },
+    {
+      "key": "PASSWORD",
+      "label": "PASSWORD",
+      "type": "string",
       "required": true
     }
   ]

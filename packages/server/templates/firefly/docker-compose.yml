@@ -13,7 +13,7 @@ services:
       - SYS_MODULE
     restart: unless-stopped
     environment:
-      - FIREFLY_PASSWORD=firefly
+      - FIREFLY_PASSWORD={{FIREFLY_PASSWORD}}
     deploy:
       resources:
         reservations:

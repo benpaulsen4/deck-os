@@ -2,7 +2,9 @@
   "id": "pdfding",
   "title": "PdfDing",
   "description": "Selfhosted PDF manager, viewer and editor",
-  "categories": ["Documents"],
+  "categories": [
+    "Documents"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -25,6 +27,12 @@
       "label": "PDFDING /HOME/NONROOT/PDFDING/MEDIA",
       "type": "path",
       "defaultValue": "./media",
+      "required": true
+    },
+    {
+      "key": "SECRET_KEY",
+      "label": "SECRET KEY",
+      "type": "string",
       "required": true
     }
   ]

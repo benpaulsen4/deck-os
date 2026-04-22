@@ -2,7 +2,9 @@
   "id": "mariadb",
   "title": "MariaDB",
   "description": "MariaDB Server is one of the most popular database servers in the world. It's made by the original developers of MySQL and guaranteed to stay open source.",
-  "categories": ["Developer"],
+  "categories": [
+    "Developer"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -39,6 +41,18 @@
       "label": "MARIADB /CONFIG",
       "type": "path",
       "defaultValue": "./config",
+      "required": true
+    },
+    {
+      "key": "MYSQL_ROOT_PASSWORD",
+      "label": "MYSQL ROOT PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "MYSQL_PASSWORD",
+      "label": "MYSQL PASSWORD",
+      "type": "string",
       "required": true
     }
   ]

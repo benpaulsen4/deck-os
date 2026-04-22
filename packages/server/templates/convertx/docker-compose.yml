@@ -9,7 +9,7 @@ services:
     ports:
       - "{{WEB_PORT}}:3000"
     environment:
-      - JWT_SECRET=aLongAndSecretStringUsedToSignTheJSONWebToken1234
+      - JWT_SECRET={{JWT_SECRET}}
       - HTTP_ALLOWED=true
     volumes:
       - type: bind

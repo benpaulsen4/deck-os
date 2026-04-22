@@ -2,7 +2,9 @@
   "id": "dify",
   "title": "Dify",
   "description": "LLM App Development Platform",
-  "categories": ["Chat"],
+  "categories": [
+    "Chat"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -88,6 +90,60 @@
       "label": "NGINX /ETC/NGINX",
       "type": "path",
       "defaultValue": "./data/nginx",
+      "required": true
+    },
+    {
+      "key": "SECRET_KEY",
+      "label": "SECRET KEY",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "INIT_PASSWORD",
+      "label": "INIT PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "DB_PASSWORD",
+      "label": "DB PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "REDIS_PASSWORD",
+      "label": "REDIS PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "WEAVIATE_API_KEY",
+      "label": "WEAVIATE API KEY",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "CODE_EXECUTION_API_KEY",
+      "label": "CODE EXECUTION API KEY",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "POSTGRES_PASSWORD",
+      "label": "POSTGRES PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "AUTHENTICATION_APIKEY_ALLOWED_KEYS",
+      "label": "AUTHENTICATION APIKEY ALLOWED KEYS",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "API_KEY",
+      "label": "API KEY",
+      "type": "string",
       "required": true
     }
   ]

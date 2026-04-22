@@ -2,7 +2,9 @@
   "id": "wireguardeasy",
   "title": "WireGuard Easy",
   "description": "WEB UI to manage WireGuard VPN.",
-  "categories": ["Network"],
+  "categories": [
+    "Network"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -25,6 +27,12 @@
       "label": "WG-EASY /ETC/WIREGUARD",
       "type": "path",
       "defaultValue": "./wireguard",
+      "required": true
+    },
+    {
+      "key": "PASSWORD",
+      "label": "PASSWORD",
+      "type": "string",
       "required": true
     }
   ]

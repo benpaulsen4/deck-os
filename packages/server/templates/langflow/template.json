@@ -2,7 +2,9 @@
   "id": "langflow",
   "title": "Langflow",
   "description": "Open-source UI for building and debugging multi-agent and RAG applications",
-  "categories": ["AI"],
+  "categories": [
+    "AI"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -25,6 +27,12 @@
       "label": "LANGFLOW-POSTGRES /VAR/LIB/POSTGRESQL/DATA",
       "type": "path",
       "defaultValue": "./postgres",
+      "required": true
+    },
+    {
+      "key": "POSTGRES_PASSWORD",
+      "label": "POSTGRES PASSWORD",
+      "type": "string",
       "required": true
     }
   ]

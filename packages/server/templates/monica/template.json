@@ -2,7 +2,9 @@
   "id": "monica",
   "title": "Monica",
   "description": "A Personal Relationship Management tool to help you document your social life.",
-  "categories": ["Utilities"],
+  "categories": [
+    "Utilities"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -25,6 +27,18 @@
       "label": "MONICA-DB /VAR/LIB/MYSQL",
       "type": "path",
       "defaultValue": "./mysql",
+      "required": true
+    },
+    {
+      "key": "DB_PASSWORD",
+      "label": "DB PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "MARIADB_PASSWORD",
+      "label": "MARIADB PASSWORD",
+      "type": "string",
       "required": true
     }
   ]

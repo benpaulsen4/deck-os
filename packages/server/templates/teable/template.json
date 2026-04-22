@@ -2,7 +2,9 @@
   "id": "teable",
   "title": "Teable",
   "description": "Teable adopts a concise spreadsheet interface, yet creates powerful database applications",
-  "categories": ["Utilities"],
+  "categories": [
+    "Utilities"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -32,6 +34,18 @@
       "label": "TEABLE-CACHE /DATA",
       "type": "path",
       "defaultValue": "./teable-cache-data",
+      "required": true
+    },
+    {
+      "key": "POSTGRES_PASSWORD",
+      "label": "POSTGRES PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "REDIS_PASSWORD",
+      "label": "REDIS PASSWORD",
+      "type": "string",
       "required": true
     }
   ]

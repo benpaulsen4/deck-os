@@ -2,7 +2,9 @@
   "id": "maybe",
   "title": "Maybe",
   "description": "Personal finance management application",
-  "categories": ["Finance"],
+  "categories": [
+    "Finance"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -32,6 +34,18 @@
       "label": "MAYBE-REDIS /DATA",
       "type": "path",
       "defaultValue": "./redis/data",
+      "required": true
+    },
+    {
+      "key": "POSTGRES_PASSWORD",
+      "label": "POSTGRES PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "SECRET_KEY_BASE",
+      "label": "SECRET KEY BASE",
+      "type": "string",
       "required": true
     }
   ]

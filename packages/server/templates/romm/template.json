@@ -2,7 +2,9 @@
   "id": "romm",
   "title": "RomM",
   "description": "RomM is a self-hosted ROM manager for managing and playing game collections.",
-  "categories": ["Games"],
+  "categories": [
+    "Games"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -53,6 +55,42 @@
       "label": "ROMM-DB /VAR/LIB/MYSQL",
       "type": "path",
       "defaultValue": "./mysql",
+      "required": true
+    },
+    {
+      "key": "ROMM_AUTH_SECRET_KEY",
+      "label": "ROMM AUTH SECRET KEY",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "IGDB_CLIENT_SECRET",
+      "label": "IGDB CLIENT SECRET",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "SCREENSCRAPER_PASSWORD",
+      "label": "SCREENSCRAPER PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "STEAMGRIDDB_API_KEY",
+      "label": "STEAMGRIDDB API KEY",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "MARIADB_ROOT_PASSWORD",
+      "label": "MARIADB ROOT PASSWORD",
+      "type": "string",
+      "required": true
+    },
+    {
+      "key": "MARIADB_PASSWORD",
+      "label": "MARIADB PASSWORD",
+      "type": "string",
       "required": true
     }
   ]

@@ -5,7 +5,7 @@ services:
       PGID: "{{PGID}}"
       TZ: "{{TZ}}"
       POSTGRES_USER: casaos
-      POSTGRES_PASSWORD: casaos
+      POSTGRES_PASSWORD: {{POSTGRES_PASSWORD}}
       POSTGRES_DB: casaos
     image: postgres:latest
     deploy:

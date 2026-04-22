@@ -20,7 +20,7 @@ services:
         target: /data
     environment:
       - ADMIN_USERNAME=casaos
-      - ADMIN_PASSWORD=casaos
+      - ADMIN_PASSWORD={{ADMIN_PASSWORD}}
       - ALLOWED_HOSTS=*
       - CSRF_TRUSTED_ORIGINS=*
       - PUBLIC_INDEX=True
@@ -28,7 +28,7 @@ services:
       - PUBLIC_ADD_VIEW=False
       - SEARCH_BACKEND_ENGINE=sonic
       - SEARCH_BACKEND_HOST_NAME=archivebox_sonic
-      - SEARCH_BACKEND_PASSWORD=SomeSecretPassword
+      - SEARCH_BACKEND_PASSWORD={{SEARCH_BACKEND_PASSWORD}}
     healthcheck:
       test:
         - CMD
@@ -59,7 +59,7 @@ services:
       - TIMEOUT=120
       - SEARCH_BACKEND_ENGINE=sonic
       - SEARCH_BACKEND_HOST_NAME=archivebox_sonic
-      - SEARCH_BACKEND_PASSWORD=SomeSecretPassword
+      - SEARCH_BACKEND_PASSWORD={{SEARCH_BACKEND_PASSWORD}}
     volumes:
       - type: bind
         source: "{{VOLUME_ARCHIVEBOX_SCHEDULER__DATA}}"
@@ -76,7 +76,7 @@ services:
     expose:
       - 1491
     environment:
-      - SEARCH_BACKEND_PASSWORD=SomeSecretPassword
+      - SEARCH_BACKEND_PASSWORD={{SEARCH_BACKEND_PASSWORD}}
     volumes:
       - type: bind
         source: "{{VOLUME_ARCHIVEBOX_SONIC__VAR_LIB_SONIC_STORE}}"

@@ -9,7 +9,7 @@ services:
   backend-inference:
     image: taskingai/taskingai-inference:latest
     environment:
-      AES_ENCRYPTION_KEY: b90e4648ad699c3bdf62c0860e09eb9efc098ee75f215bf750847ae19d41e4b0
+      AES_ENCRYPTION_KEY: {{AES_ENCRYPTION_KEY}}
       ICON_URL_PREFIX: http://nginx:3080
       PROJECT_ID: taskingai
     healthcheck:
@@ -26,7 +26,7 @@ services:
   backend-plugin:
     image: taskingai/taskingai-plugin:latest
     environment:
-      AES_ENCRYPTION_KEY: b90e4648ad699c3bdf62c0860e09eb9efc098ee75f215bf750847ae19d41e4b0
+      AES_ENCRYPTION_KEY: {{AES_ENCRYPTION_KEY}}
       ICON_URL_PREFIX: http://nginx:3080
       OBJECT_STORAGE_TYPE: local
       HOST_URL: http://nginx:3080
@@ -48,11 +48,11 @@ services:
   backend-api:
     image: taskingai/taskingai-server:latest
     environment:
-      POSTGRES_URL: postgres://postgres:TaskingAI321@db:5432/taskingai
-      REDIS_URL: redis://:TaskingAI321@cache:6379/0
+      POSTGRES_URL: postgres://postgres:{{POSTGRES_PASSWORD}}@db:5432/taskingai
+      REDIS_URL: redis://:{{REDIS_PASSWORD}}@cache:6379/0
       TASKINGAI_INFERENCE_URL: http://backend-inference:8000
       TASKINGAI_PLUGIN_URL: http://backend-plugin:8000
-      AES_ENCRYPTION_KEY: b90e4648ad699c3bdf62c0860e09eb9efc098ee75f215bf750847ae19d41e4b0
+      AES_ENCRYPTION_KEY: {{AES_ENCRYPTION_KEY}}
       OBJECT_STORAGE_TYPE: local
       HOST_URL: http://nginx:3080
       PATH_TO_VOLUME: /var/lib/data
@@ -78,15 +78,15 @@ services:
   backend-web:
     image: taskingai/taskingai-server:latest
     environment:
-      POSTGRES_URL: postgres://postgres:TaskingAI321@db:5432/taskingai
-      REDIS_URL: redis://:TaskingAI321@cache:6379/0
+      POSTGRES_URL: postgres://postgres:{{POSTGRES_PASSWORD}}@db:5432/taskingai
+      REDIS_URL: redis://:{{REDIS_PASSWORD}}@cache:6379/0
       TASKINGAI_INFERENCE_URL: http://backend-inference:8000
       TASKINGAI_PLUGIN_URL: http://backend-plugin:8000
-      AES_ENCRYPTION_KEY: b90e4648ad699c3bdf62c0860e09eb9efc098ee75f215bf750847ae19d41e4b0
-      JWT_SECRET_KEY: dbefe42f34473990a3fa903a6a3283acdc3a910beb1ae271a6463ffa5a926bfb
+      AES_ENCRYPTION_KEY: {{AES_ENCRYPTION_KEY}}
+      JWT_SECRET_KEY: {{JWT_SECRET_KEY}}
       PURPOSE: WEB
       DEFAULT_ADMIN_USERNAME: admin
-      DEFAULT_ADMIN_PASSWORD: TaskingAI321
+      DEFAULT_ADMIN_PASSWORD: {{DEFAULT_ADMIN_PASSWORD}}
       OBJECT_STORAGE_TYPE: local
       HOST_URL: http://nginx:3080
       PATH_TO_VOLUME: /var/lib/data
@@ -114,7 +114,7 @@ services:
     environment:
       POSTGRES_DB: taskingai
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: TaskingAI321
+      POSTGRES_PASSWORD: {{POSTGRES_PASSWORD}}
     volumes:
       - "{{VOLUME_DB__VAR_LIB_POSTGRESQL_DATA}}:/var/lib/postgresql/data"
     healthcheck:
@@ -132,7 +132,7 @@ services:
     command:
       - redis-server
       - --requirepass
-      - TaskingAI321
+      - {{REDIS_PASSWORD}}
     volumes:
       - "{{VOLUME_CACHE__DATA}}:/data"
     healthcheck:
@@ -140,7 +140,7 @@ services:
         - CMD
         - redis-cli
         - auth
-        - TaskingAI321
+        - {{REDIS_PASSWORD}}
         - ping
       interval: 5s
       timeout: 5s

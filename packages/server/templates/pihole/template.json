@@ -2,7 +2,9 @@
   "id": "pihole",
   "title": "Pi-hole",
   "description": "Open source home automation that puts local control and privacy first. Powered by a worldwide community of tinkerers and DIY enthusiasts. Perfect to run on a Raspberry Pi or a local server.",
-  "categories": ["Network"],
+  "categories": [
+    "Network"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
   "parameters": [
@@ -46,6 +48,12 @@
       "label": "PIHOLE /ETC/PIHOLE",
       "type": "path",
       "defaultValue": "./etc/pihole/",
+      "required": true
+    },
+    {
+      "key": "FTLCONF_WEBSERVER_API_PASSWORD",
+      "label": "WEBSERVER API PASSWORD",
+      "type": "string",
       "required": true
     }
   ]

@@ -2,7 +2,9 @@
   "id": "firefly",
   "title": "Firefly",
   "description": "Firefly, the easiest using of WireGuard VPN server, plus version of wg-easy.",
-  "categories": ["VPN"],
+  "categories": [
+    "VPN"
+  ],
   "icon": "assets/icon.png",
   "webUrlTemplate": "",
   "parameters": [
@@ -18,6 +20,12 @@
       "label": "FIREFLY /FIREFLY/CONF",
       "type": "path",
       "defaultValue": "./conf",
+      "required": true
+    },
+    {
+      "key": "FIREFLY_PASSWORD",
+      "label": "FIREFLY PASSWORD",
+      "type": "string",
       "required": true
     }
   ]
