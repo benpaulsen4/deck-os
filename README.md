@@ -20,7 +20,7 @@ DeckOS is built for people running a headless Linux server at home or in a priva
 ### Requirements
 
 - A Linux host with `systemd`
-- Ubuntu `24.04` or `25.10` for the provided installer
+- Ubuntu `24.04`, `25.10`, or `26.04` for the provided installer
 - Docker on the host, or permission for the installer to install it
 
 ### Install

@@ -11,6 +11,7 @@ PORT="${PORT:-80}"
 SERVICE_NAME="${DECKOS_SERVICE_NAME:-deckos}"
 DEBUG="${DECKOS_INSTALL_DEBUG:-0}"
 GITHUB_API_BASE="${DECKOS_GITHUB_API_BASE:-https://api.github.com}"
+readonly SUPPORTED_UBUNTU_VERSIONS=("24.04" "25.10" "26.04")
 
 step() {
   echo "==> $*"
@@ -20,6 +21,29 @@ debug() {
   if [[ "$DEBUG" == "1" ]]; then
     echo "DEBUG: $*"
   fi
+}
+
+join_by() {
+  local delimiter="$1"
+  shift
+  local result="${1:-}"
+  shift || true
+  for value in "$@"; do
+    result+="${delimiter}${value}"
+  done
+  printf '%s' "$result"
+}
+
+array_contains() {
+  local needle="$1"
+  shift
+  local item
+  for item in "$@"; do
+    if [[ "$item" == "$needle" ]]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 is_auth_retry_status() {
@@ -150,8 +174,14 @@ if [[ "${ID:-}" != "ubuntu" ]]; then
   exit 1
 fi
 
-if [[ "${VERSION_ID:-}" != "24.04" && "${VERSION_ID:-}" != "25.10" ]]; then
-  echo "Unsupported Ubuntu version: ${VERSION_ID:-unknown} (supported: 24.04, 25.10)" >&2
+if ! array_contains "${VERSION_ID:-}" "${SUPPORTED_UBUNTU_VERSIONS[@]}"; then
+  echo "Unsupported Ubuntu version: ${VERSION_ID:-unknown} (supported: $(join_by ', ' "${SUPPORTED_UBUNTU_VERSIONS[@]}"))" >&2
+  exit 1
+fi
+
+UBUNTU_CODENAME_VALUE="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
+if [[ -z "${UBUNTU_CODENAME_VALUE}" ]]; then
+  echo "Unable to determine Ubuntu codename from /etc/os-release" >&2
   exit 1
 fi
 
@@ -161,13 +191,13 @@ if [[ "$REQUESTED_VERSION" != "latest" && ! "$REQUESTED_VERSION" =~ ^v?[0-9]+\.[
 fi
 
 apt-get update -y
-apt-get install -y ca-certificates curl gnupg lsb-release jq tar xz-utils bash sudo
+apt-get install -y ca-certificates curl gnupg jq tar xz-utils bash sudo
 
 if ! command -v docker >/dev/null 2>&1; then
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
   chmod a+r /etc/apt/keyrings/docker.gpg
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${UBUNTU_CODENAME_VALUE} stable" > /etc/apt/sources.list.d/docker.list
   apt-get update -y
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 fi

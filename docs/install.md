@@ -6,6 +6,7 @@ DeckOS installs directly on the host as a `systemd` service. It does not run as 
 
 - Ubuntu `24.04`
 - Ubuntu `25.10`
+- Ubuntu `26.04`
 - Root access through `sudo`
 - A host with `systemd`
 

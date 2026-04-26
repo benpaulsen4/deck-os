@@ -25,7 +25,7 @@ This guide is written for people using DeckOS to manage a Linux homelab server. 
 ## Before You Begin
 
 - DeckOS is designed for trusted environments such as a home network or private lab
-- The provided installer supports Ubuntu `24.04` and `25.10`
+- The provided installer supports Ubuntu `24.04`, `25.10`, and `26.04`
 - DeckOS manages Docker on the host and therefore has powerful access to the machine
 
 If you are installing DeckOS for the first time, begin with [Install DeckOS](install.md).
