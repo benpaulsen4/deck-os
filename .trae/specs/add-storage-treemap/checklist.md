@@ -1,0 +1,13 @@
+- [ ] `Settings` exposes a per-disk action that opens storage analysis for that specific disk.
+- [ ] The storage analysis view renders a treemap whose block size reflects file or directory size.
+- [ ] The storage analysis view renders the recursive directory hierarchy concurrently in one nested treemap rather than requiring drilldown.
+- [ ] Directory blocks show the folder name in a header band and file blocks show their name through hover tooltip behavior.
+- [ ] The 20 most common file extensions receive stable color coding with a visible legend and fallback colors for everything else.
+- [ ] The implementation uses a dedicated `btrfs` fast analyzer and uses the generic fallback scan for all other filesystems.
+- [ ] The implementation records which analyzer produced the snapshot or why it fell back.
+- [ ] The implementation uses same-device enforcement and freshness metadata regardless of analyzer choice.
+- [ ] Repeat analysis can reuse cached or incrementally refreshed data with visible freshness information.
+- [ ] Double-clicking a directory block opens that directory in the `Files` page.
+- [ ] Double-clicking a file block opens the file's parent directory in `Files` and preserves file-specific context.
+- [ ] Loading, stale, oversized, unsupported, permission-denied, and generic failure states are handled without breaking the rest of the app.
+- [ ] Server and client validation cover analysis results, extension histogram output, handoff behavior, and degraded cases.
