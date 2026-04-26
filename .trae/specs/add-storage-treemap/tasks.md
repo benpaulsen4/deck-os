@@ -1,16 +1,16 @@
 # Tasks
 - [ ] Task 1: Finalize the storage analysis architecture and API contract.
-  - [ ] Add storage-analysis schemas in `packages/server/src/lib/schema.ts` for mount identity, analysis status, freshness metadata, extension histogram, top-20 extension legend, and recursive tree nodes.
+  - [x] Add storage-analysis schemas in `packages/server/src/lib/schema.ts` for mount identity, analysis status, freshness metadata, extension histogram, top-20 extension legend, and recursive tree nodes.
   - [ ] Define the client route shape for the dedicated analysis page plus the `Files` handoff search parameters: `path`, optional `select`, and optional `open`.
-  - [ ] Define mount-key generation, cache file paths under `DATA_DIR/storage-analysis`, the 5-minute freshness TTL, and the analysis job states `idle`, `scanning`, `ready`, `stale`, and `failed`.
-  - [ ] Define the `StorageAnalyzer` interface, analyzer selection order, analyzer result metadata, and failure taxonomy for `unsupported`, `unsafe`, `permission-denied`, and `runtime-failed`, with `btrfs` as the only filesystem-specific fast path in version 1.
+  - [x] Define mount-key generation, cache file paths under `DATA_DIR/storage-analysis`, the 5-minute freshness TTL, and the analysis job states `idle`, `scanning`, `ready`, `stale`, and `failed`.
+  - [x] Define the `StorageAnalyzer` interface, analyzer selection order, analyzer result metadata, and failure taxonomy for `unsupported`, `unsafe`, `permission-denied`, and `runtime-failed`, with `btrfs` as the only filesystem-specific fast path in version 1.
 
-- [ ] Task 2: Add server-side storage analysis support.
-  - [ ] Create `packages/server/src/services/storageAnalysis.ts` to own mount lookup, analyzer registry selection, same-device scan enforcement, snapshot persistence, stale-result serving, and background refresh triggering.
-  - [ ] Implement one concrete `btrfs` analyzer provider with explicit capability probing and deterministic skip reasons when the fast path is not safe or supported.
-  - [ ] Implement the generic Linux-first fallback scan with bounded concurrency using `fs.opendir()` plus metadata calls, ensuring traversal stays on the selected mount by checking device id.
-  - [ ] Build extension histogram generation, stable top-20 palette assignment, `oversized` result detection, and result serialization for the full recursive hierarchy.
-  - [ ] Expose the analysis data through validated server procedures or routes with tests for cache hit, `btrfs` analyzer selection, analyzer skip reasons, stale-while-refresh, permission failure, same-device enforcement, and unsupported-host behavior.
+- [x] Task 2: Add server-side storage analysis support.
+  - [x] Create `packages/server/src/services/storageAnalysis.ts` to own mount lookup, analyzer registry selection, same-device scan enforcement, snapshot persistence, stale-result serving, and background refresh triggering.
+  - [x] Implement one concrete `btrfs` analyzer provider with explicit capability probing and deterministic skip reasons when the fast path is not safe or supported.
+  - [x] Implement the generic Linux-first fallback scan with bounded concurrency using `fs.opendir()` plus metadata calls, ensuring traversal stays on the selected mount by checking device id.
+  - [x] Build extension histogram generation, stable top-20 palette assignment, `oversized` result detection, and result serialization for the full recursive hierarchy.
+  - [x] Expose the analysis data through validated server procedures or routes with tests for cache hit, `btrfs` analyzer selection, analyzer skip reasons, stale-while-refresh, permission failure, same-device enforcement, and unsupported-host behavior.
 
 - [ ] Task 3: Add the storage analysis UI from `Settings`.
   - [ ] Add a per-disk action in `Settings` that opens a dedicated analysis page for the chosen disk.

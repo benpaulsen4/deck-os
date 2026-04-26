@@ -186,6 +186,87 @@ const StackStatusSchema = z.object({
   containers: z.array(ContainerInfoSchema),
 });
 
+const StorageAnalysisMountSchema = z.object({
+  id: z.string(),
+  mount: z.string(),
+  fs: z.string(),
+  filesystemType: z.string(),
+  size: z.number(),
+  used: z.number(),
+  deviceId: z.number().nullable(),
+});
+
+const StorageAnalysisExtensionLegendEntrySchema = z.object({
+  extension: z.string(),
+  label: z.string(),
+  count: z.number().int(),
+  totalSize: z.number(),
+  color: z.string(),
+});
+
+type StorageAnalysisNode = {
+  path: string;
+  name: string;
+  type: "directory" | "file" | "symlink" | "other";
+  size: number;
+  extension: string | null;
+  childCount: number;
+  children: StorageAnalysisNode[];
+};
+
+const StorageAnalysisNodeSchema: z.ZodType<StorageAnalysisNode> = z.lazy(() =>
+  z.object({
+    path: z.string(),
+    name: z.string(),
+    type: z.enum(["directory", "file", "symlink", "other"]),
+    size: z.number(),
+    extension: z.string().nullable(),
+    childCount: z.number().int(),
+    children: z.array(StorageAnalysisNodeSchema),
+  })
+);
+
+const StorageAnalysisAnalyzerKindSchema = z.enum(["cache", "btrfs", "fallback"]);
+const StorageAnalysisStatusSchema = z.enum(["scanning", "ready", "stale", "failed"]);
+
+const StorageAnalysisSnapshotSchema = z.object({
+  mount: StorageAnalysisMountSchema,
+  status: StorageAnalysisStatusSchema,
+  analyzer: StorageAnalysisAnalyzerKindSchema,
+  sourceKind: z.enum(["cache-fresh", "cache-stale", "btdu", "scan"]),
+  mountKey: z.string(),
+  generatedAt: z.string().datetime(),
+  startedAt: z.string().datetime(),
+  completedAt: z.string().datetime(),
+  freshnessTtlMs: z.number().int(),
+  totalSize: z.number(),
+  nodeCount: z.number().int(),
+  oversized: z.boolean(),
+  extensionHistogram: z.array(StorageAnalysisExtensionLegendEntrySchema),
+  root: StorageAnalysisNodeSchema,
+  fallbackReason: z.string().nullable().optional(),
+});
+
+const StorageAnalysisResponseSchema = z.object({
+  mount: StorageAnalysisMountSchema,
+  status: StorageAnalysisStatusSchema,
+  analyzer: StorageAnalysisAnalyzerKindSchema.nullable(),
+  sourceKind: z.enum(["cache-fresh", "cache-stale", "btdu", "scan", "pending"]).nullable(),
+  mountKey: z.string(),
+  generatedAt: z.string().datetime().nullable(),
+  startedAt: z.string().datetime().nullable(),
+  completedAt: z.string().datetime().nullable(),
+  freshnessTtlMs: z.number().int(),
+  totalSize: z.number().nullable(),
+  nodeCount: z.number().int().nullable(),
+  oversized: z.boolean(),
+  extensionHistogram: z.array(StorageAnalysisExtensionLegendEntrySchema),
+  root: StorageAnalysisNodeSchema.nullable(),
+  refreshing: z.boolean(),
+  error: z.string().nullable(),
+  fallbackReason: z.string().nullable(),
+});
+
 type AppMetadata = z.infer<typeof AppMetadataSchema>;
 type ComposeFile = z.infer<typeof ComposeFileSchema>;
 type App = z.infer<typeof AppSchema>;
@@ -199,6 +280,14 @@ type ProcessMetrics = z.infer<typeof ProcessMetricsSchema>;
 type ContainerInfo = z.infer<typeof ContainerInfoSchema>;
 type ContainerState = z.infer<typeof ContainerStateSchema>;
 type StackStatus = z.infer<typeof StackStatusSchema>;
+type StorageAnalysisMount = z.infer<typeof StorageAnalysisMountSchema>;
+type StorageAnalysisExtensionLegendEntry = z.infer<
+  typeof StorageAnalysisExtensionLegendEntrySchema
+>;
+type StorageAnalysisAnalyzerKind = z.infer<typeof StorageAnalysisAnalyzerKindSchema>;
+type StorageAnalysisStatus = z.infer<typeof StorageAnalysisStatusSchema>;
+type StorageAnalysisSnapshot = z.infer<typeof StorageAnalysisSnapshotSchema>;
+type StorageAnalysisResponse = z.infer<typeof StorageAnalysisResponseSchema>;
 
 export {
   AppMetadataSchema,
@@ -215,6 +304,13 @@ export {
   ContainerStateSchema,
   ContainerPortSchema,
   StackStatusSchema,
+  StorageAnalysisMountSchema,
+  StorageAnalysisNodeSchema,
+  StorageAnalysisExtensionLegendEntrySchema,
+  StorageAnalysisAnalyzerKindSchema,
+  StorageAnalysisStatusSchema,
+  StorageAnalysisSnapshotSchema,
+  StorageAnalysisResponseSchema,
   UrlOrEmptySchema,
   OptionalUrlSchema,
   OptionalUrlOrPathSchema,
@@ -240,4 +336,11 @@ export type {
   ContainerInfo,
   ContainerState,
   StackStatus,
+  StorageAnalysisMount,
+  StorageAnalysisNode,
+  StorageAnalysisExtensionLegendEntry,
+  StorageAnalysisAnalyzerKind,
+  StorageAnalysisStatus,
+  StorageAnalysisSnapshot,
+  StorageAnalysisResponse,
 };
