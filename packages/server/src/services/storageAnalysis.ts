@@ -78,6 +78,16 @@ type ScanStats = {
   extensionCounts: Map<string, { count: number; totalSize: number }>;
 };
 
+type PartialScanSnapshot = {
+  root: StorageAnalysisNode;
+  totalSize: number;
+  nodeCount: number;
+  oversized: boolean;
+  extensionHistogram: StorageAnalysisExtensionLegendEntry[];
+  warningCode: StorageAnalysisWarningCode | null;
+  warning: string | null;
+};
+
 type ServiceDeps = {
   fsSize: typeof si.fsSize;
   statImpl: typeof stat;
@@ -132,6 +142,20 @@ function extensionLabel(extension: string): string {
   return extension.length > 0 ? extension.slice(1).toUpperCase() : "(none)";
 }
 
+function normalizeMountPath(mountPath: string): string {
+  if (process.platform === "win32" && /^[a-zA-Z]:$/.test(mountPath)) {
+    return `${mountPath}\\`;
+  }
+  return mountPath;
+}
+
+function cloneNode(node: StorageAnalysisNode): StorageAnalysisNode {
+  return {
+    ...node,
+    children: node.children.map(cloneNode),
+  };
+}
+
 function createRequestedMount(input: { mount: string; fs: string }): StorageAnalysisMount {
   return {
     id: createMountKey(input.fs, input.mount),
@@ -178,6 +202,7 @@ function toSnapshotResponse(
 function pendingResponse(
   mount: StorageAnalysisMount,
   mountKey: string,
+  startedAt: string | null,
   errorCode: StorageAnalysisErrorCode | null,
   error: string | null
 ): StorageAnalysisResponse {
@@ -188,7 +213,7 @@ function pendingResponse(
     sourceKind: "pending",
     mountKey,
     generatedAt: null,
-    startedAt: null,
+    startedAt,
     completedAt: null,
     freshnessTtlMs: STORAGE_ANALYSIS_TTL_MS,
     totalSize: null,
@@ -298,7 +323,8 @@ function buildExtensionHistogram(
 async function scanTree(
   rootPath: string,
   rootDeviceId: number,
-  deps: ServiceDeps
+  deps: ServiceDeps,
+  onPartialSnapshot?: (partial: PartialScanSnapshot) => Promise<void>
 ): Promise<StorageAnalysisSuccess> {
   const limit = createLimiter(STORAGE_ANALYSIS_SCAN_CONCURRENCY);
   const stats: ScanStats = {
@@ -308,7 +334,31 @@ async function scanTree(
     extensionCounts: new Map(),
   };
 
-  const visit = async (targetPath: string): Promise<StorageAnalysisNode | null> => {
+  const buildWarningState = () => ({
+    warningCode: stats.permissionDeniedCount > 0 ? ("partial-permissions" as const) : null,
+    warning:
+      stats.permissionDeniedCount > 0
+        ? `Skipped ${stats.permissionDeniedCount} path${stats.permissionDeniedCount === 1 ? "" : "s"} because DeckOS did not have permission to read them.`
+        : null,
+  });
+
+  const emitPartialSnapshot = async (root: StorageAnalysisNode) => {
+    if (!onPartialSnapshot) {
+      return;
+    }
+    const warningState = buildWarningState();
+    await onPartialSnapshot({
+      root: cloneNode(root),
+      totalSize: root.size,
+      nodeCount: stats.nodeCount,
+      oversized: stats.oversized,
+      extensionHistogram: buildExtensionHistogram(stats.extensionCounts),
+      warningCode: warningState.warningCode,
+      warning: warningState.warning,
+    });
+  };
+
+  const visit = async (targetPath: string, isRoot = false): Promise<StorageAnalysisNode | null> => {
     let entryStat;
     try {
       entryStat = await limit(() => deps.lstatImpl(targetPath));
@@ -356,37 +406,49 @@ async function scanTree(
         }
         throw error;
       }
-      const childTasks: Promise<StorageAnalysisNode | null>[] = [];
-      for await (const entry of dir) {
-        const childPath = path.join(targetPath, entry.name);
-        childTasks.push(
-          visit(childPath).catch((error: unknown) => {
-            const code = (error as NodeJS.ErrnoException | undefined)?.code;
-            if (code === "EACCES" || code === "EPERM" || code === "ENOENT") {
-              if (code === "EACCES" || code === "EPERM") {
-                stats.permissionDeniedCount += 1;
-              }
-              return null;
-            }
-            throw error;
-          })
-        );
-      }
-      const children = (await Promise.all(childTasks))
-        .filter((child): child is StorageAnalysisNode => child !== null)
-        .sort((left, right) => right.size - left.size || left.name.localeCompare(right.name));
-      const size = children.reduce((sum, child) => sum + child.size, 0);
-      stats.nodeCount += 1;
-      stats.oversized ||= stats.nodeCount > STORAGE_ANALYSIS_MAX_NODES;
-      return {
+      const node: StorageAnalysisNode = {
         path: targetPath,
         name: getNodeName(targetPath),
         type,
-        size,
+        size: 0,
         extension: null,
-        childCount: children.length,
-        children,
+        childCount: 0,
+        children: [],
       };
+      const childTasks: Promise<void>[] = [];
+      for await (const entry of dir) {
+        const childPath = path.join(targetPath, entry.name);
+        const task = visit(childPath).catch((error: unknown) => {
+          const code = (error as NodeJS.ErrnoException | undefined)?.code;
+          if (code === "EACCES" || code === "EPERM" || code === "ENOENT") {
+            if (code === "EACCES" || code === "EPERM") {
+              stats.permissionDeniedCount += 1;
+            }
+            return null;
+          }
+          throw error;
+        });
+        childTasks.push(
+          task.then(async (child) => {
+            if (!child) {
+              return;
+            }
+            node.children.push(child);
+            node.children.sort(
+              (left, right) => right.size - left.size || left.name.localeCompare(right.name)
+            );
+            node.childCount = node.children.length;
+            node.size = node.children.reduce((sum, current) => sum + current.size, 0);
+            if (isRoot) {
+              await emitPartialSnapshot(node);
+            }
+          })
+        );
+      }
+      await Promise.all(childTasks);
+      stats.nodeCount += 1;
+      stats.oversized ||= stats.nodeCount > STORAGE_ANALYSIS_MAX_NODES;
+      return node;
     }
 
     const extension = getExtension(targetPath, type);
@@ -409,11 +471,12 @@ async function scanTree(
     };
   };
 
-  const root = await visit(rootPath);
+  const root = await visit(rootPath, true);
   if (!root) {
     throw new Error(`Unable to scan root path: ${rootPath}`);
   }
 
+  const warningState = buildWarningState();
   return {
     analyzer: "scan",
     sourceKind: "scan",
@@ -422,11 +485,8 @@ async function scanTree(
     nodeCount: stats.nodeCount,
     oversized: stats.oversized,
     extensionHistogram: buildExtensionHistogram(stats.extensionCounts),
-    warningCode: stats.permissionDeniedCount > 0 ? "partial-permissions" : null,
-    warning:
-      stats.permissionDeniedCount > 0
-        ? `Skipped ${stats.permissionDeniedCount} path${stats.permissionDeniedCount === 1 ? "" : "s"} because DeckOS did not have permission to read them.`
-        : null,
+    warningCode: warningState.warningCode,
+    warning: warningState.warning,
   };
 }
 
@@ -453,7 +513,17 @@ async function resolveMount(
   }
   let rootStat;
   try {
-    rootStat = await deps.statImpl(match.mount);
+    const normalizedMount = normalizeMountPath(match.mount);
+    rootStat = await deps.statImpl(normalizedMount);
+    return {
+      id: createMountKey(match.fs, match.mount),
+      mount: normalizedMount,
+      fs: match.fs,
+      filesystemType: (match.type || "unknown").toLowerCase(),
+      size: match.size,
+      used: match.used,
+      deviceId: Number.isFinite(rootStat.dev) ? rootStat.dev : null,
+    };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException | undefined)?.code;
     if (code === "EACCES" || code === "EPERM") {
@@ -467,15 +537,6 @@ async function resolveMount(
       error instanceof Error ? error.message : "Storage analysis failed unexpectedly."
     );
   }
-  return {
-    id: createMountKey(match.fs, match.mount),
-    mount: match.mount,
-    fs: match.fs,
-    filesystemType: (match.type || "unknown").toLowerCase(),
-    size: match.size,
-    used: match.used,
-    deviceId: Number.isFinite(rootStat.dev) ? rootStat.dev : null,
-  };
 }
 
 async function runAnalysis(context: StorageAnalysisContext, deps: ServiceDeps): Promise<void> {
@@ -485,7 +546,32 @@ async function runAnalysis(context: StorageAnalysisContext, deps: ServiceDeps): 
       "DeckOS could not resolve a stable device boundary for this mount."
     );
   }
-  const result = await scanTree(context.mount.mount, context.mount.deviceId, deps);
+  const result = await scanTree(
+    context.mount.mount,
+    context.mount.deviceId,
+    deps,
+    async (partial) => {
+      const generatedAt = new Date(deps.now()).toISOString();
+      await writeSnapshot({
+        mount: context.mount,
+        status: "scanning",
+        analyzer: "scan",
+        sourceKind: "scan",
+        mountKey: context.mountKey,
+        generatedAt,
+        startedAt: context.startedAt,
+        completedAt: generatedAt,
+        freshnessTtlMs: STORAGE_ANALYSIS_TTL_MS,
+        totalSize: partial.totalSize,
+        nodeCount: partial.nodeCount,
+        oversized: partial.oversized,
+        extensionHistogram: partial.extensionHistogram,
+        root: partial.root,
+        warningCode: partial.warningCode,
+        warning: partial.warning,
+      });
+    }
+  );
 
   const completedAt = new Date(deps.now()).toISOString();
   const snapshot: StorageAnalysisSnapshot = {
@@ -580,7 +666,13 @@ export async function getStorageAnalysis(
             error instanceof Error ? error.message : "Storage analysis failed unexpectedly."
           );
     const requestedMount = createRequestedMount(input);
-    return pendingResponse(requestedMount, requestedMount.id, failure.code, failure.message);
+    return pendingResponse(
+      requestedMount,
+      requestedMount.id,
+      null,
+      failure.code,
+      failure.message
+    );
   }
   const mountKey = mount.id;
   const snapshot = await readSnapshot(mountKey);
@@ -588,6 +680,15 @@ export async function getStorageAnalysis(
   const nowMs = deps.now();
 
   if (snapshot) {
+    if (snapshot.status === "scanning") {
+      return toSnapshotResponse(
+        snapshot,
+        "scanning",
+        true,
+        job?.errorCode ?? null,
+        job?.error ?? null
+      );
+    }
     const fresh = isSnapshotFresh(snapshot, nowMs);
     if (fresh) {
       return toSnapshotResponse(
@@ -607,6 +708,7 @@ export async function getStorageAnalysis(
   return pendingResponse(
     mount,
     mountKey,
+    current?.startedAt ?? null,
     current?.state === "failed" ? current.errorCode : null,
     current?.state === "failed" ? current.error : null
   );
@@ -628,7 +730,13 @@ export async function refreshStorageAnalysis(
             error instanceof Error ? error.message : "Storage analysis failed unexpectedly."
           );
     const requestedMount = createRequestedMount(input);
-    return pendingResponse(requestedMount, requestedMount.id, failure.code, failure.message);
+    return pendingResponse(
+      requestedMount,
+      requestedMount.id,
+      null,
+      failure.code,
+      failure.message
+    );
   }
   await scheduleRefresh(mount, deps, true);
   const snapshot = await readSnapshot(mount.id);
@@ -639,6 +747,7 @@ export async function refreshStorageAnalysis(
   return pendingResponse(
     mount,
     mount.id,
+    current?.startedAt ?? null,
     current?.state === "failed" ? current.errorCode : null,
     current?.state === "failed" ? current.error : null
   );

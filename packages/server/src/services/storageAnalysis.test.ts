@@ -87,6 +87,7 @@ describe("storage analysis service", () => {
       deps
     );
     expect(initial.status).toBe("scanning");
+    expect(initial.startedAt).not.toBeNull();
 
     const ready = await waitForReady(() =>
       storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps)
@@ -152,6 +153,60 @@ describe("storage analysis service", () => {
     expect(stale.status).toBe("stale");
     expect(stale.refreshing).toBe(true);
     expect(stale.root?.name).toBe("fixture");
+  });
+
+  test("publishes partial root results while a long scan is still running", async () => {
+    const tempDataDir = await mkdtemp(path.join(os.tmpdir(), "deckos-storage-analysis-"));
+    const fixtureRoot = path.join(tempDataDir, "fixture");
+    const fastDir = path.join(fixtureRoot, "fast");
+    const slowDir = path.join(fixtureRoot, "slow");
+    await mkdir(fastDir, { recursive: true });
+    await mkdir(slowDir, { recursive: true });
+    await writeFile(path.join(fastDir, "fast.log"), "fast");
+    await writeFile(path.join(slowDir, "slow.log"), "slow");
+
+    const storage = await loadStorageModule(tempDataDir);
+    await storage.clearStorageAnalysisState();
+
+    const delayedLstat: typeof lstat = (async (targetPath: Parameters<typeof lstat>[0]) => {
+      if (String(targetPath).endsWith("slow.log")) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      return await lstat(targetPath);
+    }) as unknown as typeof lstat;
+
+    const deps = {
+      fsSize: vi.fn(async () => [
+        {
+          fs: "/dev/sda1",
+          mount: fixtureRoot,
+          size: 1000,
+          used: 500,
+          available: 500,
+          use: 50,
+          rw: true,
+          type: "ext4",
+        },
+      ]),
+      statImpl: stat,
+      lstatImpl: delayedLstat,
+      opendirImpl: opendir,
+      now: () => Date.now(),
+    };
+
+    const initial = await storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps);
+    expect(initial.status).toBe("scanning");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const progress = await storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps);
+    expect(progress.status).toBe("scanning");
+    expect(progress.startedAt).not.toBeNull();
+    expect(progress.root?.children.some((child) => child.name === "fast")).toBe(true);
+
+    const ready = await waitForReady(() =>
+      storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps)
+    );
+    expect(ready.status).toBe("ready");
   });
 
   test("returns a warning when nested paths are skipped for permissions", async () => {
