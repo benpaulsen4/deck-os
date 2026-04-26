@@ -77,6 +77,48 @@ function getFailureCopy(errorCode: string | null | undefined, error: string | nu
   }
 }
 
+function getScanIndicator(analysis: NonNullable<ReturnType<typeof StorageAnalysisPage> extends never ? never : any>) {
+  if (!analysis) {
+    return {
+      title: "Preparing analysis",
+      tone: "pending",
+      detail: "Waiting for the first scan response.",
+    };
+  }
+  if (analysis.status === "scanning") {
+    return analysis.root
+      ? {
+          title: "Scanning in progress",
+          tone: "scanning",
+          detail: "Showing partial results. Totals will continue growing until the scan completes.",
+        }
+      : {
+          title: "Scan starting",
+          tone: "pending",
+          detail: "No tree data is available yet.",
+        };
+  }
+  if (analysis.status === "stale") {
+    return {
+      title: "Showing stale snapshot",
+      tone: "stale",
+      detail: "Older results are visible while a refresh runs in the background.",
+    };
+  }
+  if (analysis.status === "ready") {
+    return {
+      title: "Scan complete",
+      tone: "ready",
+      detail: "This snapshot is complete for the current scan pass.",
+    };
+  }
+  return {
+    title: "Scan failed",
+    tone: "failed",
+    detail: "DeckOS could not finish the storage analysis.",
+  };
+}
+
 function StorageAnalysisPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -132,6 +174,7 @@ function StorageAnalysisPage() {
   });
 
   const analysis = analysisQuery.data;
+  const scanIndicator = getScanIndicator(analysis as never);
   const extensionColors = useMemo(
     () =>
       new Map((analysis?.extensionHistogram ?? []).map((entry) => [entry.extension, entry.color])),
@@ -322,6 +365,16 @@ function StorageAnalysisPage() {
         </aside>
 
         <section className="storage-analysis-main">
+          <div className={`storage-analysis-indicator storage-analysis-indicator--${scanIndicator.tone}`}>
+            <div className="storage-analysis-indicator-title">{scanIndicator.title}</div>
+            <div className="storage-analysis-indicator-copy">{scanIndicator.detail}</div>
+            {analysis?.startedAt && (
+              <div className="storage-analysis-indicator-meta">
+                Started {formatStorageTimestamp(analysis.startedAt)}
+              </div>
+            )}
+          </div>
+
           {analysisQuery.isLoading || (!analysis && analysisQuery.isFetching) ? (
             <div className="panel storage-analysis-empty">
               <span>Preparing storage analysis…</span>
@@ -342,7 +395,14 @@ function StorageAnalysisPage() {
             <>
               <div className="storage-analysis-banner">
                 <span>{analysis?.mount.filesystemType?.toUpperCase() ?? "UNKNOWN"}</span>
-                <span>{analysis?.refreshing ? "Refresh in progress" : "Snapshot ready"}</span>
+                <span>
+                  {analysis?.status === "scanning"
+                    ? "Live partial snapshot"
+                    : analysis?.refreshing
+                      ? "Refresh in progress"
+                      : "Snapshot ready"}
+                </span>
+                {analysis?.isPartial && <span>Totals not final</span>}
                 {analysis?.oversized && <span>Large result set</span>}
               </div>
 

@@ -24,6 +24,7 @@ const { refreshSpy, queryState } = vi.hoisted(() => ({
     freshnessTtlMs: 300000,
     totalSize: 500,
     nodeCount: 3,
+    isPartial: false,
     oversized: false,
     refreshing: false,
     error: null,
@@ -150,6 +151,7 @@ describe("storage route", () => {
       freshnessTtlMs: 300000,
       totalSize: 500,
       nodeCount: 3,
+      isPartial: false,
       oversized: false,
       refreshing: false,
       error: null,
@@ -215,6 +217,7 @@ describe("storage route", () => {
     expect(screen.getAllByText("/data").length).toBeGreaterThan(0);
     expect(screen.getByText("LOG")).toBeInTheDocument();
     expect(screen.getByText(/Skipped 1 path/)).toBeInTheDocument();
+    expect(screen.getByText("Scan complete")).toBeInTheDocument();
   });
 
   it("updates the selection rail when a block is clicked", () => {
@@ -246,6 +249,7 @@ describe("storage route", () => {
       completedAt: null,
       totalSize: null,
       nodeCount: null,
+      isPartial: false,
       errorCode: "permission-denied",
       error: "DeckOS cannot read this mount. Check filesystem permissions and try again.",
       warningCode: null,
@@ -258,5 +262,24 @@ describe("storage route", () => {
 
     expect(screen.getByText("Permission Required")).toBeInTheDocument();
     expect(screen.getByText(/cannot read this mount/i)).toBeInTheDocument();
+  });
+
+  it("makes active scanning unmistakable", () => {
+    Object.assign(queryState, {
+      status: "scanning",
+      refreshing: true,
+      isPartial: true,
+      totalSize: 1200,
+      nodeCount: 8,
+    });
+    const Component = Route.options.component!;
+    render(<Component />);
+
+    expect(screen.getByText("Scanning in progress")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Showing partial results\. Totals will continue growing/)
+    ).toBeInTheDocument();
+    expect(screen.getByText("Live partial snapshot")).toBeInTheDocument();
+    expect(screen.getByText("Totals not final")).toBeInTheDocument();
   });
 });

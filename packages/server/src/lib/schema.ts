@@ -266,6 +266,7 @@ const StorageAnalysisResponseSchema = z.object({
   freshnessTtlMs: z.number().int(),
   totalSize: z.number().nullable(),
   nodeCount: z.number().int().nullable(),
+  isPartial: z.boolean(),
   oversized: z.boolean(),
   extensionHistogram: z.array(StorageAnalysisExtensionLegendEntrySchema),
   root: StorageAnalysisNodeSchema.nullable(),
