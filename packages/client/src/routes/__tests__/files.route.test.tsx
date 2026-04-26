@@ -74,8 +74,13 @@ vi.mock("@tanstack/react-query", () => ({
     const maybe = arg as { queryKey?: unknown[] };
     const key = maybe.queryKey?.[0];
     if (key === "files.list") {
+      const requestedPath = (maybe.queryKey?.[1] as string) || "C:\\";
       return {
-        data: { cwd: "C:\\", parent: null, entries: state.entries },
+        data: {
+          cwd: requestedPath || "C:\\",
+          parent: requestedPath && requestedPath !== "C:\\" ? "C:\\" : null,
+          entries: state.entries,
+        },
         isFetching: false,
         isLoading: false,
         dataUpdatedAt: Date.now(),
@@ -104,6 +109,7 @@ vi.mock("../../lib/auth", () => ({
 
 describe("files route", () => {
   beforeEach(() => {
+    window.history.replaceState({}, "", "/files");
     setPinsSpy.mockReset();
     mkdirSpy.mockReset();
     renameSpy.mockReset();
@@ -183,5 +189,28 @@ describe("files route", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cut" }));
     fireEvent.click(screen.getByRole("button", { name: "Paste" }));
     await waitFor(() => expect(moveSpy).not.toHaveBeenCalled());
+  });
+
+  it("consumes one-time handoff search params for path, selection, and open", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/files?path=C%3A%5Cworkspace&select=C%3A%5Cworkspace%5Cnote.txt&open=true"
+    );
+    state.entries = [
+      {
+        name: "note.txt",
+        path: "C:\\workspace\\note.txt",
+        type: "file",
+        size: 64,
+        modifiedAt: "2026-01-01T00:00:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+    const Component = Route.options.component!;
+    render(<Component />);
+
+    expect(await screen.findByText("Back")).toBeInTheDocument();
+    expect(window.location.search).toBe("");
   });
 });

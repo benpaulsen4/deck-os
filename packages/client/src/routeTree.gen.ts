@@ -13,6 +13,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as FilesRouteImport } from './routes/files'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppsIndexRouteImport } from './routes/apps/index'
+import { Route as StorageMountIdRouteImport } from './routes/storage.$mountId'
 import { Route as AppsNewRouteImport } from './routes/apps/new'
 import { Route as AppsAppIdRouteImport } from './routes/apps/$appId'
 import { Route as AppsTemplatesIndexRouteImport } from './routes/apps/templates/index'
@@ -36,6 +37,11 @@ const IndexRoute = IndexRouteImport.update({
 const AppsIndexRoute = AppsIndexRouteImport.update({
   id: '/apps/',
   path: '/apps/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StorageMountIdRoute = StorageMountIdRouteImport.update({
+  id: '/storage/$mountId',
+  path: '/storage/$mountId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppsNewRoute = AppsNewRouteImport.update({
@@ -65,6 +71,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/apps/$appId': typeof AppsAppIdRoute
   '/apps/new': typeof AppsNewRoute
+  '/storage/$mountId': typeof StorageMountIdRoute
   '/apps/': typeof AppsIndexRoute
   '/apps/templates/$templateId': typeof AppsTemplatesTemplateIdRoute
   '/apps/templates/': typeof AppsTemplatesIndexRoute
@@ -75,6 +82,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/apps/$appId': typeof AppsAppIdRoute
   '/apps/new': typeof AppsNewRoute
+  '/storage/$mountId': typeof StorageMountIdRoute
   '/apps': typeof AppsIndexRoute
   '/apps/templates/$templateId': typeof AppsTemplatesTemplateIdRoute
   '/apps/templates': typeof AppsTemplatesIndexRoute
@@ -86,6 +94,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/apps/$appId': typeof AppsAppIdRoute
   '/apps/new': typeof AppsNewRoute
+  '/storage/$mountId': typeof StorageMountIdRoute
   '/apps/': typeof AppsIndexRoute
   '/apps/templates/$templateId': typeof AppsTemplatesTemplateIdRoute
   '/apps/templates/': typeof AppsTemplatesIndexRoute
@@ -98,6 +107,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/apps/$appId'
     | '/apps/new'
+    | '/storage/$mountId'
     | '/apps/'
     | '/apps/templates/$templateId'
     | '/apps/templates/'
@@ -108,6 +118,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/apps/$appId'
     | '/apps/new'
+    | '/storage/$mountId'
     | '/apps'
     | '/apps/templates/$templateId'
     | '/apps/templates'
@@ -118,6 +129,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/apps/$appId'
     | '/apps/new'
+    | '/storage/$mountId'
     | '/apps/'
     | '/apps/templates/$templateId'
     | '/apps/templates/'
@@ -129,6 +141,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   AppsAppIdRoute: typeof AppsAppIdRoute
   AppsNewRoute: typeof AppsNewRoute
+  StorageMountIdRoute: typeof StorageMountIdRoute
   AppsIndexRoute: typeof AppsIndexRoute
   AppsTemplatesTemplateIdRoute: typeof AppsTemplatesTemplateIdRoute
   AppsTemplatesIndexRoute: typeof AppsTemplatesIndexRoute
@@ -162,6 +175,13 @@ declare module '@tanstack/react-router' {
       path: '/apps'
       fullPath: '/apps/'
       preLoaderRoute: typeof AppsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/storage/$mountId': {
+      id: '/storage/$mountId'
+      path: '/storage/$mountId'
+      fullPath: '/storage/$mountId'
+      preLoaderRoute: typeof StorageMountIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/apps/new': {
@@ -201,6 +221,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   AppsAppIdRoute: AppsAppIdRoute,
   AppsNewRoute: AppsNewRoute,
+  StorageMountIdRoute: StorageMountIdRoute,
   AppsIndexRoute: AppsIndexRoute,
   AppsTemplatesTemplateIdRoute: AppsTemplatesTemplateIdRoute,
   AppsTemplatesIndexRoute: AppsTemplatesIndexRoute,

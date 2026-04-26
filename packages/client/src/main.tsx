@@ -10,6 +10,7 @@ import { QUERY_STALE_TIME_MS } from "./lib/constants.js";
 import "./styles/global.css";
 import "./styles/shell.css";
 import "./styles/files.css";
+import "./styles/storage-analysis.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

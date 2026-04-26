@@ -2,18 +2,30 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route } from "../settings";
+import { createStorageMountId } from "../../lib/storageAnalysis";
 
-const { addToastSpy, authFetchSpy, emitUnauthorizedEventSpy, checkForUpdatesSpy } =
+const { addToastSpy, authFetchSpy, emitUnauthorizedEventSpy, checkForUpdatesSpy, navigateSpy } =
   vi.hoisted(() => ({
   addToastSpy: vi.fn(),
   authFetchSpy: vi.fn(),
   emitUnauthorizedEventSpy: vi.fn(),
   checkForUpdatesSpy: vi.fn(async () => ({ updateAvailable: false })),
+  navigateSpy: vi.fn(),
 }));
 
 vi.mock("../../stores/toast", () => ({
   useToastStore: () => ({ addToast: addToastSpy }),
 }));
+
+vi.mock("@tanstack/react-router", async () => {
+  const actual = await vi.importActual<typeof import("@tanstack/react-router")>(
+    "@tanstack/react-router"
+  );
+  return {
+    ...actual,
+    useNavigate: () => navigateSpy,
+  };
+});
 
 vi.mock("../../trpc", () => ({
   useTRPC: () => ({
@@ -63,6 +75,61 @@ vi.mock("@tanstack/react-query", () => ({
         refetch: vi.fn(async () => ({})),
       };
     }
+    if (Array.isArray(maybe?.queryKey) && maybe.queryKey[0] === "system.getInfo") {
+      return {
+        data: {
+          hostname: "deckos",
+          os: "linux",
+          osDistro: "Ubuntu",
+          osRelease: "24.04",
+          osArch: "x64",
+          nodeVersion: "v24.0.0",
+          uptime: 3600,
+          dockerVersion: "26.0.0",
+        },
+        isLoading: false,
+        isFetching: false,
+      };
+    }
+    if (Array.isArray(maybe?.queryKey) && maybe.queryKey[0] === "system.getDataDir") {
+      return {
+        data: { dataDir: "/var/lib/deckos" },
+        isLoading: false,
+        isFetching: false,
+      };
+    }
+    if (Array.isArray(maybe?.queryKey) && maybe.queryKey[0] === "system.getMetrics") {
+      return {
+        data: {
+          disk: {
+            fs: [
+              {
+                fs: "/dev/nvme0n1p1",
+                mount: "/data",
+                size: 2000,
+                used: 1000,
+                usePercent: 50,
+              },
+            ],
+          },
+        },
+        isLoading: false,
+        isFetching: false,
+      };
+    }
+    if (Array.isArray(maybe?.queryKey) && maybe.queryKey[0] === "system.getUpdateStatus") {
+      return {
+        data: {
+          currentVersion: "0.3.3",
+          latestVersion: null,
+          updateAvailable: false,
+          lastCheckedAt: null,
+          error: null,
+        },
+        isLoading: false,
+        isFetching: false,
+      };
+    }
     return {
       data: null,
       isLoading: false,
@@ -77,6 +144,7 @@ describe("settings route", () => {
     authFetchSpy.mockReset();
     emitUnauthorizedEventSpy.mockReset();
     checkForUpdatesSpy.mockReset();
+    navigateSpy.mockReset();
     checkForUpdatesSpy.mockResolvedValue({ updateAvailable: false });
     authFetchSpy.mockResolvedValue({
       ok: true,
@@ -113,5 +181,21 @@ describe("settings route", () => {
     await waitFor(() =>
       expect(addToastSpy).toHaveBeenCalledWith("No updates available", "info")
     );
+  });
+
+  it("launches storage analysis from a disk row", async () => {
+    const Component = Route.options.component!;
+    render(<Component />);
+
+    fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
+
+    expect(navigateSpy).toHaveBeenCalledWith({
+      to: "/storage/$mountId",
+      params: { mountId: createStorageMountId("/data", "/dev/nvme0n1p1") },
+      search: {
+        mount: "/data",
+        fs: "/dev/nvme0n1p1",
+      },
+    });
   });
 });

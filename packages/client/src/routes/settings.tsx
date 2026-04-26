@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useTRPC } from "../trpc";
 import { trpcClient } from "../trpc";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -6,6 +6,7 @@ import { useToastStore } from "../stores/toast";
 import { Button } from "../components/ui/Button";
 import { useEffect, useRef, useState } from "react";
 import { authFetch, emitUnauthorizedEvent, fetchAuthStatus } from "../lib/auth";
+import { createStorageMountId } from "../lib/storageAnalysis";
 
 const SESSION_MIN_MS = 60 * 60 * 1000;
 const SESSION_MAX_MS = 7 * 24 * 60 * 60 * 1000;
@@ -24,6 +25,7 @@ export const Route = createFileRoute("/settings")({
 });
 
 function SettingsPage() {
+  const navigate = useNavigate();
   const [securityModal, setSecurityModal] = useState<
     null | "enable" | "session" | "passcode" | "disable"
   >(null);
@@ -470,6 +472,7 @@ function SettingsPage() {
                       <div className="settings-disk-list">
                         {diskEntries.map((disk) => {
                           const diskFree = Math.max(0, disk.size - disk.used);
+                          const mountId = createStorageMountId(disk.mount, disk.fs);
                           return (
                             <div
                               className="settings-disk-item"
@@ -515,6 +518,29 @@ function SettingsPage() {
                                     transition: "width var(--transition-meter) linear",
                                   }}
                                 />
+                              </div>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "flex-end",
+                                  marginTop: "var(--space-2)",
+                                }}
+                              >
+                                <Button
+                                  variant="secondary"
+                                  onClick={() =>
+                                    void navigate({
+                                      to: "/storage/$mountId",
+                                      params: { mountId },
+                                      search: {
+                                        mount: disk.mount,
+                                        fs: disk.fs,
+                                      },
+                                    })
+                                  }
+                                >
+                                  ANALYZE
+                                </Button>
                               </div>
                             </div>
                           );

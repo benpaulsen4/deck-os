@@ -52,6 +52,35 @@ export const Route = createFileRoute("/files")({
   component: FilesPage,
 });
 
+type FilesHandoffSearch = {
+  path: string;
+  select: string;
+  open: boolean;
+};
+
+function readFilesHandoffSearch(): FilesHandoffSearch {
+  if (typeof window === "undefined") {
+    return { path: "", select: "", open: false };
+  }
+  const params = new URLSearchParams(window.location.search);
+  return {
+    path: params.get("path") ?? "",
+    select: params.get("select") ?? "",
+    open: params.get("open") === "true",
+  };
+}
+
+function clearFilesHandoffSearch() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const url = new URL(window.location.href);
+  url.searchParams.delete("path");
+  url.searchParams.delete("select");
+  url.searchParams.delete("open");
+  window.history.replaceState(window.history.state, "", url.toString());
+}
+
 function getRootPath(absolutePath: string): string {
   const windowsRoot = absolutePath.match(/^[A-Za-z]:\\/);
   if (windowsRoot) {
@@ -357,6 +386,7 @@ function FilesPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { addToast } = useToastStore();
+  const initialHandoff = useMemo(() => readFilesHandoffSearch(), []);
   const [requestedPath, setRequestedPath] = useState("");
   const [pathInput, setPathInput] = useState("");
   const [showHidden, setShowHidden] = useState(false);
@@ -382,6 +412,7 @@ function FilesPage() {
   const savedListScrollTopRef = useRef(0);
   const shouldRestoreScrollRef = useRef(false);
   const restoreIntervalRef = useRef<number | null>(null);
+  const handoffAppliedRef = useRef(false);
 
   const listQuery = useQuery(
     trpc.files.list.queryOptions(
@@ -458,6 +489,13 @@ function FilesPage() {
     }
   }, [listQuery.data?.cwd]);
 
+  useEffect(() => {
+    if (initialHandoff.path) {
+      setRequestedPath(initialHandoff.path);
+      setPathInput(initialHandoff.path);
+    }
+  }, [initialHandoff.path]);
+
   const currentPath = listQuery.data?.cwd ?? requestedPath;
   const pinned = pinsQuery.data?.items ?? [];
   const parentPath = listQuery.data?.parent ?? null;
@@ -468,6 +506,38 @@ function FilesPage() {
     setSelectedPaths([]);
     setSelectionAnchorPath(null);
   }, [currentPath]);
+
+  useEffect(() => {
+    if (!initialHandoff.path || handoffAppliedRef.current) {
+      return;
+    }
+    if (listQuery.isLoading || listQuery.isFetching || listQuery.data?.cwd !== initialHandoff.path) {
+      return;
+    }
+
+    if (initialHandoff.select) {
+      const matchingEntry = listQuery.data.entries.find(
+        (entry) => entry.path === initialHandoff.select
+      );
+      if (matchingEntry) {
+        setSelectedPaths([matchingEntry.path]);
+        setSelectionAnchorPath(matchingEntry.path);
+        if (initialHandoff.open && matchingEntry.type !== "directory") {
+          openFileViewer(matchingEntry.path);
+        }
+      }
+    }
+
+    handoffAppliedRef.current = true;
+    clearFilesHandoffSearch();
+  }, [
+    initialHandoff.open,
+    initialHandoff.path,
+    initialHandoff.select,
+    listQuery.data,
+    listQuery.isFetching,
+    listQuery.isLoading,
+  ]);
 
   useEffect(() => {
     setForceEditable(false);
