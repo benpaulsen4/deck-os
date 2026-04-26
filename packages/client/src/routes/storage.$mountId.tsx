@@ -55,6 +55,28 @@ function getNodeColor(
   return extensionColors.get(node.extension ?? "") ?? "rgba(128, 139, 150, 0.45)";
 }
 
+function getFailureCopy(errorCode: string | null | undefined, error: string | null | undefined) {
+  switch (errorCode) {
+    case "permission-denied":
+      return {
+        title: "Permission Required",
+        description:
+          error ?? "DeckOS does not currently have permission to inspect this mount.",
+      };
+    case "unsupported":
+      return {
+        title: "Mount Not Supported",
+        description:
+          error ?? "DeckOS could not resolve this mount safely enough to analyze it.",
+      };
+    default:
+      return {
+        title: "Analysis Failed",
+        description: error ?? "Storage analysis failed unexpectedly.",
+      };
+  }
+}
+
 function StorageAnalysisPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -233,10 +255,10 @@ function StorageAnalysisPage() {
                   : "Pending"}
               </span>
             </div>
-            {analysis?.fallbackReason && (
+            {analysis?.warning && (
               <div className="storage-analysis-warning">
                 <AlertTriangle size={14} />
-                <span>{analysis.fallbackReason}</span>
+                <span>{analysis.warning}</span>
               </div>
             )}
           </div>
@@ -305,8 +327,12 @@ function StorageAnalysisPage() {
               <span>Preparing storage analysis…</span>
             </div>
           ) : analysis?.status === "failed" ? (
-            <div className="panel storage-analysis-empty">
-              <span>{analysis.error ?? "Storage analysis failed."}</span>
+            <div className="panel storage-analysis-empty storage-analysis-empty--stack">
+              <strong>{getFailureCopy(analysis.errorCode, analysis.error).title}</strong>
+              <span>{getFailureCopy(analysis.errorCode, analysis.error).description}</span>
+              <span className="storage-analysis-empty-meta">
+                You can return to Settings or retry after correcting the mount state.
+              </span>
             </div>
           ) : analysis?.status === "scanning" && !analysis.root ? (
             <div className="panel storage-analysis-empty">

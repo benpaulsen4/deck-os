@@ -20,18 +20,16 @@ DeckOS currently shows disk utilization totals in `Settings`, but it does not he
 - Files handoff: extend `packages/client/src/routes/files.tsx` to accept search parameters for `path`, optional `select`, and optional `open`, so double-click from the treemap can open a directory, preselect a file, or open the file viewer directly.
 - Shared schemas: add storage-analysis request and response schemas in `packages/server/src/lib/schema.ts` and mirror their usage through the existing tRPC surface rather than introducing ad hoc client fetches.
 - Server service: add `packages/server/src/services/storageAnalysis.ts` as the single owner of scan jobs, cache metadata, result serialization, and mount-boundary enforcement.
-- Analyzer registry: structure the service around a pluggable `StorageAnalyzer` interface with capability probing so the system can use a dedicated `btrfs` fast analyzer when available and otherwise fall back to generic scanning.
+- Analyzer strategy: version 1 uses a single generic same-device analyzer with warm-cache reuse rather than a filesystem-specific fast path.
 - Job model: create one analysis job per mount key; job states are `idle`, `scanning`, `ready`, `stale`, and `failed`; a ready job can be served immediately while a background refresh updates it.
 - Cache location: persist snapshots under `DATA_DIR/storage-analysis/<mount-key>.json` plus a small metadata file containing `startedAt`, `completedAt`, `rootPath`, `deviceId`, `nodeCount`, `totalSize`, and `extensionHistogram`.
 - Mount targeting: identify the selected disk from the existing `systeminformation.fsSize()` output, then resolve the scan root to the mount path shown in `Settings`; for Linux, enforce same-device traversal by comparing each entry's `st_dev` to the root device so the scan does not cross into other mounted filesystems.
 - Filesystem detection: determine the filesystem type for the selected mount up front and record it in job metadata so the analyzer-selection path is visible in logs, tests, and UI diagnostics.
-- Analyzer order: attempt analyzers in this order for each mount: `warm-cache reuse`, dedicated `btrfs` fast analyzer when the detected filesystem is `btrfs`, then generic bounded scan as the last resort for all other filesystems.
-- Btrfs fast analyzer: define one concrete filesystem-specific implementation for `btrfs` with `isSupported()`, `analyze()`, `sourceKind`, and deterministic failure classification so unsupported or unsafe situations can be skipped cleanly.
-- Fast-path contract: the `btrfs` analyzer may only run if it can operate safely from the DeckOS server context, respects the selected mount boundary and subvolume semantics, and returns per-file and per-directory size data precise enough for the nested treemap.
-- Cold-scan fallback strategy: if the mount is not `btrfs`, or if the `btrfs` analyzer is unavailable or fails with an expected unsupported condition, run a bounded-concurrency recursive scanner using `fs.opendir()` plus `Dirent` and `lstat()`/`stat()` in a worker context, batching directory reads and file metadata collection to reduce event-loop blocking.
+- Analyzer order: attempt analyzers in this order for each mount: `warm-cache reuse`, then the generic bounded-concurrency same-device scan.
+- Generic scan strategy: run a bounded-concurrency recursive scanner using `fs.opendir()` plus `Dirent` and `lstat()`/`stat()`, batching directory reads and file metadata collection to reduce event-loop blocking.
 - Warm-open strategy: if a cached snapshot exists and is younger than the freshness TTL, return it immediately; if it is older than the TTL, return it as `stale` immediately and start a background refresh without blocking the page.
 - Freshness TTL: set the initial freshness threshold to 5 minutes for hot reuse and mark anything older as stale but still viewable until a refresh completes.
-- Linux-first performance note: version 1 should ship one filesystem-specific fast path for `btrfs`; all other Linux filesystems explicitly use the generic fallback analyzer unless a future spec adds another proven fast path.
+- Linux-first performance note: version 1 ships only the generic analyzer plus cache reuse; a future spec can add filesystem-specific fast paths only after they are proven and worth the added complexity.
 - Tree shape: every node in the stored result includes `path`, `name`, `type`, `size`, `extension`, `childCount`, and `children`; directory `size` equals the sum of all descendants so rectangles can nest correctly without a separate drilldown mode.
 - Result budget: include every directory in the hierarchy and every file needed for layout; if node count exceeds a defined safety ceiling, the analysis still completes but the response includes an `oversized` flag so the UI can warn about degraded responsiveness before rendering.
 - Extension colors: compute a histogram across all files in the result, sort descending by count then total bytes, keep the top 20 extensions, and assign each one a deterministic palette slot; all non-top-20 extensions share a neutral fallback file color.
@@ -83,16 +81,11 @@ The system SHALL prioritize fast storage analysis and avoid making the user wait
 - **AND** the treemap can render without waiting for a new full scan
 - **AND** the result includes freshness metadata
 
-#### Scenario: Filesystem-specific fast analyzer is supported
-- **WHEN** the selected disk uses `btrfs` and the `btrfs` fast analyzer is supported
-- **THEN** DeckOS runs the `btrfs` analyzer before considering a generic scan
-- **AND** the result metadata identifies which analyzer produced the snapshot
-
-#### Scenario: Fallback analyzer is used
-- **WHEN** the selected disk is not `btrfs`, or the `btrfs` analyzer cannot safely produce the required hierarchy
-- **THEN** DeckOS falls back to the bounded-concurrency same-device scan for that mount
-- **AND** the fallback reason is preserved in analysis metadata
-- **AND** the UI can communicate that the current result came from a slower path
+#### Scenario: Generic analyzer is used
+- **WHEN** the selected disk is analyzed in version 1
+- **THEN** DeckOS uses the bounded-concurrency same-device scan for that mount
+- **AND** the result metadata identifies that the generic analyzer produced the snapshot
+- **AND** the UI can communicate stale data, oversized output, skipped paths, and hard failures clearly
 
 #### Scenario: Serve stale while refreshing
 - **WHEN** a snapshot exists but is older than the freshness threshold
@@ -119,8 +112,8 @@ The plan SHALL define the implementation structure precisely enough that a futur
 
 #### Scenario: Future implementation follows the plan
 - **WHEN** an implementation agent begins work from this spec
-- **THEN** the agent can identify the target route shape, server service boundary, analyzer registry, cache location, job states, result schema, extension-color rule, and `Files` handoff contract directly from the plan
-- **AND** the agent does not need to guess whether the feature uses drilldown, nested rendering, extension-based coloring, or which filesystems receive a specialized fast path in version 1
+- **THEN** the agent can identify the target route shape, server service boundary, cache location, job states, result schema, extension-color rule, degraded-state contract, and `Files` handoff contract directly from the plan
+- **AND** the agent does not need to guess whether the feature uses drilldown, nested rendering, extension-based coloring, or filesystem-specific fast paths in version 1
 
 ### Requirement: Analysis State And Failure Handling
 The system SHALL communicate analysis progress, stale results, and failures in a way that keeps the feature understandable and safe to use.

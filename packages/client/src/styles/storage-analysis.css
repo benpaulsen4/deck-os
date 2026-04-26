@@ -218,6 +218,18 @@
   text-align: center;
 }
 
+.storage-analysis-empty--stack {
+  flex-direction: column;
+  gap: 10px;
+}
+
+.storage-analysis-empty-meta {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
 .storage-analysis-footer {
   display: flex;
   justify-content: space-between;

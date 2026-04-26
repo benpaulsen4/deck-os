@@ -2,20 +2,83 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route } from "../storage.$mountId";
 
-const { navigateSpy, refreshSpy } = vi.hoisted(() => ({
-  navigateSpy: vi.fn(),
+const { refreshSpy, queryState } = vi.hoisted(() => ({
   refreshSpy: vi.fn(async () => ({})),
+  queryState: {
+    mount: {
+      id: "abc123",
+      mount: "/data",
+      fs: "/dev/nvme0n1p1",
+      filesystemType: "ext4",
+      size: 1000,
+      used: 500,
+      deviceId: 10,
+    },
+    status: "ready",
+    analyzer: "scan",
+    sourceKind: "scan",
+    mountKey: "abc123",
+    generatedAt: "2026-01-01T00:00:00.000Z",
+    startedAt: "2026-01-01T00:00:00.000Z",
+    completedAt: "2026-01-01T00:00:00.000Z",
+    freshnessTtlMs: 300000,
+    totalSize: 500,
+    nodeCount: 3,
+    oversized: false,
+    refreshing: false,
+    error: null,
+    errorCode: null,
+    warningCode: "partial-permissions",
+    warning: "Skipped 1 path because DeckOS did not have permission to read it.",
+    extensionHistogram: [
+      {
+        extension: ".log",
+        label: "LOG",
+        count: 1,
+        totalSize: 300,
+        color: "#ff7b72",
+      },
+    ],
+    root: {
+      path: "/data",
+      name: "data",
+      type: "directory",
+      size: 500,
+      extension: null,
+      childCount: 2,
+      children: [
+        {
+          path: "/data/logs",
+          name: "logs",
+          type: "directory",
+          size: 300,
+          extension: null,
+          childCount: 1,
+          children: [
+            {
+              path: "/data/logs/app.log",
+              name: "app.log",
+              type: "file",
+              size: 300,
+              extension: ".log",
+              childCount: 0,
+              children: [],
+            },
+          ],
+        },
+        {
+          path: "/data/config.yml",
+          name: "config.yml",
+          type: "file",
+          size: 200,
+          extension: ".yml",
+          childCount: 0,
+          children: [],
+        },
+      ],
+    },
+  },
 }));
-
-vi.mock("@tanstack/react-router", async () => {
-  const actual = await vi.importActual<typeof import("@tanstack/react-router")>(
-    "@tanstack/react-router"
-  );
-  return {
-    ...actual,
-    useNavigate: () => navigateSpy,
-  };
-});
 
 vi.mock("../../stores/toast", () => ({
   useToastStore: () => ({ addToast: vi.fn() }),
@@ -55,78 +118,7 @@ vi.mock("@tanstack/react-query", () => ({
     const maybe = arg as { queryKey?: string[] };
     if (maybe.queryKey?.[0] === "storage.getAnalysis") {
       return {
-        data: {
-          mount: {
-            id: "abc123",
-            mount: "/data",
-            fs: "/dev/nvme0n1p1",
-            filesystemType: "ext4",
-            size: 1000,
-            used: 500,
-            deviceId: 10,
-          },
-          status: "ready",
-          analyzer: "fallback",
-          sourceKind: "scan",
-          mountKey: "abc123",
-          generatedAt: "2026-01-01T00:00:00.000Z",
-          startedAt: "2026-01-01T00:00:00.000Z",
-          completedAt: "2026-01-01T00:00:00.000Z",
-          freshnessTtlMs: 300000,
-          totalSize: 500,
-          nodeCount: 3,
-          oversized: false,
-          refreshing: false,
-          error: null,
-          fallbackReason: "Filesystem is not btrfs.",
-          extensionHistogram: [
-            {
-              extension: ".log",
-              label: "LOG",
-              count: 1,
-              totalSize: 300,
-              color: "#ff7b72",
-            },
-          ],
-          root: {
-            path: "/data",
-            name: "data",
-            type: "directory",
-            size: 500,
-            extension: null,
-            childCount: 2,
-            children: [
-              {
-                path: "/data/logs",
-                name: "logs",
-                type: "directory",
-                size: 300,
-                extension: null,
-                childCount: 1,
-                children: [
-                  {
-                    path: "/data/logs/app.log",
-                    name: "app.log",
-                    type: "file",
-                    size: 300,
-                    extension: ".log",
-                    childCount: 0,
-                    children: [],
-                  },
-                ],
-              },
-              {
-                path: "/data/config.yml",
-                name: "config.yml",
-                type: "file",
-                size: 200,
-                extension: ".yml",
-                childCount: 0,
-                children: [],
-              },
-            ],
-          },
-        },
+        data: queryState,
         isLoading: false,
         isFetching: false,
       };
@@ -137,8 +129,81 @@ vi.mock("@tanstack/react-query", () => ({
 
 describe("storage route", () => {
   beforeEach(() => {
-    navigateSpy.mockReset();
     refreshSpy.mockReset();
+    Object.assign(queryState, {
+      mount: {
+        id: "abc123",
+        mount: "/data",
+        fs: "/dev/nvme0n1p1",
+        filesystemType: "ext4",
+        size: 1000,
+        used: 500,
+        deviceId: 10,
+      },
+      status: "ready",
+      analyzer: "scan",
+      sourceKind: "scan",
+      mountKey: "abc123",
+      generatedAt: "2026-01-01T00:00:00.000Z",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: "2026-01-01T00:00:00.000Z",
+      freshnessTtlMs: 300000,
+      totalSize: 500,
+      nodeCount: 3,
+      oversized: false,
+      refreshing: false,
+      error: null,
+      errorCode: null,
+      warningCode: "partial-permissions",
+      warning: "Skipped 1 path because DeckOS did not have permission to read it.",
+      extensionHistogram: [
+        {
+          extension: ".log",
+          label: "LOG",
+          count: 1,
+          totalSize: 300,
+          color: "#ff7b72",
+        },
+      ],
+      root: {
+        path: "/data",
+        name: "data",
+        type: "directory",
+        size: 500,
+        extension: null,
+        childCount: 2,
+        children: [
+          {
+            path: "/data/logs",
+            name: "logs",
+            type: "directory",
+            size: 300,
+            extension: null,
+            childCount: 1,
+            children: [
+              {
+                path: "/data/logs/app.log",
+                name: "app.log",
+                type: "file",
+                size: 300,
+                extension: ".log",
+                childCount: 0,
+                children: [],
+              },
+            ],
+          },
+          {
+            path: "/data/config.yml",
+            name: "config.yml",
+            type: "file",
+            size: 200,
+            extension: ".yml",
+            childCount: 0,
+            children: [],
+          },
+        ],
+      },
+    });
     window.history.replaceState({}, "", "/storage/abc123?mount=%2Fdata&fs=%2Fdev%2Fnvme0n1p1");
   });
 
@@ -149,7 +214,7 @@ describe("storage route", () => {
     expect(screen.getByText("Storage Analysis")).toBeInTheDocument();
     expect(screen.getAllByText("/data").length).toBeGreaterThan(0);
     expect(screen.getByText("LOG")).toBeInTheDocument();
-    expect(screen.getByText("Filesystem is not btrfs.")).toBeInTheDocument();
+    expect(screen.getByText(/Skipped 1 path/)).toBeInTheDocument();
   });
 
   it("updates the selection rail when a block is clicked", () => {
@@ -160,5 +225,38 @@ describe("storage route", () => {
     fireEvent.click(nodes[1] as Element);
 
     expect(screen.getByText("config.yml")).toBeInTheDocument();
+  });
+
+  it("shows a dedicated permission-denied state", () => {
+    Object.assign(queryState, {
+      mount: {
+        id: "abc123",
+        mount: "/data",
+        fs: "/dev/nvme0n1p1",
+        filesystemType: "ext4",
+        size: 1000,
+        used: 500,
+        deviceId: null,
+      },
+      status: "failed",
+      analyzer: null,
+      sourceKind: "pending",
+      generatedAt: null,
+      startedAt: null,
+      completedAt: null,
+      totalSize: null,
+      nodeCount: null,
+      errorCode: "permission-denied",
+      error: "DeckOS cannot read this mount. Check filesystem permissions and try again.",
+      warningCode: null,
+      warning: null,
+      extensionHistogram: [],
+      root: null,
+    });
+    const Component = Route.options.component!;
+    render(<Component />);
+
+    expect(screen.getByText("Permission Required")).toBeInTheDocument();
+    expect(screen.getByText(/cannot read this mount/i)).toBeInTheDocument();
   });
 });

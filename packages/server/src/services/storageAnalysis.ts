@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { opendir, lstat, stat } from "node:fs/promises";
 import path from "node:path";
@@ -8,13 +7,16 @@ import { DATA_DIR } from "../lib/config.js";
 import type {
   StorageAnalysisAnalyzerKind,
   StorageAnalysisExtensionLegendEntry,
+  StorageAnalysisErrorCode,
   StorageAnalysisMount,
   StorageAnalysisNode,
   StorageAnalysisResponse,
   StorageAnalysisSnapshot,
+  StorageAnalysisWarningCode,
 } from "../lib/schema.js";
 
 const STORAGE_ANALYSIS_DIR = path.join(DATA_DIR, "storage-analysis");
+// These guardrails keep the first release responsive while leaving room for future profiling.
 const STORAGE_ANALYSIS_TTL_MS = 5 * 60 * 1000;
 const STORAGE_ANALYSIS_MAX_NODES = 40_000;
 const STORAGE_ANALYSIS_SCAN_CONCURRENCY = 24;
@@ -43,26 +45,13 @@ const EXTENSION_COLOR_PALETTE = [
 
 type SupportedAnalysisStatus = StorageAnalysisResponse["status"];
 
-type StorageAnalyzerFailureCode =
-  | "unsupported"
-  | "unsafe"
-  | "permission-denied"
-  | "runtime-failed";
-
 type StorageAnalysisContext = {
   mount: StorageAnalysisMount;
   mountKey: string;
   startedAt: string;
 };
 
-type StorageAnalyzerUnsupported = {
-  ok: false;
-  code: StorageAnalyzerFailureCode;
-  reason: string;
-};
-
-type StorageAnalyzerSuccess = {
-  ok: true;
+type StorageAnalysisSuccess = {
   analyzer: StorageAnalysisAnalyzerKind;
   sourceKind: StorageAnalysisSnapshot["sourceKind"];
   root: StorageAnalysisNode;
@@ -70,41 +59,42 @@ type StorageAnalyzerSuccess = {
   nodeCount: number;
   oversized: boolean;
   extensionHistogram: StorageAnalysisExtensionLegendEntry[];
-  fallbackReason?: string | null;
-};
-
-type StorageAnalyzerResult = StorageAnalyzerSuccess | StorageAnalyzerUnsupported;
-
-type StorageAnalyzer = {
-  name: StorageAnalysisAnalyzerKind;
-  isSupported(
-    context: StorageAnalysisContext,
-    deps: ServiceDeps
-  ): Promise<StorageAnalyzerUnsupported | null>;
-  analyze(context: StorageAnalysisContext, deps: ServiceDeps): Promise<StorageAnalyzerResult>;
+  warningCode: StorageAnalysisWarningCode | null;
+  warning: string | null;
 };
 
 type JobRecord = {
   startedAt: string;
   state: SupportedAnalysisStatus;
   promise: Promise<void>;
+  errorCode: StorageAnalysisErrorCode | null;
   error: string | null;
 };
 
 type ScanStats = {
   nodeCount: number;
   oversized: boolean;
+  permissionDeniedCount: number;
   extensionCounts: Map<string, { count: number; totalSize: number }>;
 };
 
 type ServiceDeps = {
   fsSize: typeof si.fsSize;
-  spawnImpl: typeof spawn;
   statImpl: typeof stat;
   lstatImpl: typeof lstat;
   opendirImpl: typeof opendir;
   now: () => number;
 };
+
+class StorageAnalysisFailure extends Error {
+  code: StorageAnalysisErrorCode;
+
+  constructor(code: StorageAnalysisErrorCode, message: string) {
+    super(message);
+    this.code = code;
+    this.name = "StorageAnalysisFailure";
+  }
+}
 
 const jobs = new Map<string, JobRecord>();
 
@@ -142,10 +132,23 @@ function extensionLabel(extension: string): string {
   return extension.length > 0 ? extension.slice(1).toUpperCase() : "(none)";
 }
 
+function createRequestedMount(input: { mount: string; fs: string }): StorageAnalysisMount {
+  return {
+    id: createMountKey(input.fs, input.mount),
+    mount: input.mount,
+    fs: input.fs,
+    filesystemType: "unknown",
+    size: 0,
+    used: 0,
+    deviceId: null,
+  };
+}
+
 function toSnapshotResponse(
   snapshot: StorageAnalysisSnapshot,
   status: SupportedAnalysisStatus,
   refreshing: boolean,
+  errorCode: StorageAnalysisErrorCode | null,
   error: string | null
 ): StorageAnalysisResponse {
   return {
@@ -165,14 +168,17 @@ function toSnapshotResponse(
     extensionHistogram: snapshot.extensionHistogram,
     root: snapshot.root,
     refreshing,
+    errorCode,
     error,
-    fallbackReason: snapshot.fallbackReason ?? null,
+    warningCode: snapshot.warningCode ?? null,
+    warning: snapshot.warning ?? null,
   };
 }
 
 function pendingResponse(
   mount: StorageAnalysisMount,
   mountKey: string,
+  errorCode: StorageAnalysisErrorCode | null,
   error: string | null
 ): StorageAnalysisResponse {
   return {
@@ -191,8 +197,10 @@ function pendingResponse(
     extensionHistogram: [],
     root: null,
     refreshing: !error,
+    errorCode,
     error,
-    fallbackReason: null,
+    warningCode: null,
+    warning: null,
   };
 }
 
@@ -230,7 +238,8 @@ async function writeSnapshot(snapshot: StorageAnalysisSnapshot): Promise<void> {
     totalSize: snapshot.totalSize,
     oversized: snapshot.oversized,
     extensionHistogram: snapshot.extensionHistogram,
-    fallbackReason: snapshot.fallbackReason ?? null,
+    warningCode: snapshot.warningCode ?? null,
+    warning: snapshot.warning ?? null,
   });
 }
 
@@ -290,16 +299,33 @@ async function scanTree(
   rootPath: string,
   rootDeviceId: number,
   deps: ServiceDeps
-): Promise<StorageAnalyzerSuccess> {
+): Promise<StorageAnalysisSuccess> {
   const limit = createLimiter(STORAGE_ANALYSIS_SCAN_CONCURRENCY);
   const stats: ScanStats = {
     nodeCount: 0,
     oversized: false,
+    permissionDeniedCount: 0,
     extensionCounts: new Map(),
   };
 
   const visit = async (targetPath: string): Promise<StorageAnalysisNode | null> => {
-    const entryStat = await limit(() => deps.lstatImpl(targetPath));
+    let entryStat;
+    try {
+      entryStat = await limit(() => deps.lstatImpl(targetPath));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (code === "EACCES" || code === "EPERM") {
+        if (targetPath === rootPath) {
+          throw new StorageAnalysisFailure(
+            "permission-denied",
+            "DeckOS cannot read this mount. Check filesystem permissions and try again."
+          );
+        }
+        stats.permissionDeniedCount += 1;
+        return null;
+      }
+      throw error;
+    }
     if (entryStat.dev !== rootDeviceId) {
       return null;
     }
@@ -313,7 +339,23 @@ async function scanTree(
           : "other";
 
     if (type === "directory") {
-      const dir = await limit(() => deps.opendirImpl(targetPath));
+      let dir;
+      try {
+        dir = await limit(() => deps.opendirImpl(targetPath));
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException | undefined)?.code;
+        if (code === "EACCES" || code === "EPERM") {
+          if (targetPath === rootPath) {
+            throw new StorageAnalysisFailure(
+              "permission-denied",
+              "DeckOS cannot open this mount. Check filesystem permissions and try again."
+            );
+          }
+          stats.permissionDeniedCount += 1;
+          return null;
+        }
+        throw error;
+      }
       const childTasks: Promise<StorageAnalysisNode | null>[] = [];
       for await (const entry of dir) {
         const childPath = path.join(targetPath, entry.name);
@@ -321,6 +363,9 @@ async function scanTree(
           visit(childPath).catch((error: unknown) => {
             const code = (error as NodeJS.ErrnoException | undefined)?.code;
             if (code === "EACCES" || code === "EPERM" || code === "ENOENT") {
+              if (code === "EACCES" || code === "EPERM") {
+                stats.permissionDeniedCount += 1;
+              }
               return null;
             }
             throw error;
@@ -370,76 +415,23 @@ async function scanTree(
   }
 
   return {
-    ok: true,
-    analyzer: "fallback",
+    analyzer: "scan",
     sourceKind: "scan",
     root,
     totalSize: root.size,
     nodeCount: stats.nodeCount,
     oversized: stats.oversized,
     extensionHistogram: buildExtensionHistogram(stats.extensionCounts),
-    fallbackReason: null,
+    warningCode: stats.permissionDeniedCount > 0 ? "partial-permissions" : null,
+    warning:
+      stats.permissionDeniedCount > 0
+        ? `Skipped ${stats.permissionDeniedCount} path${stats.permissionDeniedCount === 1 ? "" : "s"} because DeckOS did not have permission to read them.`
+        : null,
   };
 }
 
-async function runCommand(
-  spawnImpl: typeof spawn,
-  command: string,
-  args: readonly string[]
-): Promise<{ code: number | null; stdout: string; stderr: string }> {
-  return await new Promise((resolve, reject) => {
-    const child = spawnImpl(command, args, {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr?.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.once("error", reject);
-    child.once("exit", (code) => {
-      resolve({ code, stdout, stderr });
-    });
-  });
-}
-
-const btrfsAnalyzer: StorageAnalyzer = {
-  name: "btrfs",
-  async isSupported(context, deps) {
-    if (context.mount.filesystemType.toLowerCase() !== "btrfs") {
-      return { ok: false, code: "unsupported", reason: "Filesystem is not btrfs." };
-    }
-    if (process.platform !== "linux") {
-      return { ok: false, code: "unsupported", reason: "btrfs fast path requires Linux." };
-    }
-    const probe = await runCommand(deps.spawnImpl, "btdu", ["--help"]).catch(() => null);
-    if (!probe || probe.code !== 0) {
-      return { ok: false, code: "unsupported", reason: "btdu is not installed." };
-    }
-    return null;
-  },
-  async analyze(context, deps) {
-    const unsupported = await this.isSupported(context, deps);
-    if (unsupported) {
-      return unsupported;
-    }
-    return {
-      ok: false,
-      code: "unsupported",
-      reason:
-        "btdu support detected, but automatic export parsing is not available in this build.",
-    };
-  },
-};
-
 const defaultDeps: ServiceDeps = {
   fsSize: si.fsSize,
-  spawnImpl: spawn,
   statImpl: stat,
   lstatImpl: lstat,
   opendirImpl: opendir,
@@ -454,9 +446,27 @@ async function resolveMount(
   const entries = await deps.fsSize();
   const match = entries.find((entry) => entry.mount === mountPath && entry.fs === fsName);
   if (!match) {
-    throw new Error(`Disk mount not found: ${mountPath}`);
+    throw new StorageAnalysisFailure(
+      "unsupported",
+      "This disk is no longer available. Re-open analysis from Settings."
+    );
   }
-  const rootStat = await deps.statImpl(match.mount);
+  let rootStat;
+  try {
+    rootStat = await deps.statImpl(match.mount);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "EACCES" || code === "EPERM") {
+      throw new StorageAnalysisFailure(
+        "permission-denied",
+        "DeckOS cannot inspect this mount. Check filesystem permissions and try again."
+      );
+    }
+    throw new StorageAnalysisFailure(
+      "runtime-failed",
+      error instanceof Error ? error.message : "Storage analysis failed unexpectedly."
+    );
+  }
   return {
     id: createMountKey(match.fs, match.mount),
     mount: match.mount,
@@ -469,17 +479,13 @@ async function resolveMount(
 }
 
 async function runAnalysis(context: StorageAnalysisContext, deps: ServiceDeps): Promise<void> {
-  let result = await btrfsAnalyzer.analyze(context, deps);
-  if (!result.ok) {
-    if (context.mount.deviceId === null) {
-      throw new Error("Unable to determine device id for selected mount.");
-    }
-    const fallback = await scanTree(context.mount.mount, context.mount.deviceId, deps);
-    result = {
-      ...fallback,
-      fallbackReason: result.reason,
-    };
+  if (context.mount.deviceId === null) {
+    throw new StorageAnalysisFailure(
+      "unsupported",
+      "DeckOS could not resolve a stable device boundary for this mount."
+    );
   }
+  const result = await scanTree(context.mount.mount, context.mount.deviceId, deps);
 
   const completedAt = new Date(deps.now()).toISOString();
   const snapshot: StorageAnalysisSnapshot = {
@@ -497,7 +503,8 @@ async function runAnalysis(context: StorageAnalysisContext, deps: ServiceDeps): 
     oversized: result.oversized,
     extensionHistogram: result.extensionHistogram,
     root: result.root,
-    fallbackReason: result.fallbackReason ?? null,
+    warningCode: result.warningCode,
+    warning: result.warning,
   };
   await writeSnapshot(snapshot);
 }
@@ -509,7 +516,7 @@ async function scheduleRefresh(
 ): Promise<JobRecord | null> {
   const mountKey = mount.id;
   const existing = jobs.get(mountKey);
-  if (existing && !force && existing.state === "scanning") {
+  if (existing && !force && (existing.state === "scanning" || existing.state === "failed")) {
     return existing;
   }
 
@@ -517,6 +524,7 @@ async function scheduleRefresh(
   const record: JobRecord = {
     startedAt,
     state: "scanning",
+    errorCode: null,
     error: null,
     promise: (async () => {
       try {
@@ -531,12 +539,15 @@ async function scheduleRefresh(
         const current = jobs.get(mountKey);
         if (current) {
           current.state = "ready";
+          current.errorCode = null;
           current.error = null;
         }
       } catch (error) {
         const current = jobs.get(mountKey);
         if (current) {
           current.state = "failed";
+          current.errorCode =
+            error instanceof StorageAnalysisFailure ? error.code : "runtime-failed";
           current.error =
             error instanceof Error ? error.message : "Storage analysis failed unexpectedly.";
         }
@@ -557,7 +568,20 @@ export async function getStorageAnalysis(
   input: { mount: string; fs: string },
   deps: ServiceDeps = defaultDeps
 ): Promise<StorageAnalysisResponse> {
-  const mount = await resolveMount(input.mount, input.fs, deps);
+  let mount: StorageAnalysisMount;
+  try {
+    mount = await resolveMount(input.mount, input.fs, deps);
+  } catch (error) {
+    const failure =
+      error instanceof StorageAnalysisFailure
+        ? error
+        : new StorageAnalysisFailure(
+            "runtime-failed",
+            error instanceof Error ? error.message : "Storage analysis failed unexpectedly."
+          );
+    const requestedMount = createRequestedMount(input);
+    return pendingResponse(requestedMount, requestedMount.id, failure.code, failure.message);
+  }
   const mountKey = mount.id;
   const snapshot = await readSnapshot(mountKey);
   const job = jobs.get(mountKey);
@@ -566,28 +590,58 @@ export async function getStorageAnalysis(
   if (snapshot) {
     const fresh = isSnapshotFresh(snapshot, nowMs);
     if (fresh) {
-      return toSnapshotResponse(snapshot, "ready", job?.state === "scanning", job?.error ?? null);
+      return toSnapshotResponse(
+        snapshot,
+        "ready",
+        job?.state === "scanning",
+        job?.errorCode ?? null,
+        job?.error ?? null
+      );
     }
     await scheduleRefresh(mount, deps);
-    return toSnapshotResponse(snapshot, "stale", true, job?.error ?? null);
+    return toSnapshotResponse(snapshot, "stale", true, job?.errorCode ?? null, job?.error ?? null);
   }
 
   await scheduleRefresh(mount, deps);
   const current = jobs.get(mountKey);
-  return pendingResponse(mount, mountKey, current?.state === "failed" ? current.error : null);
+  return pendingResponse(
+    mount,
+    mountKey,
+    current?.state === "failed" ? current.errorCode : null,
+    current?.state === "failed" ? current.error : null
+  );
 }
 
 export async function refreshStorageAnalysis(
   input: { mount: string; fs: string },
   deps: ServiceDeps = defaultDeps
 ): Promise<StorageAnalysisResponse> {
-  const mount = await resolveMount(input.mount, input.fs, deps);
+  let mount: StorageAnalysisMount;
+  try {
+    mount = await resolveMount(input.mount, input.fs, deps);
+  } catch (error) {
+    const failure =
+      error instanceof StorageAnalysisFailure
+        ? error
+        : new StorageAnalysisFailure(
+            "runtime-failed",
+            error instanceof Error ? error.message : "Storage analysis failed unexpectedly."
+          );
+    const requestedMount = createRequestedMount(input);
+    return pendingResponse(requestedMount, requestedMount.id, failure.code, failure.message);
+  }
   await scheduleRefresh(mount, deps, true);
   const snapshot = await readSnapshot(mount.id);
   if (snapshot) {
-    return toSnapshotResponse(snapshot, "stale", true, null);
+    return toSnapshotResponse(snapshot, "stale", true, null, null);
   }
-  return pendingResponse(mount, mount.id, null);
+  const current = jobs.get(mount.id);
+  return pendingResponse(
+    mount,
+    mount.id,
+    current?.state === "failed" ? current.errorCode : null,
+    current?.state === "failed" ? current.error : null
+  );
 }
 
 export async function clearStorageAnalysisState(): Promise<void> {
@@ -601,5 +655,4 @@ export const __storageAnalysisTestUtils = {
   createMountKey,
   getSnapshotPath,
   getMetaPath,
-  btrfsAnalyzer,
 };

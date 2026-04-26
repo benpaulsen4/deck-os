@@ -3,11 +3,11 @@
 - [x] The storage analysis view renders the recursive directory hierarchy concurrently in one nested treemap rather than requiring drilldown.
 - [x] Directory blocks show the folder name in a header band and file blocks show their name through hover tooltip behavior.
 - [x] The 20 most common file extensions receive stable color coding with a visible legend and fallback colors for everything else.
-- [ ] The implementation uses a dedicated `btrfs` fast analyzer and uses the generic fallback scan for all other filesystems.
-- [x] The implementation records which analyzer produced the snapshot or why it fell back.
+- [x] Version 1 uses the generic same-device analyzer consistently across supported filesystems.
+- [x] The implementation records which analyzer produced the snapshot plus any warning or failure metadata needed by the UI.
 - [x] The implementation uses same-device enforcement and freshness metadata regardless of analyzer choice.
 - [x] Repeat analysis can reuse cached or incrementally refreshed data with visible freshness information.
 - [x] Double-clicking a directory block opens that directory in the `Files` page.
 - [x] Double-clicking a file block opens the file's parent directory in `Files` and preserves file-specific context.
-- [ ] Loading, stale, oversized, unsupported, permission-denied, and generic failure states are handled without breaking the rest of the app.
-- [ ] Server and client validation cover analysis results, extension histogram output, handoff behavior, and degraded cases.
+- [x] Loading, stale, oversized, unsupported, permission-denied, and generic failure states are handled without breaking the rest of the app.
+- [x] Server and client validation cover analysis results, extension histogram output, handoff behavior, and degraded cases.

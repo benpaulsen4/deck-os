@@ -226,14 +226,20 @@ const StorageAnalysisNodeSchema: z.ZodType<StorageAnalysisNode> = z.lazy(() =>
   })
 );
 
-const StorageAnalysisAnalyzerKindSchema = z.enum(["cache", "btrfs", "fallback"]);
+const StorageAnalysisAnalyzerKindSchema = z.enum(["scan"]);
 const StorageAnalysisStatusSchema = z.enum(["scanning", "ready", "stale", "failed"]);
+const StorageAnalysisErrorCodeSchema = z.enum([
+  "permission-denied",
+  "unsupported",
+  "runtime-failed",
+]);
+const StorageAnalysisWarningCodeSchema = z.enum(["partial-permissions"]);
 
 const StorageAnalysisSnapshotSchema = z.object({
   mount: StorageAnalysisMountSchema,
   status: StorageAnalysisStatusSchema,
   analyzer: StorageAnalysisAnalyzerKindSchema,
-  sourceKind: z.enum(["cache-fresh", "cache-stale", "btdu", "scan"]),
+  sourceKind: z.enum(["cache-fresh", "cache-stale", "scan"]),
   mountKey: z.string(),
   generatedAt: z.string().datetime(),
   startedAt: z.string().datetime(),
@@ -244,14 +250,15 @@ const StorageAnalysisSnapshotSchema = z.object({
   oversized: z.boolean(),
   extensionHistogram: z.array(StorageAnalysisExtensionLegendEntrySchema),
   root: StorageAnalysisNodeSchema,
-  fallbackReason: z.string().nullable().optional(),
+  warningCode: StorageAnalysisWarningCodeSchema.nullable().optional(),
+  warning: z.string().nullable().optional(),
 });
 
 const StorageAnalysisResponseSchema = z.object({
   mount: StorageAnalysisMountSchema,
   status: StorageAnalysisStatusSchema,
   analyzer: StorageAnalysisAnalyzerKindSchema.nullable(),
-  sourceKind: z.enum(["cache-fresh", "cache-stale", "btdu", "scan", "pending"]).nullable(),
+  sourceKind: z.enum(["cache-fresh", "cache-stale", "scan", "pending"]).nullable(),
   mountKey: z.string(),
   generatedAt: z.string().datetime().nullable(),
   startedAt: z.string().datetime().nullable(),
@@ -263,8 +270,10 @@ const StorageAnalysisResponseSchema = z.object({
   extensionHistogram: z.array(StorageAnalysisExtensionLegendEntrySchema),
   root: StorageAnalysisNodeSchema.nullable(),
   refreshing: z.boolean(),
+  errorCode: StorageAnalysisErrorCodeSchema.nullable(),
   error: z.string().nullable(),
-  fallbackReason: z.string().nullable(),
+  warningCode: StorageAnalysisWarningCodeSchema.nullable(),
+  warning: z.string().nullable(),
 });
 
 type AppMetadata = z.infer<typeof AppMetadataSchema>;
@@ -286,6 +295,8 @@ type StorageAnalysisExtensionLegendEntry = z.infer<
 >;
 type StorageAnalysisAnalyzerKind = z.infer<typeof StorageAnalysisAnalyzerKindSchema>;
 type StorageAnalysisStatus = z.infer<typeof StorageAnalysisStatusSchema>;
+type StorageAnalysisErrorCode = z.infer<typeof StorageAnalysisErrorCodeSchema>;
+type StorageAnalysisWarningCode = z.infer<typeof StorageAnalysisWarningCodeSchema>;
 type StorageAnalysisSnapshot = z.infer<typeof StorageAnalysisSnapshotSchema>;
 type StorageAnalysisResponse = z.infer<typeof StorageAnalysisResponseSchema>;
 
@@ -309,6 +320,8 @@ export {
   StorageAnalysisExtensionLegendEntrySchema,
   StorageAnalysisAnalyzerKindSchema,
   StorageAnalysisStatusSchema,
+  StorageAnalysisErrorCodeSchema,
+  StorageAnalysisWarningCodeSchema,
   StorageAnalysisSnapshotSchema,
   StorageAnalysisResponseSchema,
   UrlOrEmptySchema,
@@ -341,6 +354,8 @@ export type {
   StorageAnalysisExtensionLegendEntry,
   StorageAnalysisAnalyzerKind,
   StorageAnalysisStatus,
+  StorageAnalysisErrorCode,
+  StorageAnalysisWarningCode,
   StorageAnalysisSnapshot,
   StorageAnalysisResponse,
 };
