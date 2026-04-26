@@ -27,6 +27,8 @@
   - [x] Add focused tests around server analysis logic, nested-treemap labeling rules, extension-color legend output, and `Files` handoff behavior.
   - [ ] Measure warm-cache, `btrfs` fast-path, and generic-fallback behavior on representative large mounts, then capture concrete acceptance thresholds in code comments or nearby docs used by the implementation.
   - [ ] Ensure stale snapshots, `btrfs` analyzer unavailability, slow scans, oversized results, and permission failures degrade clearly without freezing the app or blocking `Settings`.
+  - [ ] Replace the placeholder `btrfs` provider with a real fast analyzer implementation, likely by invoking `btdu` in a supported non-interactive export mode and mapping its result into the treemap schema.
+  - [ ] Add explicit unsupported and permission-denied UI states so degraded analyzer outcomes are visually distinct from generic loading or failure.
 
 # Task Dependencies
 - Task 2 depends on Task 1.
