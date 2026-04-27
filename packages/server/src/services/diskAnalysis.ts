@@ -84,7 +84,7 @@ const RUNNING_JOB_TTL_MS = 2 * 60 * 60 * 1000;
 const DEFAULT_LIMITS: DiskAnalysisResourceLimits = {
   maxWorkers: 4,
   maxPendingDirectories: 2048,
-  maxIndexedNodes: 50000,
+  maxIndexedNodes: 20000,
 };
 
 const jobs = new Map<string, DiskAnalysisJobInternal>();
@@ -333,18 +333,48 @@ function createDirectoryNode(directoryPath: string, parentPath: string | null): 
   };
 }
 
+function createDirectoryPlaceholder(directoryPath: string): DiskAnalysisTreemapNode {
+  return {
+    path: directoryPath,
+    name: getNodeName(directoryPath),
+    type: "directory",
+    size: 0,
+    recursiveSize: 0,
+    extension: null,
+    childCount: 0,
+    descendantsScanned: 0,
+    truncated: false,
+    issues: [],
+    children: [],
+  };
+}
+
+function upsertChildBranch(parent: MutableDirectoryNode, child: DiskAnalysisTreemapNode) {
+  const childIndex = parent.children.findIndex((entry) => entry.path === child.path);
+  if (childIndex >= 0) {
+    parent.children[childIndex] = child;
+    return;
+  }
+  parent.children.push(child);
+}
+
 function toTreemapNode(node: MutableDirectoryNode): DiskAnalysisTreemapNode {
+  const children = [...node.children].sort((left, right) => right.recursiveSize - left.recursiveSize);
+  const recursiveSize = children.reduce((sum, child) => sum + child.recursiveSize, node.size);
+  const descendantsScanned = children.reduce((sum, child) => {
+    return sum + (child.type === "directory" ? child.descendantsScanned + 1 : 0);
+  }, 0);
   return {
     path: node.path,
     name: node.name,
     type: "directory",
     size: node.size,
-    recursiveSize: node.recursiveSize,
+    recursiveSize,
     childCount: node.childCount,
-    descendantsScanned: node.descendantsScanned,
+    descendantsScanned,
     truncated: node.truncated,
     issues: node.issues,
-    children: [...node.children].sort((left, right) => right.recursiveSize - left.recursiveSize),
+    children,
   };
 }
 
@@ -418,14 +448,14 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
       if (node.parentPath) {
         const parent = nodesByPath.get(node.parentPath);
         if (parent) {
-          parent.children.push(branch);
-          parent.recursiveSize += branch.recursiveSize;
-          parent.descendantsScanned += branch.descendantsScanned + 1;
+          upsertChildBranch(parent, branch);
           parent.pendingChildren = Math.max(0, parent.pendingChildren - 1);
           if (parent.scanned && parent.pendingChildren === 0) {
             finalizeNode(parent);
           }
         }
+        nodesByPath.delete(node.path);
+        node.children = [];
         return;
       }
 
@@ -560,6 +590,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
 
                 const childNode = createDirectoryNode(entryPath, task.node.path);
                 nodesByPath.set(entryPath, childNode);
+                upsertChildBranch(task.node, createDirectoryPlaceholder(entryPath));
                 task.node.pendingChildren += 1;
                 totalDirectories += 1;
                 job.progress.directoriesDiscovered += 1;
@@ -602,7 +633,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
                 issues: [],
                 children: [],
               });
-              task.node.recursiveSize += stat.size;
+              task.node.size += stat.size;
               job.progress.filesDiscovered += 1;
               job.progress.bytesProcessed += stat.size;
             }
@@ -611,6 +642,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
             job.progress.directoriesCompleted += 1;
             touchJob(job);
             emitProgress(job);
+            emitBranch(job, toTreemapNode(task.node));
             if (task.node.pendingChildren === 0) {
               finalizeNode(task.node);
             }

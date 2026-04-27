@@ -52,13 +52,31 @@ function DiskAnalysisPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { addToast } = useToastStore();
-  const mount = search.fs
-    ? ({
-        mount: search.mount,
-        fs: search.fs,
-      } satisfies DiskAnalysisMountIdentity)
-    : null;
+  const mount = useMemo(
+    () =>
+      search.fs
+        ? ({
+            mount: search.mount,
+            fs: search.fs,
+          } satisfies DiskAnalysisMountIdentity)
+        : null,
+    [search.fs, search.mount]
+  );
   const mountKey = mount ? `${mount.mount}::${mount.fs}` : "missing-mount";
+  const mountStateQueryKey = useMemo(
+    () =>
+      mount
+        ? (["diskAnalysis.getMountState", mount.mount, mount.fs] as const)
+        : (["diskAnalysis.getMountState", "", ""] as const),
+    [mount]
+  );
+  const snapshotQueryKey = useMemo(
+    () =>
+      mount
+        ? (["diskAnalysis.getSnapshot", mount.mount, mount.fs] as const)
+        : (["diskAnalysis.getSnapshot", "", ""] as const),
+    [mount]
+  );
 
   const [viewMode, setViewMode] = useState<ViewMode>("live");
   const [liveRoot, setLiveRoot] = useState<DiskAnalysisTreemapNode | null>(null);
@@ -165,6 +183,14 @@ function DiskAnalysisPage() {
         const parsed = DiskAnalysisScanEventSchema.parse(JSON.parse(messageEvent.data));
         if (parsed.event === "status" || parsed.event === "progress") {
           setLiveJob(parsed.job);
+          if (
+            parsed.job.phase === "completed" ||
+            parsed.job.phase === "partial" ||
+            parsed.job.phase === "failed" ||
+            parsed.job.phase === "cancelled"
+          ) {
+            setStreamPath(null);
+          }
           return;
         }
         if (parsed.event === "branch") {
@@ -181,11 +207,12 @@ function DiskAnalysisPage() {
           setLiveJob(parsed.job);
           setLiveSnapshot(parsed.snapshot);
           setLiveRoot(parsed.snapshot.root);
+          setStreamPath(null);
           void queryClient.invalidateQueries({
-            queryKey: trpc.diskAnalysis.getMountState.queryOptions(mount).queryKey,
+            queryKey: mountStateQueryKey,
           });
           void queryClient.invalidateQueries({
-            queryKey: trpc.diskAnalysis.getSnapshot.queryOptions(mount).queryKey,
+            queryKey: snapshotQueryKey,
           });
         }
       } catch (error) {
@@ -224,7 +251,7 @@ function DiskAnalysisPage() {
       source.removeEventListener("snapshot", handleEvent);
       source.close();
     };
-  }, [mount, queryClient, streamPath, trpc.diskAnalysis]);
+  }, [mount, mountStateQueryKey, queryClient, snapshotQueryKey, streamPath]);
 
   const liveRootOrSnapshot = liveSnapshot?.root ?? liveRoot;
   const liveAvailable = !!streamPath || !!liveJob || !!liveRootOrSnapshot;

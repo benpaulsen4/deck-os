@@ -343,7 +343,27 @@ describe("disk analysis route", () => {
     expect(screen.getByText("Viewing live result")).toBeInTheDocument();
 
     const eventSource = MockEventSource.latest();
+    const initialEventSourceCount = MockEventSource.instances.length;
     eventSource.dispatchOpen();
+    eventSource.dispatchMessage("branch", {
+      event: "branch",
+      jobId: "11111111-1111-1111-1111-111111111111",
+      mount: { mount: "C:\\", fs: "ntfs" },
+      branch: makeDirectory("C:\\", [makeDirectory("C:\\media", []), makeDirectory("C:\\cache", [])]),
+    });
+
+    eventSource.dispatchMessage("progress", {
+      event: "progress",
+      job: {
+        ...state.mountState!.activeJob!,
+        progress: {
+          directoriesDiscovered: 5,
+          directoriesCompleted: 2,
+          filesDiscovered: 2,
+          bytesProcessed: 640,
+        },
+      },
+    });
     eventSource.dispatchMessage("branch", {
       event: "branch",
       jobId: "11111111-1111-1111-1111-111111111111",
@@ -351,6 +371,7 @@ describe("disk analysis route", () => {
       branch: makeDirectory("C:\\media", [makeFile("C:\\media\\clip.mp4", 512, "mp4")]),
     });
 
+    expect(MockEventSource.instances).toHaveLength(initialEventSourceCount);
     expect(await screen.findByText("media")).toBeInTheDocument();
     fireEvent.doubleClick(screen.getByText("media"));
     await waitFor(() =>

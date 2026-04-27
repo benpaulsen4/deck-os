@@ -90,6 +90,15 @@ describe("diskAnalysis service", () => {
     expect(finalJob?.phase).toBe("completed");
     expect(events.some((event) => event.event === "progress")).toBe(true);
     expect(
+      events.some(
+        (event) =>
+          event.event === "branch" &&
+          event.branch.path === mountDir &&
+          event.branch.children.some((child) => child.path.endsWith("alpha")) &&
+          event.branch.children.some((child) => child.path.endsWith("beta"))
+      )
+    ).toBe(true);
+    expect(
       events.some((event) => event.event === "branch" && event.branch.path.endsWith("alpha"))
     ).toBe(true);
     expect(
