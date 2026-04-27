@@ -18,12 +18,13 @@
   - [x] Add route search or equivalent route-driven state for initial folder targeting and file reveal
   - [x] Restore selection/highlight and scroll target file into view after the directory listing resolves
   - [x] Validate deep-link behavior with targeted Files route tests
-- [ ] Task 5: Verify the end-to-end feature against the spec
-  - [ ] Confirm Settings launch flow, scan/cached/live states, legend coloring, hover behavior, and Files handoff
-  - [ ] Confirm stale-cache refresh behavior and SSE progress handling against the checklist
+- [x] Task 5: Verify the end-to-end feature against the spec
+  - [x] Confirm Settings launch flow, scan/cached/live states, legend coloring, hover behavior, and Files handoff
+  - [x] Confirm stale-cache refresh behavior and SSE progress handling against the checklist
 
 # Task Dependencies
 - Task 2 depends on Task 1
 - Task 3 depends on Task 1 and Task 2
 - Task 4 depends on Task 1
 - Task 5 depends on Task 2, Task 3, and Task 4
+
