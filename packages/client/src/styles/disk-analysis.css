@@ -1,0 +1,436 @@
+.disk-analysis-page {
+  display: grid;
+  gap: var(--space-2);
+  min-height: 0;
+}
+
+.disk-analysis-header {
+  display: grid;
+  gap: 4px;
+}
+
+.disk-analysis-header__eyebrow {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-secondary);
+}
+
+.disk-analysis-header__path {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.disk-analysis-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+.disk-analysis-summary {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.disk-analysis-summary__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.disk-analysis-summary__status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.disk-analysis-mode-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.disk-analysis-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-primary);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.disk-analysis-pill--good {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.disk-analysis-pill--warn {
+  border-color: var(--status-warning);
+  color: var(--status-warning);
+}
+
+.disk-analysis-pill--bad {
+  border-color: var(--status-stopped);
+  color: var(--status-stopped);
+}
+
+.disk-analysis-pill--info {
+  border-color: var(--meter-disk);
+  color: #caa0ff;
+}
+
+.disk-analysis-pill--neutral {
+  border-color: var(--border-active);
+  color: var(--text-secondary);
+}
+
+.disk-analysis-summary__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.disk-analysis-stat {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-primary);
+}
+
+.disk-analysis-stat__label {
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.disk-analysis-stat__value {
+  font-size: var(--text-lg);
+  color: var(--text-primary);
+}
+
+.disk-analysis-progress {
+  display: grid;
+  gap: 10px;
+}
+
+.disk-analysis-progress__bar {
+  height: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  overflow: hidden;
+}
+
+.disk-analysis-progress__fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--meter-disk), var(--accent-primary));
+  transition: width 180ms linear;
+}
+
+.disk-analysis-progress__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.disk-analysis-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.9fr);
+  gap: var(--space-2);
+  min-height: 0;
+  flex: 1;
+}
+
+.disk-analysis-treemap-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--space-3);
+  gap: var(--space-2);
+}
+
+.disk-analysis-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.disk-analysis-panel-subtitle {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.disk-analysis-panel-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.disk-analysis-treemap {
+  position: relative;
+  flex: 1;
+  min-height: 460px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent),
+    radial-gradient(circle at top right, rgba(170, 68, 255, 0.16), transparent 30%),
+    radial-gradient(circle at bottom left, rgba(0, 255, 136, 0.12), transparent 32%),
+    var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  overflow: hidden;
+}
+
+.disk-analysis-node {
+  position: absolute;
+  padding: 2px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.disk-analysis-node__surface {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border: 1px solid;
+  overflow: hidden;
+  cursor: pointer;
+  outline: none;
+  transition:
+    transform 100ms linear,
+    border-color 100ms linear,
+    box-shadow 100ms linear;
+}
+
+.disk-analysis-node__surface:hover,
+.disk-analysis-node__surface:focus-visible {
+  transform: translateZ(0) scale(0.995);
+  border-color: var(--accent-primary) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.disk-analysis-node__strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  min-height: 20px;
+  padding: 3px 6px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.44), rgba(0, 0, 0, 0.14));
+  backdrop-filter: blur(6px);
+}
+
+.disk-analysis-node__title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.disk-analysis-node__hover-label {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px;
+  opacity: 0;
+  transform: translateY(6px);
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.82));
+  font-size: var(--text-xs);
+  transition:
+    opacity 120ms linear,
+    transform 120ms linear;
+}
+
+.disk-analysis-node__surface:hover .disk-analysis-node__hover-label,
+.disk-analysis-node__surface:focus-visible .disk-analysis-node__hover-label {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.disk-analysis-node__flag {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  padding: 2px 5px;
+  background: rgba(10, 10, 10, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.disk-analysis-sidebar {
+  display: grid;
+  gap: var(--space-2);
+  min-height: 0;
+}
+
+.disk-analysis-details,
+.disk-analysis-legend,
+.disk-analysis-issues {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.disk-analysis-details__content {
+  display: grid;
+  gap: 8px;
+}
+
+.disk-analysis-details__name {
+  font-size: var(--text-xl);
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.disk-analysis-details__type {
+  color: var(--accent-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--text-xs);
+}
+
+.disk-analysis-details__path {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.disk-analysis-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-primary);
+  font-size: var(--text-sm);
+}
+
+.disk-analysis-legend__list,
+.disk-analysis-issues__list {
+  display: grid;
+  gap: 8px;
+}
+
+.disk-analysis-legend__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.disk-analysis-legend__swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.disk-analysis-legend__label {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.disk-analysis-legend__count {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.disk-analysis-issue {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  background: rgba(255, 84, 112, 0.06);
+  border: 1px solid rgba(255, 84, 112, 0.18);
+}
+
+.disk-analysis-issue__code {
+  color: #ff8aa0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--text-xs);
+}
+
+.disk-analysis-issue__message {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.disk-analysis-issue__path {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  word-break: break-all;
+}
+
+.disk-analysis-empty {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 260px;
+  padding: var(--space-4);
+  text-align: center;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px dashed var(--border-primary);
+}
+
+.disk-analysis-empty--error {
+  border-color: rgba(255, 84, 112, 0.28);
+}
+
+.disk-analysis-empty__title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.disk-analysis-empty__body {
+  max-width: 54ch;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+@media (max-width: 1100px) {
+  .disk-analysis-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .disk-analysis-header__actions,
+  .disk-analysis-summary__head,
+  .disk-analysis-panel-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .disk-analysis-summary__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .disk-analysis-treemap {
+    min-height: 340px;
+  }
+}

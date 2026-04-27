@@ -9,11 +9,11 @@
   - [x] Add APIs for starting/reusing scan jobs, reading cached snapshots, and streaming live updates over SSE
   - [x] Add persistent cache storage and freshness rules for per-disk completed scans, including background regeneration after 24 hours
   - [x] Validate performance constraints with focused service tests around queue limits, cache behavior, and incremental event emission
-- [ ] Task 3: Design the client-side disk analysis experience
-  - [ ] Add a Settings action for each disk that opens a dedicated disk analysis page
-  - [ ] Build the treemap page layout with scan state, stale/live mode switching, extension legend, hover details, and empty/error states
-  - [ ] Define incremental client-state assembly so streamed branch updates can populate the visualization without blocking on full completion
-  - [ ] Validate interaction behavior with focused route/component tests for loading, switching between cached/live views, and double-click navigation
+- [x] Task 3: Design the client-side disk analysis experience
+  - [x] Add a Settings action for each disk that opens a dedicated disk analysis page
+  - [x] Build the treemap page layout with scan state, stale/live mode switching, extension legend, hover details, and empty/error states
+  - [x] Define incremental client-state assembly so streamed branch updates can populate the visualization without blocking on full completion
+  - [x] Validate interaction behavior with focused route/component tests for loading, switching between cached/live views, and double-click navigation
 - [x] Task 4: Extend the Files page for reveal-in-folder navigation
   - [x] Add route search or equivalent route-driven state for initial folder targeting and file reveal
   - [x] Restore selection/highlight and scroll target file into view after the directory listing resolves

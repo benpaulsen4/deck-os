@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useTRPC } from "../trpc";
 import { trpcClient } from "../trpc";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,6 +24,7 @@ export const Route = createFileRoute("/settings")({
 });
 
 function SettingsPage() {
+  const navigate = useNavigate();
   const [securityModal, setSecurityModal] = useState<
     null | "enable" | "session" | "passcode" | "disable"
   >(null);
@@ -515,6 +516,22 @@ function SettingsPage() {
                                     transition: "width var(--transition-meter) linear",
                                   }}
                                 />
+                              </div>
+                              <div style={{ marginTop: "var(--space-2)" }}>
+                                <Button
+                                  variant="secondary"
+                                  onClick={() =>
+                                    void navigate({
+                                      to: "/disk-analysis",
+                                      search: {
+                                        mount: disk.mount,
+                                        fs: disk.fs,
+                                      },
+                                    })
+                                  }
+                                >
+                                  ANALYZE DISK
+                                </Button>
                               </div>
                             </div>
                           );
