@@ -1,4 +1,3 @@
-import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   DiskAnalysisCancelScanInputSchema,
@@ -9,29 +8,33 @@ import {
   DiskAnalysisStartScanResultSchema,
 } from "../lib/diskAnalysisContract.js";
 import { protectedProcedure, router } from "../trpc/trpc.js";
-
-function notImplemented(): never {
-  throw new TRPCError({
-    code: "NOT_IMPLEMENTED",
-    message: "Disk analysis scan execution is not implemented yet.",
-  });
-}
+import * as diskAnalysisService from "../services/diskAnalysis.js";
 
 export const diskAnalysisRouter = router({
   getMountState: protectedProcedure
     .input(DiskAnalysisMountIdentitySchema)
     .output(DiskAnalysisMountStateSchema.nullable())
-    .query(() => notImplemented()),
+    .query(async ({ input }) => {
+      return await diskAnalysisService.getMountState(input);
+    }),
   getSnapshot: protectedProcedure
     .input(DiskAnalysisMountIdentitySchema)
     .output(DiskAnalysisSnapshotEnvelopeSchema.nullable())
-    .query(() => notImplemented()),
+    .query(async ({ input }) => {
+      return await diskAnalysisService.getCachedSnapshot(input);
+    }),
   startScan: protectedProcedure
     .input(DiskAnalysisStartScanInputSchema)
     .output(DiskAnalysisStartScanResultSchema)
-    .mutation(() => notImplemented()),
+    .mutation(async ({ input }) => {
+      return await diskAnalysisService.startScan(input.mount);
+    }),
   cancelScan: protectedProcedure
     .input(DiskAnalysisCancelScanInputSchema)
     .output(z.object({ success: z.boolean() }))
-    .mutation(() => notImplemented()),
+    .mutation(({ input }) => {
+      return {
+        success: diskAnalysisService.cancelScan(input.mount, input.jobId),
+      };
+    }),
 });

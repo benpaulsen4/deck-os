@@ -4,11 +4,11 @@
   - [x] Define worker/resource limit rules, stale-cache behavior, and failure handling for inaccessible paths and partial scans
   - [x] Define the disk-analysis tRPC surface as named query/mutation procedures instead of generic CRUD endpoints
   - [x] Confirm route/deep-link contract between the treemap page and the Files page
-- [ ] Task 2: Design the server-side scan pipeline
-  - [ ] Add a dedicated disk-analysis service using bounded multi-worker traversal, branch aggregation, and cancellation support
-  - [ ] Add APIs for starting/reusing scan jobs, reading cached snapshots, and streaming live updates over SSE
-  - [ ] Add persistent cache storage and freshness rules for per-disk completed scans, including background regeneration after 24 hours
-  - [ ] Validate performance constraints with focused service tests around queue limits, cache behavior, and incremental event emission
+- [x] Task 2: Design the server-side scan pipeline
+  - [x] Add a dedicated disk-analysis service using bounded multi-worker traversal, branch aggregation, and cancellation support
+  - [x] Add APIs for starting/reusing scan jobs, reading cached snapshots, and streaming live updates over SSE
+  - [x] Add persistent cache storage and freshness rules for per-disk completed scans, including background regeneration after 24 hours
+  - [x] Validate performance constraints with focused service tests around queue limits, cache behavior, and incremental event emission
 - [ ] Task 3: Design the client-side disk analysis experience
   - [ ] Add a Settings action for each disk that opens a dedicated disk analysis page
   - [ ] Build the treemap page layout with scan state, stale/live mode switching, extension legend, hover details, and empty/error states

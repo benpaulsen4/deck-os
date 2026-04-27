@@ -19,6 +19,13 @@ const pullJobsMock = vi.hoisted(() => ({
   subscribeToPullJob: vi.fn(() => () => undefined),
 }));
 
+const diskAnalysisMock = vi.hoisted(() => ({
+  getJobStreamInitialEvent: vi.fn(),
+  subscribeToJob: vi.fn(() => () => undefined),
+  getJobKeepaliveEvent: vi.fn((jobId: string) => ({ event: "keepalive", jobId })),
+  DiskAnalysisJobNotFoundError: class DiskAnalysisJobNotFoundError extends Error {},
+}));
+
 const versionMock = vi.hoisted(() => ({
   getCurrentVersion: vi.fn(() => "0.0.0-test"),
 }));
@@ -26,6 +33,7 @@ const versionMock = vi.hoisted(() => ({
 vi.mock("../services/metrics.js", () => metricsMock);
 vi.mock("../services/docker.js", () => dockerMock);
 vi.mock("../services/pullJobs.js", () => pullJobsMock);
+vi.mock("../services/diskAnalysis.js", () => diskAnalysisMock);
 vi.mock("../lib/version.js", () => versionMock);
 
 import { registerRuntimeRoutes } from "./runtimeRoutes.js";
@@ -207,6 +215,66 @@ describe("runtimeRoutes", () => {
     expect(payload).toContain("event: docker-event");
     expect(payload).toContain('"status":"start"');
     expect(getEvents).toHaveBeenCalledTimes(1);
+  });
+
+  test("disk analysis events endpoint rejects non-SSE requests", async () => {
+    const app = createApp();
+    const res = await app.request(
+      "http://localhost/api/disk-analysis/jobs/job-1/events?mount=C%3A%5C&fs=ntfs"
+    );
+
+    expect(res.status).toBe(406);
+    expect(await res.json()).toEqual({
+      error: "This endpoint only supports SSE subscriptions",
+    });
+  });
+
+  test("disk analysis events endpoint streams initial SSE payloads", async () => {
+    diskAnalysisMock.getJobStreamInitialEvent.mockReturnValue({
+      event: "status",
+      job: {
+        jobId: "11111111-1111-1111-1111-111111111111",
+        mount: { mount: "C:\\", fs: "ntfs" },
+        phase: "scanning",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        progress: {
+          directoriesDiscovered: 1,
+          directoriesCompleted: 0,
+          filesDiscovered: 0,
+          bytesProcessed: 0,
+        },
+        issues: [],
+        limits: {
+          maxWorkers: 2,
+          maxPendingDirectories: 10,
+          maxIndexedNodes: 100,
+        },
+      },
+    });
+    const app = createApp();
+
+    const res = await app.request(
+      "http://localhost/api/disk-analysis/jobs/11111111-1111-1111-1111-111111111111/events?mount=C%3A%5C&fs=ntfs",
+      {
+        headers: {
+          accept: "text/event-stream",
+        },
+      }
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    const reader = res.body!.getReader();
+    const first = await reader.read();
+    await reader.cancel();
+    const payload = new TextDecoder().decode(first.value);
+    expect(payload).toContain("event: status");
+    expect(payload).toContain('"phase":"scanning"');
+    expect(diskAnalysisMock.subscribeToJob).toHaveBeenCalledWith(
+      "11111111-1111-1111-1111-111111111111",
+      expect.any(Function)
+    );
   });
 
   test("logs endpoint validates tail query before docker lookup", async () => {
