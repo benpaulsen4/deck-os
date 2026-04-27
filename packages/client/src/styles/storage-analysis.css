@@ -19,6 +19,20 @@
   gap: var(--space-2);
 }
 
+.storage-analysis-inline-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+.storage-analysis-inline-status-icon {
+  animation: storage-analysis-spin 0.85s linear infinite;
+}
+
 .storage-analysis-page {
   display: grid;
   grid-template-columns: minmax(280px, 320px) 1fr;
@@ -80,17 +94,6 @@
   color: var(--text-primary);
 }
 
-.storage-analysis-warning {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px;
-  border-left: 2px solid var(--status-warning);
-  background: rgba(255, 196, 0, 0.08);
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-}
-
 .storage-analysis-legend {
   display: grid;
   gap: 6px;
@@ -132,75 +135,18 @@
   gap: var(--space-2);
 }
 
-.storage-analysis-indicator {
-  display: grid;
-  gap: 6px;
-  padding: 12px 14px;
-  border: 1px solid var(--border-primary);
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.storage-analysis-indicator--scanning {
-  border-left: 3px solid var(--accent-primary);
-  background: rgba(88, 166, 255, 0.08);
-}
-
-.storage-analysis-indicator--ready {
-  border-left: 3px solid var(--status-success);
-  background: rgba(80, 200, 120, 0.08);
-}
-
-.storage-analysis-indicator--stale {
-  border-left: 3px solid var(--status-warning);
-  background: rgba(255, 196, 0, 0.08);
-}
-
-.storage-analysis-indicator--pending,
-.storage-analysis-indicator--failed {
-  border-left: 3px solid var(--status-danger);
-  background: rgba(255, 90, 95, 0.08);
-}
-
-.storage-analysis-indicator-title {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-primary);
-}
-
-.storage-analysis-indicator-copy {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-}
-
-.storage-analysis-indicator-meta {
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
-}
-
-.storage-analysis-banner {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-secondary);
-}
-
-.storage-analysis-banner > span {
-  padding: 6px 8px;
-  border: 1px solid var(--border-primary);
-}
-
 .storage-analysis-canvas-shell {
   flex: 1;
   min-height: 0;
   padding: var(--space-2);
   overflow: hidden;
+  position: relative;
+}
+
+.storage-analysis-note {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 
 .storage-analysis-canvas {
@@ -311,5 +257,15 @@
 
   .storage-analysis-footer {
     flex-direction: column;
+  }
+}
+
+@keyframes storage-analysis-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
   }
 }

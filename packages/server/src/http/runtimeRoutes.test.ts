@@ -19,6 +19,10 @@ const pullJobsMock = vi.hoisted(() => ({
   subscribeToPullJob: vi.fn(() => () => undefined),
 }));
 
+const storageAnalysisMock = vi.hoisted(() => ({
+  subscribeToStorageAnalysisJob: vi.fn(),
+}));
+
 const versionMock = vi.hoisted(() => ({
   getCurrentVersion: vi.fn(() => "0.0.0-test"),
 }));
@@ -26,6 +30,7 @@ const versionMock = vi.hoisted(() => ({
 vi.mock("../services/metrics.js", () => metricsMock);
 vi.mock("../services/docker.js", () => dockerMock);
 vi.mock("../services/pullJobs.js", () => pullJobsMock);
+vi.mock("../services/storageAnalysis.js", () => storageAnalysisMock);
 vi.mock("../lib/version.js", () => versionMock);
 
 import { registerRuntimeRoutes } from "./runtimeRoutes.js";
@@ -186,6 +191,49 @@ describe("runtimeRoutes", () => {
     const payload = new TextDecoder().decode(first.value);
     expect(payload).toContain("event: metrics");
     expect(payload).toContain('"cpuPercent":12');
+  });
+
+  test("storage analysis events stream initial SSE payloads", async () => {
+    storageAnalysisMock.subscribeToStorageAnalysisJob.mockImplementation(
+      (_jobId: string, _afterEventId: string | null, listener: (eventId: string, event: unknown) => void) => {
+        listener("1", {
+          type: "started",
+          job: {
+            jobId: "job-1",
+            mountKey: "mount-1",
+            startedAt: "2026-01-01T00:00:00.000Z",
+            status: "scanning",
+          },
+          mount: {
+            id: "mount-1",
+            mount: "/data",
+            fs: "/dev/sda1",
+            filesystemType: "ext4",
+            size: 1000,
+            used: 500,
+            deviceId: 1,
+          },
+        });
+        return () => undefined;
+      }
+    );
+    const app = createApp();
+
+    const res = await app.request("http://localhost/api/storage/analysis/job-1/events");
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    const reader = res.body!.getReader();
+    const first = await reader.read();
+    await reader.cancel();
+    const payload = new TextDecoder().decode(first.value);
+    expect(payload).toContain("event: storage-analysis");
+    expect(payload).toContain('"type":"started"');
+    expect(storageAnalysisMock.subscribeToStorageAnalysisJob).toHaveBeenCalledWith(
+      "job-1",
+      null,
+      expect.any(Function)
+    );
   });
 
   test("docker events stream emits parsed event payloads", async () => {

@@ -6,8 +6,8 @@ import {
   Activity,
   Database,
   HardDrive,
+  LoaderCircle,
   RefreshCw,
-  AlertTriangle,
 } from "lucide-react";
 import { useTRPC, trpcClient } from "../trpc";
 import { Button } from "../components/ui/Button";
@@ -31,6 +31,114 @@ type StorageSearch = {
   fs: string;
 };
 
+type StorageMount = {
+  id: string;
+  mount: string;
+  fs: string;
+  filesystemType: string;
+  size: number;
+  used: number;
+  deviceId: number | null;
+};
+
+type StorageExtensionEntry = {
+  extension: string;
+  label: string;
+  count: number;
+  totalSize: number;
+  color: string;
+};
+
+type StorageNode = {
+  path: string;
+  name: string;
+  type: "directory" | "file" | "symlink" | "other";
+  size: number;
+  extension: string | null;
+  childCount: number;
+  children: StorageNode[];
+};
+
+type StorageAnalysisView = {
+  mount: StorageMount;
+  status: "scanning" | "ready" | "stale" | "failed";
+  analyzer: "scan" | null;
+  sourceKind: "cache-fresh" | "cache-stale" | "scan" | "pending" | null;
+  jobId: string | null;
+  mountKey: string;
+  generatedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  freshnessTtlMs: number;
+  totalSize: number | null;
+  nodeCount: number | null;
+  isPartial: boolean;
+  oversized: boolean;
+  extensionHistogram: StorageExtensionEntry[];
+  root: StorageNode | null;
+  refreshing: boolean;
+  errorCode: string | null;
+  error: string | null;
+  warningCode: string | null;
+  warning: string | null;
+};
+
+type StorageStreamEvent =
+  | {
+      type: "started";
+      job: {
+        jobId: string;
+        mountKey: string;
+        startedAt: string;
+        status: "scanning" | "ready" | "failed";
+      };
+      mount: StorageMount;
+    }
+  | {
+      type: "node";
+      node: {
+        parentPath: string | null;
+        path: string;
+        name: string;
+        type: "directory" | "file" | "symlink" | "other";
+        size: number;
+        extension: string | null;
+      };
+      totalSize: number;
+      nodeCount: number;
+    }
+  | {
+      type: "progress";
+      totalSize: number;
+      nodeCount: number;
+      warningCode: string | null;
+      warning: string | null;
+      extensionHistogram: StorageExtensionEntry[];
+    }
+  | {
+      type: "done";
+      completedAt: string;
+      totalSize: number;
+      nodeCount: number;
+      warningCode: string | null;
+      warning: string | null;
+    }
+  | {
+      type: "failed";
+      errorCode: string;
+      error: string;
+    };
+
+type LiveNodeRecord = {
+  path: string;
+  parentPath: string | null;
+  name: string;
+  type: "directory" | "file" | "symlink" | "other";
+  size: number;
+  extension: string | null;
+  children: Set<string>;
+};
+
 function readStorageSearch(): StorageSearch {
   if (typeof window === "undefined") {
     return { mount: "", fs: "" };
@@ -40,6 +148,35 @@ function readStorageSearch(): StorageSearch {
     mount: params.get("mount") ?? "",
     fs: params.get("fs") ?? "",
   };
+}
+
+function materializeTree(
+  rootPath: string | null,
+  nodes: Map<string, LiveNodeRecord>
+): StorageNode | null {
+  if (!rootPath) {
+    return null;
+  }
+  const build = (path: string): StorageNode | null => {
+    const record = nodes.get(path);
+    if (!record) {
+      return null;
+    }
+    const children = [...record.children]
+      .map((childPath) => build(childPath))
+      .filter((child): child is StorageNode => child !== null)
+      .sort((left, right) => right.size - left.size || left.name.localeCompare(right.name));
+    return {
+      path: record.path,
+      name: record.name,
+      type: record.type,
+      size: record.size,
+      extension: record.extension,
+      childCount: children.length,
+      children,
+    };
+  };
+  return build(rootPath);
 }
 
 function getNodeColor(
@@ -77,48 +214,6 @@ function getFailureCopy(errorCode: string | null | undefined, error: string | nu
   }
 }
 
-function getScanIndicator(analysis: NonNullable<ReturnType<typeof StorageAnalysisPage> extends never ? never : any>) {
-  if (!analysis) {
-    return {
-      title: "Preparing analysis",
-      tone: "pending",
-      detail: "Waiting for the first scan response.",
-    };
-  }
-  if (analysis.status === "scanning") {
-    return analysis.root
-      ? {
-          title: "Scanning in progress",
-          tone: "scanning",
-          detail: "Showing partial results. Totals will continue growing until the scan completes.",
-        }
-      : {
-          title: "Scan starting",
-          tone: "pending",
-          detail: "No tree data is available yet.",
-        };
-  }
-  if (analysis.status === "stale") {
-    return {
-      title: "Showing stale snapshot",
-      tone: "stale",
-      detail: "Older results are visible while a refresh runs in the background.",
-    };
-  }
-  if (analysis.status === "ready") {
-    return {
-      title: "Scan complete",
-      tone: "ready",
-      detail: "This snapshot is complete for the current scan pass.",
-    };
-  }
-  return {
-    title: "Scan failed",
-    tone: "failed",
-    detail: "DeckOS could not finish the storage analysis.",
-  };
-}
-
 function StorageAnalysisPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -127,6 +222,20 @@ function StorageAnalysisPage() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1024, height: 640 });
+  const [liveAnalysis, setLiveAnalysis] = useState<StorageAnalysisView | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const liveNodesRef = useRef<Map<string, LiveNodeRecord>>(new Map());
+  const liveRootPathRef = useRef<string | null>(null);
+  const liveJobIdRef = useRef<string | null>(null);
+  const lastEventIdRef = useRef<string | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const liveAnalysisRef = useRef<StorageAnalysisView | null>(null);
+  const snapshotAnalysisRef = useRef<StorageAnalysisView | undefined>(undefined);
+  const autoStartLockRef = useRef<{ key: string | null; inFlight: boolean; settled: boolean }>({
+    key: null,
+    inFlight: false,
+    settled: false,
+  });
 
   useEffect(() => {
     const update = () => {
@@ -154,27 +263,370 @@ function StorageAnalysisPage() {
     )
   );
 
-  const refreshMutation = useMutation({
-    mutationFn: async () =>
-      await trpcClient.storage.refreshAnalysis.mutate({
+  const startMutation = useMutation({
+    mutationFn: async (force = false) =>
+      await trpcClient.storage.startAnalysis.mutate({
         mount: search.mount,
         fs: search.fs,
+        force,
       }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: trpc.storage.getAnalysis.queryOptions({
-          mount: search.mount,
-          fs: search.fs,
-        }).queryKey,
-      });
+    onSuccess: (result) => {
+      liveNodesRef.current = new Map();
+      liveRootPathRef.current = null;
+      liveJobIdRef.current = result.job.jobId;
+      lastEventIdRef.current = null;
+      setActiveJobId(result.job.jobId);
+      closeStream();
     },
     onError: (error: unknown) => {
-      addToast(error instanceof Error ? error.message : "Refresh failed", "error");
+      addToast(error instanceof Error ? error.message : "Failed to start storage analysis", "error");
     },
   });
 
-  const analysis = analysisQuery.data;
-  const scanIndicator = getScanIndicator(analysis as never);
+  const resetLiveState = () => {
+    liveNodesRef.current = new Map();
+    liveRootPathRef.current = null;
+    liveJobIdRef.current = null;
+    lastEventIdRef.current = null;
+    autoStartLockRef.current = {
+      key: null,
+      inFlight: false,
+      settled: false,
+    };
+    setActiveJobId(null);
+    setLiveAnalysis(null);
+  };
+
+  const closeStream = () => {
+    eventSourceRef.current?.close();
+    eventSourceRef.current = null;
+  };
+
+  const applyNodePatch = (event: Extract<StorageStreamEvent, { type: "node" }>) => {
+    const { node } = event;
+    const existing = liveNodesRef.current.get(node.path);
+    const record: LiveNodeRecord = existing ?? {
+      path: node.path,
+      parentPath: node.parentPath,
+      name: node.name,
+      type: node.type,
+      size: node.size,
+      extension: node.extension,
+      children: new Set<string>(),
+    };
+    record.parentPath = node.parentPath;
+    record.name = node.name;
+    record.type = node.type;
+    record.size = node.size;
+    record.extension = node.extension;
+    liveNodesRef.current.set(node.path, record);
+    if (node.parentPath) {
+      const parent =
+        liveNodesRef.current.get(node.parentPath) ??
+        ({
+          path: node.parentPath,
+          parentPath: null,
+          name: node.parentPath,
+          type: "directory",
+          size: 0,
+          extension: null,
+          children: new Set<string>(),
+        } satisfies LiveNodeRecord);
+      parent.children.add(node.path);
+      liveNodesRef.current.set(node.parentPath, parent);
+    } else {
+      liveRootPathRef.current = node.path;
+    }
+  };
+
+  const syncLiveTree = (
+    base: StorageAnalysisView | null,
+    patch: Pick<
+      StorageAnalysisView,
+      | "status"
+      | "startedAt"
+      | "completedAt"
+      | "totalSize"
+      | "nodeCount"
+      | "extensionHistogram"
+      | "warningCode"
+      | "warning"
+      | "errorCode"
+      | "error"
+      | "refreshing"
+      | "sourceKind"
+      | "isPartial"
+    >
+  ) => {
+    const root = materializeTree(liveRootPathRef.current, liveNodesRef.current);
+    const fallbackMount =
+      base?.mount ??
+      ({
+        id: "",
+        mount: search.mount,
+        fs: search.fs,
+        filesystemType: "unknown",
+        size: 0,
+        used: 0,
+        deviceId: null,
+      } satisfies StorageMount);
+    setLiveAnalysis({
+      mount: fallbackMount,
+      status: patch.status,
+      analyzer: "scan",
+      sourceKind: patch.sourceKind,
+      jobId: activeJobId,
+      mountKey: base?.mountKey ?? liveJobIdRef.current ?? "",
+      generatedAt: patch.completedAt,
+      startedAt: patch.startedAt,
+      completedAt: patch.completedAt,
+      freshnessTtlMs: base?.freshnessTtlMs ?? 300000,
+      totalSize: patch.totalSize,
+      nodeCount: patch.nodeCount,
+      isPartial: patch.isPartial,
+      oversized: base?.oversized ?? false,
+      extensionHistogram: patch.extensionHistogram,
+      root,
+      refreshing: patch.refreshing,
+      errorCode: patch.errorCode,
+      error: patch.error,
+      warningCode: patch.warningCode,
+      warning: patch.warning,
+    });
+  };
+
+  useEffect(() => {
+    resetLiveState();
+  }, [search.fs, search.mount]);
+
+  useEffect(() => {
+    return () => {
+      closeStream();
+    };
+  }, []);
+
+  const analysis = liveAnalysis ?? (analysisQuery.data as StorageAnalysisView | undefined);
+
+  useEffect(() => {
+    liveAnalysisRef.current = liveAnalysis;
+  }, [liveAnalysis]);
+
+  useEffect(() => {
+    snapshotAnalysisRef.current = analysisQuery.data as StorageAnalysisView | undefined;
+  }, [analysisQuery.data]);
+
+  useEffect(() => {
+    if (!search.mount || !search.fs) {
+      return;
+    }
+    const autoStartKey = `${search.mount}::${search.fs}`;
+    const queryAnalysis = analysisQuery.data as StorageAnalysisView | undefined;
+    if (activeJobId || queryAnalysis?.jobId) {
+      return;
+    }
+    const shouldAutoStart = !queryAnalysis || queryAnalysis.status === "scanning";
+    const lock = autoStartLockRef.current;
+    if (
+      !shouldAutoStart ||
+      startMutation.isPending ||
+      (lock.key === autoStartKey && (lock.inFlight || lock.settled))
+    ) {
+      return;
+    }
+    autoStartLockRef.current = {
+      key: autoStartKey,
+      inFlight: true,
+      settled: false,
+    };
+    void startMutation
+      .mutateAsync(false)
+      .then(() => {
+        autoStartLockRef.current = {
+          key: autoStartKey,
+          inFlight: false,
+          settled: true,
+        };
+      })
+      .catch(() => {
+        autoStartLockRef.current = {
+          key: autoStartKey,
+          inFlight: false,
+          settled: false,
+        };
+      });
+  }, [activeJobId, analysisQuery.data, search.fs, search.mount, startMutation.isPending]);
+
+  useEffect(() => {
+    const queryAnalysis = analysisQuery.data as StorageAnalysisView | undefined;
+    if (activeJobId || !queryAnalysis?.jobId) {
+      return;
+    }
+    autoStartLockRef.current = {
+      key: `${search.mount}::${search.fs}`,
+      inFlight: false,
+      settled: true,
+    };
+    liveJobIdRef.current = queryAnalysis.jobId;
+    setActiveJobId(queryAnalysis.jobId);
+  }, [activeJobId, analysisQuery.data, search.fs, search.mount]);
+
+  useEffect(() => {
+    const jobId = activeJobId;
+    const streamUrl = jobId
+      ? `/api/storage/analysis/${encodeURIComponent(jobId)}/events${
+          lastEventIdRef.current ? `?after=${encodeURIComponent(lastEventIdRef.current)}` : ""
+        }`
+      : null;
+    if (!jobId || !streamUrl || eventSourceRef.current?.url === streamUrl) {
+      return;
+    }
+    closeStream();
+    const source = new EventSource(streamUrl);
+    eventSourceRef.current = source;
+
+    source.addEventListener("storage-analysis", (rawEvent) => {
+      const event = JSON.parse((rawEvent as MessageEvent<string>).data) as StorageStreamEvent;
+      const eventId = (rawEvent as MessageEvent<string>).lastEventId;
+      if (eventId) {
+        lastEventIdRef.current = eventId;
+      }
+
+      if (event.type === "started") {
+        liveJobIdRef.current = event.job.jobId;
+        setLiveAnalysis((current) => ({
+          mount: event.mount,
+          status: "scanning",
+          analyzer: "scan",
+          sourceKind: "scan",
+          jobId: event.job.jobId,
+          mountKey: event.job.mountKey,
+          generatedAt: null,
+          startedAt: event.job.startedAt,
+          completedAt: null,
+          freshnessTtlMs: current?.freshnessTtlMs ?? 300000,
+          totalSize: current?.totalSize ?? 0,
+          nodeCount: current?.nodeCount ?? 0,
+          isPartial: true,
+          oversized: current?.oversized ?? false,
+          extensionHistogram: current?.extensionHistogram ?? [],
+          root: current?.root ?? null,
+          refreshing: true,
+          errorCode: null,
+          error: null,
+          warningCode: current?.warningCode ?? null,
+          warning: current?.warning ?? null,
+        }));
+        return;
+      }
+
+      if (event.type === "node") {
+        applyNodePatch(event);
+        return;
+      }
+
+      if (event.type === "progress") {
+        syncLiveTree(liveAnalysisRef.current, {
+          status: "scanning",
+          startedAt: liveAnalysisRef.current?.startedAt ?? startMutation.data?.job.startedAt ?? null,
+          completedAt: null,
+          totalSize: event.totalSize,
+          nodeCount: event.nodeCount,
+          extensionHistogram: event.extensionHistogram,
+          warningCode: event.warningCode,
+          warning: event.warning,
+          errorCode: null,
+          error: null,
+          refreshing: true,
+          sourceKind: "scan",
+          isPartial: true,
+        });
+        return;
+      }
+
+      if (event.type === "done") {
+        syncLiveTree(liveAnalysisRef.current, {
+          status: "ready",
+          startedAt: liveAnalysisRef.current?.startedAt ?? startMutation.data?.job.startedAt ?? null,
+          completedAt: event.completedAt,
+          totalSize: event.totalSize,
+          nodeCount: event.nodeCount,
+          extensionHistogram: liveAnalysisRef.current?.extensionHistogram ?? [],
+          warningCode: event.warningCode,
+          warning: event.warning,
+          errorCode: null,
+          error: null,
+          refreshing: false,
+          sourceKind: "scan",
+          isPartial: false,
+        });
+        closeStream();
+        liveJobIdRef.current = null;
+        setActiveJobId(null);
+        void queryClient.invalidateQueries({
+          queryKey: trpc.storage.getAnalysis.queryOptions({
+            mount: search.mount,
+            fs: search.fs,
+          }).queryKey,
+        });
+        return;
+      }
+
+      setLiveAnalysis((current) => ({
+        ...(current ?? {
+          mount:
+            snapshotAnalysisRef.current?.mount ?? {
+              id: "",
+              mount: search.mount,
+              fs: search.fs,
+              filesystemType: "unknown",
+              size: 0,
+              used: 0,
+              deviceId: null,
+            },
+          analyzer: null,
+          sourceKind: "pending",
+          jobId: activeJobId,
+          mountKey: liveJobIdRef.current ?? "",
+          generatedAt: null,
+          startedAt: startMutation.data?.job.startedAt ?? null,
+          completedAt: null,
+          freshnessTtlMs: 300000,
+          totalSize: null,
+          nodeCount: null,
+          isPartial: false,
+          oversized: false,
+          extensionHistogram: [],
+          root: null,
+          refreshing: false,
+          warningCode: null,
+          warning: null,
+        }),
+        status: "failed",
+        errorCode: event.errorCode,
+        error: event.error,
+        refreshing: false,
+      }));
+      closeStream();
+      liveJobIdRef.current = null;
+      setActiveJobId(null);
+    });
+
+    source.addEventListener("keepalive", () => {});
+    source.onerror = () => {};
+
+    return () => {
+      if (eventSourceRef.current === source) {
+        closeStream();
+      }
+    };
+  }, [
+    activeJobId,
+    queryClient,
+    search.fs,
+    search.mount,
+    startMutation.data,
+    trpc.storage,
+  ]);
   const extensionColors = useMemo(
     () =>
       new Map((analysis?.extensionHistogram ?? []).map((entry) => [entry.extension, entry.color])),
@@ -253,13 +705,19 @@ function StorageAnalysisPage() {
           </div>
         </div>
         <div className="storage-analysis-actions">
+          {analysis?.status === "scanning" && (
+            <div className="storage-analysis-inline-status" aria-live="polite" role="status">
+              <LoaderCircle size={14} className="storage-analysis-inline-status-icon" />
+              <span>Scanning</span>
+            </div>
+          )}
           <Button
             variant="secondary"
-            onClick={() => refreshMutation.mutate()}
-            disabled={refreshMutation.isPending}
+            onClick={() => startMutation.mutate(true)}
+            disabled={startMutation.isPending}
           >
             <RefreshCw size={14} />
-            <span>{refreshMutation.isPending ? "Refreshing..." : "Refresh"}</span>
+            <span>{startMutation.isPending ? "Refreshing..." : "Refresh"}</span>
           </Button>
         </div>
       </div>
@@ -298,12 +756,6 @@ function StorageAnalysisPage() {
                   : "Pending"}
               </span>
             </div>
-            {analysis?.warning && (
-              <div className="storage-analysis-warning">
-                <AlertTriangle size={14} />
-                <span>{analysis.warning}</span>
-              </div>
-            )}
           </div>
 
           <div className="storage-analysis-rail-section">
@@ -318,6 +770,9 @@ function StorageAnalysisPage() {
                 {formatStorageTimestamp(analysis?.completedAt ?? null)}
               </span>
             </div>
+            {analysis?.warning && (
+              <div className="storage-analysis-note">{analysis.warning}</div>
+            )}
           </div>
 
           <div className="storage-analysis-rail-section storage-analysis-rail-section--grow">
@@ -365,16 +820,6 @@ function StorageAnalysisPage() {
         </aside>
 
         <section className="storage-analysis-main">
-          <div className={`storage-analysis-indicator storage-analysis-indicator--${scanIndicator.tone}`}>
-            <div className="storage-analysis-indicator-title">{scanIndicator.title}</div>
-            <div className="storage-analysis-indicator-copy">{scanIndicator.detail}</div>
-            {analysis?.startedAt && (
-              <div className="storage-analysis-indicator-meta">
-                Started {formatStorageTimestamp(analysis.startedAt)}
-              </div>
-            )}
-          </div>
-
           {analysisQuery.isLoading || (!analysis && analysisQuery.isFetching) ? (
             <div className="panel storage-analysis-empty">
               <span>Preparing storage analysis…</span>
@@ -389,23 +834,10 @@ function StorageAnalysisPage() {
             </div>
           ) : analysis?.status === "scanning" && !analysis.root ? (
             <div className="panel storage-analysis-empty">
-              <span>Scanning the selected disk. Results will appear automatically.</span>
+              <span>Starting scan. The treemap will appear automatically.</span>
             </div>
           ) : (
             <>
-              <div className="storage-analysis-banner">
-                <span>{analysis?.mount.filesystemType?.toUpperCase() ?? "UNKNOWN"}</span>
-                <span>
-                  {analysis?.status === "scanning"
-                    ? "Live partial snapshot"
-                    : analysis?.refreshing
-                      ? "Refresh in progress"
-                      : "Snapshot ready"}
-                </span>
-                {analysis?.isPartial && <span>Totals not final</span>}
-                {analysis?.oversized && <span>Large result set</span>}
-              </div>
-
               <div className="panel storage-analysis-canvas-shell">
                 <div className="storage-analysis-canvas" ref={canvasRef}>
                   {layoutNodes.map((node) => {

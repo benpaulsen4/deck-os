@@ -9,6 +9,7 @@ import { LOG_HISTORY_SIZE } from "../lib/config.js";
 import * as metricsService from "../services/metrics.js";
 import * as dockerService from "../services/docker.js";
 import * as pullJobsService from "../services/pullJobs.js";
+import { subscribeToStorageAnalysisJob } from "../services/storageAnalysis.js";
 
 export function registerRuntimeRoutes(app: Hono) {
   app.get("/api/health", (c) => {
@@ -206,6 +207,58 @@ export function registerRuntimeRoutes(app: Hono) {
           });
         } catch (error) {
           console.error("[deckos] Error sending pull keepalive:", error);
+        }
+      }, 30000);
+
+      stream.onAbort(() => {
+        clearInterval(keepaliveInterval);
+        unsubscribe();
+      });
+
+      await stream.sleep(1000000);
+    });
+  });
+
+  app.get("/api/storage/analysis/:jobId/events", async (c) => {
+    const { jobId } = c.req.param();
+    const afterEventId = c.req.query("after") ?? null;
+
+    return streamSSE(c, async (stream) => {
+      const unsubscribe = subscribeToStorageAnalysisJob(jobId, afterEventId, (eventId, event) => {
+        try {
+          stream.writeSSE({
+            data: JSON.stringify(event),
+            event: "storage-analysis",
+            id: eventId,
+          });
+        } catch (error) {
+          console.error("[deckos] Error sending storage analysis event:", error);
+          unsubscribe?.();
+        }
+      });
+
+      if (!unsubscribe) {
+        stream.writeSSE({
+          data: JSON.stringify({
+            type: "failed",
+            errorCode: "runtime-failed",
+            error: "Storage analysis job not found.",
+          }),
+          event: "storage-analysis",
+          id: Date.now().toString(),
+        });
+        return;
+      }
+
+      const keepaliveInterval = setInterval(() => {
+        try {
+          stream.writeSSE({
+            data: "keepalive",
+            event: "keepalive",
+            id: Date.now().toString(),
+          });
+        } catch (error) {
+          console.error("[deckos] Error sending storage analysis keepalive:", error);
         }
       }, 30000);
 

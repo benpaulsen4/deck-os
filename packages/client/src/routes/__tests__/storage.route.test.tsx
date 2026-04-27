@@ -1,9 +1,18 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route } from "../storage.$mountId";
+import { MockEventSource } from "../../test/helpers/eventSource";
 
-const { refreshSpy, queryState } = vi.hoisted(() => ({
-  refreshSpy: vi.fn(async () => ({})),
+const { startSpy, queryState } = vi.hoisted(() => ({
+  startSpy: vi.fn(async (input?: { mount?: string; fs?: string; force?: boolean }) => ({
+    job: {
+      jobId: "job-1",
+      mountKey: "abc123",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      status: "scanning",
+      ...input,
+    },
+  })),
   queryState: {
     mount: {
       id: "abc123",
@@ -17,6 +26,7 @@ const { refreshSpy, queryState } = vi.hoisted(() => ({
     status: "ready",
     analyzer: "scan",
     sourceKind: "scan",
+    jobId: null,
     mountKey: "abc123",
     generatedAt: "2026-01-01T00:00:00.000Z",
     startedAt: "2026-01-01T00:00:00.000Z",
@@ -98,8 +108,8 @@ vi.mock("../../trpc", () => ({
   }),
   trpcClient: {
     storage: {
-      refreshAnalysis: {
-        mutate: refreshSpy,
+      startAnalysis: {
+        mutate: startSpy,
       },
     },
   },
@@ -109,10 +119,21 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({
     invalidateQueries: vi.fn(async () => {}),
   }),
-  useMutation: (opts: { mutationFn: () => Promise<unknown> }) => ({
+  useMutation: (opts: {
+    mutationFn: (...args: unknown[]) => Promise<unknown>;
+    onSuccess?: (value: unknown) => void | Promise<void>;
+  }) => ({
     isPending: false,
-    mutate: () => {
-      void opts.mutationFn();
+    data: undefined,
+    mutate: async (...args: unknown[]) => {
+      const value = await opts.mutationFn(...args);
+      await opts.onSuccess?.(value);
+      return value;
+    },
+    mutateAsync: async (...args: unknown[]) => {
+      const value = await opts.mutationFn(...args);
+      await opts.onSuccess?.(value);
+      return value;
     },
   }),
   useQuery: (arg: unknown) => {
@@ -130,7 +151,8 @@ vi.mock("@tanstack/react-query", () => ({
 
 describe("storage route", () => {
   beforeEach(() => {
-    refreshSpy.mockReset();
+    startSpy.mockClear();
+    MockEventSource.reset();
     Object.assign(queryState, {
       mount: {
         id: "abc123",
@@ -144,6 +166,7 @@ describe("storage route", () => {
       status: "ready",
       analyzer: "scan",
       sourceKind: "scan",
+      jobId: null,
       mountKey: "abc123",
       generatedAt: "2026-01-01T00:00:00.000Z",
       startedAt: "2026-01-01T00:00:00.000Z",
@@ -217,7 +240,7 @@ describe("storage route", () => {
     expect(screen.getAllByText("/data").length).toBeGreaterThan(0);
     expect(screen.getByText("LOG")).toBeInTheDocument();
     expect(screen.getByText(/Skipped 1 path/)).toBeInTheDocument();
-    expect(screen.getByText("Scan complete")).toBeInTheDocument();
+    expect(screen.getByText("READY")).toBeInTheDocument();
   });
 
   it("updates the selection rail when a block is clicked", () => {
@@ -264,7 +287,7 @@ describe("storage route", () => {
     expect(screen.getByText(/cannot read this mount/i)).toBeInTheDocument();
   });
 
-  it("makes active scanning unmistakable", () => {
+  it("shows a small non-blocking scanning status while keeping live results visible", () => {
     Object.assign(queryState, {
       status: "scanning",
       refreshing: true,
@@ -275,11 +298,133 @@ describe("storage route", () => {
     const Component = Route.options.component!;
     render(<Component />);
 
-    expect(screen.getByText("Scanning in progress")).toBeInTheDocument();
-    expect(
-      screen.getByText(/Showing partial results\. Totals will continue growing/)
-    ).toBeInTheDocument();
-    expect(screen.getByText("Live partial snapshot")).toBeInTheDocument();
-    expect(screen.getByText("Totals not final")).toBeInTheDocument();
+    expect(screen.getByText("Scanning")).toBeInTheDocument();
+    expect(screen.getByText("logs")).toBeInTheDocument();
+    expect(screen.queryByText("Live partial snapshot")).not.toBeInTheDocument();
+    expect(screen.queryByText("Totals not final")).not.toBeInTheDocument();
+  });
+
+  it("auto-starts scanning only once for the same mount while waiting for SSE updates", async () => {
+    Object.assign(queryState, {
+      status: "scanning",
+      analyzer: null,
+      sourceKind: "pending",
+      jobId: null,
+      startedAt: null,
+      completedAt: null,
+      totalSize: null,
+      nodeCount: null,
+      extensionHistogram: [],
+      warningCode: null,
+      warning: null,
+      root: null,
+    });
+    const Component = Route.options.component!;
+    render(<Component />);
+
+    await waitFor(() => {
+      expect(startSpy).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("attaches to an existing scanning job from query state without starting again", async () => {
+    Object.assign(queryState, {
+      status: "scanning",
+      analyzer: null,
+      sourceKind: "pending",
+      jobId: "job-existing",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: null,
+      totalSize: null,
+      nodeCount: null,
+      extensionHistogram: [],
+      warningCode: null,
+      warning: null,
+      root: null,
+    });
+    const Component = Route.options.component!;
+    render(<Component />);
+
+    await waitFor(() => {
+      expect(MockEventSource.instances.length).toBe(1);
+    });
+    expect(startSpy).not.toHaveBeenCalled();
+    expect(MockEventSource.latest().url).toContain("/api/storage/analysis/job-existing/events");
+  });
+
+  it("builds live tree updates from SSE patch events", async () => {
+    Object.assign(queryState, {
+      status: "scanning",
+      analyzer: null,
+      sourceKind: "pending",
+      jobId: null,
+      startedAt: null,
+      completedAt: null,
+      totalSize: null,
+      nodeCount: null,
+      extensionHistogram: [],
+      warningCode: null,
+      warning: null,
+      root: null,
+    });
+    const Component = Route.options.component!;
+    render(<Component />);
+
+    await waitFor(() => {
+      expect(startSpy).toHaveBeenCalled();
+      expect(MockEventSource.instances.length).toBeGreaterThan(0);
+    });
+    const source = MockEventSource.latest();
+    await act(async () => {
+      source.dispatchMessage("storage-analysis", {
+        type: "started",
+        job: {
+          jobId: "job-1",
+          mountKey: "abc123",
+          startedAt: "2026-01-01T00:00:00.000Z",
+          status: "scanning",
+        },
+        mount: queryState.mount,
+      });
+      source.dispatchMessage("storage-analysis", {
+        type: "node",
+        node: {
+          parentPath: null,
+          path: "/data",
+          name: "data",
+          type: "directory",
+          size: 0,
+          extension: null,
+        },
+        totalSize: 0,
+        nodeCount: 1,
+      });
+      source.dispatchMessage("storage-analysis", {
+        type: "node",
+        node: {
+          parentPath: "/data",
+          path: "/data/live.log",
+          name: "live.log",
+          type: "file",
+          size: 256,
+          extension: ".log",
+        },
+        totalSize: 256,
+        nodeCount: 2,
+      });
+      source.dispatchMessage("storage-analysis", {
+        type: "progress",
+        totalSize: 256,
+        nodeCount: 2,
+        warningCode: null,
+        warning: null,
+        extensionHistogram: queryState.extensionHistogram,
+      });
+    });
+
+    expect(screen.getByText("Scanning")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("2")).toBeInTheDocument();
+    });
   });
 });

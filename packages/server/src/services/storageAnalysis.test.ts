@@ -2,7 +2,7 @@ import { mkdtemp, writeFile, mkdir, readFile, stat, lstat, opendir } from "node:
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { StorageAnalysisResponse } from "../lib/schema.js";
+import type { StorageAnalysisResponse, StorageAnalysisStreamEvent } from "../lib/schema.js";
 
 type ServiceModule = typeof import("./storageAnalysis.js");
 
@@ -42,6 +42,17 @@ async function waitForFailed(
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error("Timed out waiting for failed analysis result");
+}
+
+async function waitForCondition<T>(fn: () => Promise<T>, predicate: (value: T) => boolean): Promise<T> {
+  for (let index = 0; index < 100; index += 1) {
+    const value = await fn();
+    if (predicate(value)) {
+      return value;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for condition");
 }
 
 describe("storage analysis service", () => {
@@ -87,7 +98,11 @@ describe("storage analysis service", () => {
       deps
     );
     expect(initial.status).toBe("scanning");
-    expect(initial.startedAt).not.toBeNull();
+    expect(initial.startedAt).toBeNull();
+
+    const started = await storage.startStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps);
+    expect(started.job.status).toBe("scanning");
+    expect(started.job.startedAt).not.toBeNull();
 
     const ready = await waitForReady(() =>
       storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps)
@@ -106,7 +121,7 @@ describe("storage analysis service", () => {
     expect(await (await import("fs-extra")).pathExists(metaPath)).toBe(true);
   });
 
-  test("serves stale snapshots immediately and refreshes in the background", async () => {
+  test("serves stale snapshots immediately until an explicit refresh starts", async () => {
     const tempDataDir = await mkdtemp(path.join(os.tmpdir(), "deckos-storage-analysis-"));
     const fixtureRoot = path.join(tempDataDir, "fixture");
     await mkdir(fixtureRoot, { recursive: true });
@@ -134,7 +149,7 @@ describe("storage analysis service", () => {
       now: () => Date.now(),
     };
 
-    await storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps);
+    await storage.startStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps);
     await waitForReady(() =>
       storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps)
     );
@@ -151,11 +166,14 @@ describe("storage analysis service", () => {
 
     const stale = await storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps);
     expect(stale.status).toBe("stale");
-    expect(stale.refreshing).toBe(true);
+    expect(stale.refreshing).toBe(false);
     expect(stale.root?.name).toBe("fixture");
+
+    const refreshed = await storage.refreshStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps);
+    expect(refreshed.refreshing).toBe(true);
   });
 
-  test("publishes partial root results while a long scan is still running", async () => {
+  test("streams node patches while a long scan is still running", async () => {
     const tempDataDir = await mkdtemp(path.join(os.tmpdir(), "deckos-storage-analysis-"));
     const fixtureRoot = path.join(tempDataDir, "fixture");
     const fastDir = path.join(fixtureRoot, "fast");
@@ -163,14 +181,22 @@ describe("storage analysis service", () => {
     await mkdir(fastDir, { recursive: true });
     await mkdir(slowDir, { recursive: true });
     await writeFile(path.join(fastDir, "fast.log"), "fast");
-    await writeFile(path.join(slowDir, "slow.log"), "slow");
+    await writeFile(path.join(slowDir, "slow-a.log"), "slow-a");
+    await writeFile(path.join(slowDir, "slow-b.log"), "slow-b");
 
     const storage = await loadStorageModule(tempDataDir);
     await storage.clearStorageAnalysisState();
 
     const delayedLstat: typeof lstat = (async (targetPath: Parameters<typeof lstat>[0]) => {
-      if (String(targetPath).endsWith("slow.log")) {
-        await new Promise((resolve) => setTimeout(resolve, 200));
+      const target = String(targetPath);
+      if (target.endsWith("slow-a.log")) {
+        await new Promise((resolve) => setTimeout(resolve, 180));
+      }
+      if (target.endsWith("slow")) {
+        await new Promise((resolve) => setTimeout(resolve, 90));
+      }
+      if (target.endsWith("slow-b.log")) {
+        await new Promise((resolve) => setTimeout(resolve, 450));
       }
       return await lstat(targetPath);
     }) as unknown as typeof lstat;
@@ -194,19 +220,92 @@ describe("storage analysis service", () => {
       now: () => Date.now(),
     };
 
-    const initial = await storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps);
-    expect(initial.status).toBe("scanning");
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const started = await storage.startStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps);
+    const events: StorageAnalysisStreamEvent[] = [];
+    const unsubscribe = storage.subscribeToStorageAnalysisJob(
+      started.job.jobId,
+      null,
+      (_eventId, event) => {
+        events.push(event);
+      }
+    );
+    expect(unsubscribe).not.toBeNull();
 
-    const progress = await storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps);
-    expect(progress.status).toBe("scanning");
-    expect(progress.startedAt).not.toBeNull();
-    expect(progress.root?.children.some((child) => child.name === "fast")).toBe(true);
+    await waitForCondition(
+      async () => events,
+      (value) =>
+        value.some(
+          (event) =>
+            event.type === "node" &&
+            (event.node.name === "fast" || event.node.name === "fast.log")
+        )
+    );
+
+    await waitForCondition(
+      async () => events,
+      (value) =>
+        value.some(
+          (event) =>
+            event.type === "node" &&
+            (event.node.name === "slow" || event.node.name === "slow-a.log")
+        )
+    );
 
     const ready = await waitForReady(() =>
       storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps)
     );
     expect(ready.status).toBe("ready");
+    unsubscribe?.();
+  });
+
+  test("does not persist scanning snapshots to disk while a scan is in progress", async () => {
+    const tempDataDir = await mkdtemp(path.join(os.tmpdir(), "deckos-storage-analysis-"));
+    const fixtureRoot = path.join(tempDataDir, "fixture");
+    const slowDir = path.join(fixtureRoot, "slow");
+    await mkdir(slowDir, { recursive: true });
+    await writeFile(path.join(slowDir, "slow.log"), "slow");
+
+    const storage = await loadStorageModule(tempDataDir);
+    await storage.clearStorageAnalysisState();
+
+    const delayedLstat: typeof lstat = (async (targetPath: Parameters<typeof lstat>[0]) => {
+      if (String(targetPath).endsWith("slow.log")) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+      return await lstat(targetPath);
+    }) as unknown as typeof lstat;
+
+    const deps = {
+      fsSize: vi.fn(async () => [
+        {
+          fs: "/dev/sda1",
+          mount: fixtureRoot,
+          size: 1000,
+          used: 500,
+          available: 500,
+          use: 50,
+          rw: true,
+          type: "ext4",
+        },
+      ]),
+      statImpl: stat,
+      lstatImpl: delayedLstat,
+      opendirImpl: opendir,
+      now: () => Date.now(),
+    };
+
+    await storage.startStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    const mountKey = storage.__storageAnalysisTestUtils.createMountKey("/dev/sda1", fixtureRoot);
+    const snapshotPath = storage.__storageAnalysisTestUtils.getSnapshotPath(mountKey);
+    expect(await (await import("fs-extra")).pathExists(snapshotPath)).toBe(false);
+
+    const ready = await waitForReady(() =>
+      storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps)
+    );
+    expect(ready.status).toBe("ready");
+    expect(await (await import("fs-extra")).pathExists(snapshotPath)).toBe(true);
   });
 
   test("returns a warning when nested paths are skipped for permissions", async () => {
@@ -248,7 +347,7 @@ describe("storage analysis service", () => {
       now: () => Date.now(),
     };
 
-    await storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps);
+    await storage.startStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps);
     const ready = await waitForReady(() =>
       storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps)
     );
@@ -295,7 +394,7 @@ describe("storage analysis service", () => {
       now: () => Date.now(),
     };
 
-    await storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps);
+    await storage.startStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps);
     const failed = await waitForFailed(() =>
       storage.getStorageAnalysis({ mount: fixtureRoot, fs: "/dev/sda1" }, deps)
     );

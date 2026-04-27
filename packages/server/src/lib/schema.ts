@@ -259,6 +259,7 @@ const StorageAnalysisResponseSchema = z.object({
   status: StorageAnalysisStatusSchema,
   analyzer: StorageAnalysisAnalyzerKindSchema.nullable(),
   sourceKind: z.enum(["cache-fresh", "cache-stale", "scan", "pending"]).nullable(),
+  jobId: z.string().nullable(),
   mountKey: z.string(),
   generatedAt: z.string().datetime().nullable(),
   startedAt: z.string().datetime().nullable(),
@@ -276,6 +277,61 @@ const StorageAnalysisResponseSchema = z.object({
   warningCode: StorageAnalysisWarningCodeSchema.nullable(),
   warning: z.string().nullable(),
 });
+
+const StorageAnalysisJobSchema = z.object({
+  jobId: z.string(),
+  mountKey: z.string(),
+  startedAt: z.string().datetime(),
+  status: z.enum(["scanning", "ready", "failed"]),
+});
+
+const StorageAnalysisStartResponseSchema = z.object({
+  job: StorageAnalysisJobSchema,
+});
+
+const StorageAnalysisNodePatchSchema = z.object({
+  parentPath: z.string().nullable(),
+  path: z.string(),
+  name: z.string(),
+  type: z.enum(["directory", "file", "symlink", "other"]),
+  size: z.number(),
+  extension: z.string().nullable(),
+});
+
+const StorageAnalysisStreamEventSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("started"),
+    job: StorageAnalysisJobSchema,
+    mount: StorageAnalysisMountSchema,
+  }),
+  z.object({
+    type: z.literal("node"),
+    node: StorageAnalysisNodePatchSchema,
+    totalSize: z.number(),
+    nodeCount: z.number().int(),
+  }),
+  z.object({
+    type: z.literal("progress"),
+    totalSize: z.number(),
+    nodeCount: z.number().int(),
+    warningCode: StorageAnalysisWarningCodeSchema.nullable(),
+    warning: z.string().nullable(),
+    extensionHistogram: z.array(StorageAnalysisExtensionLegendEntrySchema),
+  }),
+  z.object({
+    type: z.literal("done"),
+    completedAt: z.string().datetime(),
+    totalSize: z.number(),
+    nodeCount: z.number().int(),
+    warningCode: StorageAnalysisWarningCodeSchema.nullable(),
+    warning: z.string().nullable(),
+  }),
+  z.object({
+    type: z.literal("failed"),
+    errorCode: StorageAnalysisErrorCodeSchema,
+    error: z.string(),
+  }),
+]);
 
 type AppMetadata = z.infer<typeof AppMetadataSchema>;
 type ComposeFile = z.infer<typeof ComposeFileSchema>;
@@ -300,6 +356,10 @@ type StorageAnalysisErrorCode = z.infer<typeof StorageAnalysisErrorCodeSchema>;
 type StorageAnalysisWarningCode = z.infer<typeof StorageAnalysisWarningCodeSchema>;
 type StorageAnalysisSnapshot = z.infer<typeof StorageAnalysisSnapshotSchema>;
 type StorageAnalysisResponse = z.infer<typeof StorageAnalysisResponseSchema>;
+type StorageAnalysisJob = z.infer<typeof StorageAnalysisJobSchema>;
+type StorageAnalysisStartResponse = z.infer<typeof StorageAnalysisStartResponseSchema>;
+type StorageAnalysisNodePatch = z.infer<typeof StorageAnalysisNodePatchSchema>;
+type StorageAnalysisStreamEvent = z.infer<typeof StorageAnalysisStreamEventSchema>;
 
 export {
   AppMetadataSchema,
@@ -325,6 +385,10 @@ export {
   StorageAnalysisWarningCodeSchema,
   StorageAnalysisSnapshotSchema,
   StorageAnalysisResponseSchema,
+  StorageAnalysisJobSchema,
+  StorageAnalysisStartResponseSchema,
+  StorageAnalysisNodePatchSchema,
+  StorageAnalysisStreamEventSchema,
   UrlOrEmptySchema,
   OptionalUrlSchema,
   OptionalUrlOrPathSchema,
@@ -359,4 +423,8 @@ export type {
   StorageAnalysisWarningCode,
   StorageAnalysisSnapshot,
   StorageAnalysisResponse,
+  StorageAnalysisJob,
+  StorageAnalysisStartResponse,
+  StorageAnalysisNodePatch,
+  StorageAnalysisStreamEvent,
 };
