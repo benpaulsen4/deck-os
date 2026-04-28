@@ -61,6 +61,7 @@ type DiskAnalysisJobInternal = {
   createdAtMs: number;
   finishedAtMs?: number;
   snapshot?: DiskAnalysisSnapshot;
+  lastProgressEmitAtMs: number;
 };
 
 export class DiskAnalysisJobNotFoundError extends Error {
@@ -81,10 +82,13 @@ const DISK_ANALYSIS_DIR = path.join(DATA_DIR, "disk-analysis");
 const CACHE_FRESH_MS = 24 * 60 * 60 * 1000;
 const FINISHED_JOB_TTL_MS = 10 * 60 * 1000;
 const RUNNING_JOB_TTL_MS = 2 * 60 * 60 * 1000;
+const PROGRESS_EMIT_INTERVAL_MS = 500;
+const SMALL_FILE_BUCKET_SUFFIX = "__deckos_small_files__";
+const MAX_SMALL_FILE_THRESHOLD_BYTES = 64 * 1024 * 1024;
 const DEFAULT_LIMITS: DiskAnalysisResourceLimits = {
   maxWorkers: 4,
   maxPendingDirectories: 2048,
-  maxIndexedNodes: 20000,
+  maxIndexedNodes: 1_000_000,
 };
 
 const jobs = new Map<string, DiskAnalysisJobInternal>();
@@ -115,6 +119,44 @@ function getLimits(): DiskAnalysisResourceLimits {
       DEFAULT_LIMITS.maxIndexedNodes
     ),
   };
+}
+
+function getSmallFileThresholdBytes(): number {
+  return getConfiguredPositiveInt("DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES", 1024 * 1024);
+}
+
+function getAdaptiveSmallFileThresholdBytes(
+  baseThresholdBytes: number,
+  indexedNodes: number,
+  maxIndexedNodes: number,
+  entryCount: number
+): number {
+  let multiplier = 1;
+  const nodeUsageRatio = maxIndexedNodes > 0 ? indexedNodes / maxIndexedNodes : 0;
+
+  if (entryCount >= 20000) {
+    multiplier = Math.max(multiplier, 16);
+  } else if (entryCount >= 10000) {
+    multiplier = Math.max(multiplier, 8);
+  } else if (entryCount >= 5000) {
+    multiplier = Math.max(multiplier, 4);
+  } else if (entryCount >= 1000) {
+    multiplier = Math.max(multiplier, 2);
+  }
+
+  if (nodeUsageRatio >= 0.95) {
+    multiplier = Math.max(multiplier, 64);
+  } else if (nodeUsageRatio >= 0.9) {
+    multiplier = Math.max(multiplier, 32);
+  } else if (nodeUsageRatio >= 0.8) {
+    multiplier = Math.max(multiplier, 16);
+  } else if (nodeUsageRatio >= 0.65) {
+    multiplier = Math.max(multiplier, 8);
+  } else if (nodeUsageRatio >= 0.5) {
+    multiplier = Math.max(multiplier, 4);
+  }
+
+  return Math.min(baseThresholdBytes * multiplier, MAX_SMALL_FILE_THRESHOLD_BYTES);
 }
 
 function getMountKey(mount: DiskAnalysisMountIdentity): string {
@@ -217,11 +259,56 @@ function getCacheState(generatedAt: string): "fresh" | "stale" {
 }
 
 function countNodes(node: DiskAnalysisTreemapNode): number {
-  return 1 + node.children.reduce((sum, child) => sum + countNodes(child), 0);
+  let count = 0;
+  const stack: DiskAnalysisTreemapNode[] = [node];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+    count += 1;
+    for (const child of current.children) {
+      stack.push(child);
+    }
+  }
+  return count;
 }
 
 function countIssues(node: DiskAnalysisTreemapNode): number {
-  return node.issues.length + node.children.reduce((sum, child) => sum + countIssues(child), 0);
+  let count = 0;
+  const stack: DiskAnalysisTreemapNode[] = [node];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+    count += current.issues.length;
+    for (const child of current.children) {
+      stack.push(child);
+    }
+  }
+  return count;
+}
+
+async function buildSnapshotEnvelope(
+  mount: DiskAnalysisMountIdentity,
+  snapshot: DiskAnalysisSnapshot,
+  snapshotBytes?: number
+): Promise<DiskAnalysisSnapshotEnvelope> {
+  const state = getCacheState(snapshot.generatedAt);
+  const staleAt = new Date(new Date(snapshot.generatedAt).getTime() + CACHE_FRESH_MS).toISOString();
+  return DiskAnalysisSnapshotEnvelopeSchema.parse({
+    mount,
+    cache: {
+      state,
+      generatedAt: snapshot.generatedAt,
+      staleAt,
+      nodeCount: countNodes(snapshot.root),
+      issueCount: snapshot.issues.length + countIssues(snapshot.root),
+      snapshotBytes,
+    },
+    snapshot,
+  });
 }
 
 async function readPersistedCache(
@@ -232,25 +319,16 @@ async function readPersistedCache(
   if (!exists) {
     return null;
   }
-
-  const parsed = (await fs.readJson(cachePath)) as PersistedCacheFile;
-  const snapshot = DiskAnalysisSnapshotSchema.parse(parsed.snapshot);
-  const stat = await fs.stat(cachePath);
-  const state = getCacheState(snapshot.generatedAt);
-  const staleAt = new Date(new Date(snapshot.generatedAt).getTime() + CACHE_FRESH_MS).toISOString();
-
-  return DiskAnalysisSnapshotEnvelopeSchema.parse({
-    mount: parsed.mount,
-    cache: {
-      state,
-      generatedAt: snapshot.generatedAt,
-      staleAt,
-      nodeCount: countNodes(snapshot.root),
-      issueCount: snapshot.issues.length + countIssues(snapshot.root),
-      snapshotBytes: stat.size,
-    },
-    snapshot,
-  });
+  try {
+    const parsed = (await fs.readJson(cachePath)) as PersistedCacheFile;
+    const snapshot = DiskAnalysisSnapshotSchema.parse(parsed.snapshot);
+    const stat = await fs.stat(cachePath);
+    return await buildSnapshotEnvelope(parsed.mount, snapshot, stat.size);
+  } catch {
+    const corruptPath = `${cachePath}.corrupt-${Date.now()}`;
+    await fs.move(cachePath, corruptPath, { overwrite: true }).catch(() => undefined);
+    return null;
+  }
 }
 
 async function writePersistedCache(
@@ -258,20 +336,18 @@ async function writePersistedCache(
   snapshot: DiskAnalysisSnapshot
 ): Promise<DiskAnalysisSnapshotEnvelope> {
   const cachePath = getCachePath(mount);
+  const tempPath = `${cachePath}.${process.pid}.${Date.now()}.tmp`;
   await fs.ensureDir(DISK_ANALYSIS_DIR);
-  await fs.writeJson(
-    cachePath,
-    {
-      mount,
-      snapshot,
-    } satisfies PersistedCacheFile,
-    { spaces: 2 }
+  const serialized = JSON.stringify({
+    mount,
+    snapshot,
+  } satisfies PersistedCacheFile);
+  await fs.writeFile(
+    tempPath,
+    serialized
   );
-  const envelope = await readPersistedCache(mount);
-  if (!envelope) {
-    throw new Error("Disk analysis cache write did not persist");
-  }
-  return envelope;
+  await fs.move(tempPath, cachePath, { overwrite: true });
+  return await buildSnapshotEnvelope(mount, snapshot, Buffer.byteLength(serialized));
 }
 
 function notifyListeners(jobId: string, event: DiskAnalysisScanEvent) {
@@ -296,6 +372,15 @@ function emitProgress(job: DiskAnalysisJobInternal) {
     event: "progress",
     job: getJobState(job),
   });
+}
+
+function emitProgressIfDue(job: DiskAnalysisJobInternal, force: boolean = false) {
+  const now = Date.now();
+  if (!force && now - job.lastProgressEmitAtMs < PROGRESS_EMIT_INTERVAL_MS) {
+    return;
+  }
+  job.lastProgressEmitAtMs = now;
+  emitProgress(job);
 }
 
 function emitBranch(job: DiskAnalysisJobInternal, branch: DiskAnalysisTreemapNode) {
@@ -349,6 +434,31 @@ function createDirectoryPlaceholder(directoryPath: string): DiskAnalysisTreemapN
   };
 }
 
+function createSmallFilesBucket(
+  directoryPath: string,
+  fileCount: number,
+  totalBytes: number,
+  thresholdBytes: number
+): DiskAnalysisTreemapNode {
+  const thresholdLabel =
+    thresholdBytes >= 1024 * 1024
+      ? `< ${(thresholdBytes / (1024 * 1024)).toFixed(0)} MB`
+      : `< ${Math.max(1, Math.round(thresholdBytes / 1024))} KB`;
+  return {
+    path: path.join(directoryPath, SMALL_FILE_BUCKET_SUFFIX),
+    name: `Small Files (${thresholdLabel}) x ${fileCount}`,
+    type: "file",
+    size: totalBytes,
+    recursiveSize: totalBytes,
+    extension: null,
+    childCount: 0,
+    descendantsScanned: 0,
+    truncated: false,
+    issues: [],
+    children: [],
+  };
+}
+
 function upsertChildBranch(parent: MutableDirectoryNode, child: DiskAnalysisTreemapNode) {
   const childIndex = parent.children.findIndex((entry) => entry.path === child.path);
   if (childIndex >= 0) {
@@ -358,8 +468,36 @@ function upsertChildBranch(parent: MutableDirectoryNode, child: DiskAnalysisTree
   parent.children.push(child);
 }
 
-function toTreemapNode(node: MutableDirectoryNode): DiskAnalysisTreemapNode {
-  const children = [...node.children].sort((left, right) => right.recursiveSize - left.recursiveSize);
+function serializeChildNode(
+  node: DiskAnalysisTreemapNode,
+  mode: "deep" | "shallow"
+): DiskAnalysisTreemapNode {
+  if (node.type === "file") {
+    return {
+      ...node,
+      issues: [...node.issues],
+      children: [],
+    };
+  }
+
+  const children =
+    mode === "deep"
+      ? node.children.map((child) => serializeChildNode(child, mode))
+      : [];
+  return {
+    ...node,
+    issues: [...node.issues],
+    children,
+  };
+}
+
+function toTreemapNode(
+  node: MutableDirectoryNode,
+  mode: "deep" | "shallow" = "deep"
+): DiskAnalysisTreemapNode {
+  const children = [...node.children]
+    .map((child) => serializeChildNode(child, mode))
+    .sort((left, right) => right.recursiveSize - left.recursiveSize);
   const recursiveSize = children.reduce((sum, child) => sum + child.recursiveSize, node.size);
   const descendantsScanned = children.reduce((sum, child) => {
     return sum + (child.type === "directory" ? child.descendantsScanned + 1 : 0);
@@ -385,6 +523,10 @@ function getFileExtension(filePath: string): string | null {
 
 function isActivePhase(phase: JobPhase): boolean {
   return phase === "queued" || phase === "scanning";
+}
+
+function hasPartialResult(job: DiskAnalysisJobInternal): boolean {
+  return job.issues.some((issue) => issue.code === "partial-scan" || issue.recoverable === false);
 }
 
 async function ensureMountAvailable(mount: DiskAnalysisMountIdentity): Promise<string> {
@@ -428,6 +570,7 @@ function pruneJobs(now: number = Date.now()) {
 
 async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSnapshot> {
   const rootPath = await ensureMountAvailable(job.mount);
+  const smallFileThresholdBytes = getSmallFileThresholdBytes();
   const rootNode = createDirectoryNode(rootPath, null);
   const nodesByPath = new Map<string, MutableDirectoryNode>([[rootPath, rootNode]]);
   const pending: DirectoryTask[] = [{ directoryPath: rootPath, node: rootNode }];
@@ -442,13 +585,20 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
 
   const done = new Promise<DiskAnalysisSnapshot>((resolve, reject) => {
     const finalizeNode = (node: MutableDirectoryNode) => {
-      const branch = toTreemapNode(node);
-      emitBranch(job, branch);
+      const deepBranch = toTreemapNode(node, "deep");
+      if (
+        node.parentPath === null ||
+        deepBranch.recursiveSize > 0 ||
+        deepBranch.truncated ||
+        deepBranch.issues.length > 0
+      ) {
+        emitBranch(job, toTreemapNode(node, "shallow"));
+      }
 
       if (node.parentPath) {
         const parent = nodesByPath.get(node.parentPath);
         if (parent) {
-          upsertChildBranch(parent, branch);
+          upsertChildBranch(parent, deepBranch);
           parent.pendingChildren = Math.max(0, parent.pendingChildren - 1);
           if (parent.scanned && parent.pendingChildren === 0) {
             finalizeNode(parent);
@@ -472,10 +622,10 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
       const snapshot = DiskAnalysisSnapshotSchema.parse({
         mount: job.mount,
         generatedAt,
-        root: branch,
+        root: deepBranch,
         extensionLegend,
         totals: {
-          totalBytes: branch.recursiveSize,
+          totalBytes: deepBranch.recursiveSize,
           totalFiles,
           totalDirectories,
         },
@@ -516,7 +666,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
       }
 
       while (activeWorkers < job.limits.maxWorkers && pending.length > 0) {
-        const task = pending.shift();
+        const task = pending.pop();
         if (!task) {
           break;
         }
@@ -545,6 +695,17 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
               return;
             }
 
+            const adaptiveSmallFileThresholdBytes = getAdaptiveSmallFileThresholdBytes(
+              smallFileThresholdBytes,
+              indexedNodes,
+              job.limits.maxIndexedNodes,
+              entries.length
+            );
+
+            let smallFileCount = 0;
+            let smallFileBytes = 0;
+            let pendingLimitSkips = 0;
+            let indexedNodeSkips = 0;
             for (const entry of entries) {
               if (maybeAbort()) {
                 return;
@@ -577,14 +738,12 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
               if (stat.isDirectory()) {
                 task.node.childCount += 1;
                 if (pending.length >= job.limits.maxPendingDirectories || !addNodeWithinLimit()) {
-                  const issue = createIssue(
-                    "partial-scan",
-                    entryPath,
-                    `Traversal limit reached while indexing ${entryPath}`
-                  );
-                  task.node.issues.push(issue);
-                  job.issues.push(issue);
                   task.node.truncated = true;
+                  if (pending.length >= job.limits.maxPendingDirectories) {
+                    pendingLimitSkips += 1;
+                  } else {
+                    indexedNodeSkips += 1;
+                  }
                   continue;
                 }
 
@@ -602,24 +761,25 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
                 continue;
               }
 
-              if (!addNodeWithinLimit()) {
-                const issue = createIssue(
-                  "partial-scan",
-                  entryPath,
-                  `Node limit reached while indexing ${entryPath}`
-                );
-                task.node.issues.push(issue);
-                job.issues.push(issue);
-                task.node.truncated = true;
-                continue;
-              }
-
               const extension = getFileExtension(entryPath);
               if (extension) {
                 extensionCounts.set(extension, (extensionCounts.get(extension) ?? 0) + 1);
               }
               totalFiles += 1;
               task.node.childCount += 1;
+              if (stat.size < adaptiveSmallFileThresholdBytes) {
+                smallFileCount += 1;
+                smallFileBytes += stat.size;
+                task.node.size += stat.size;
+                job.progress.filesDiscovered += 1;
+                job.progress.bytesProcessed += stat.size;
+                continue;
+              }
+              if (!addNodeWithinLimit()) {
+                task.node.truncated = true;
+                indexedNodeSkips += 1;
+                continue;
+              }
               task.node.children.push({
                 path: entryPath,
                 name: entry.name,
@@ -638,11 +798,41 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
               job.progress.bytesProcessed += stat.size;
             }
 
+            if (smallFileCount > 0) {
+              task.node.children.push(
+                createSmallFilesBucket(
+                  task.directoryPath,
+                  smallFileCount,
+                  smallFileBytes,
+                  adaptiveSmallFileThresholdBytes
+                )
+              );
+            }
+
+            if (pendingLimitSkips > 0) {
+              const issue = createIssue(
+                "partial-scan",
+                task.directoryPath,
+                `Traversal limit reached while indexing ${pendingLimitSkips} child director${pendingLimitSkips === 1 ? "y" : "ies"} under ${task.directoryPath}`
+              );
+              task.node.issues.push(issue);
+              job.issues.push(issue);
+            }
+
+            if (indexedNodeSkips > 0) {
+              const issue = createIssue(
+                "partial-scan",
+                task.directoryPath,
+                `Node limit reached while indexing ${indexedNodeSkips} entr${indexedNodeSkips === 1 ? "y" : "ies"} under ${task.directoryPath}`
+              );
+              task.node.issues.push(issue);
+              job.issues.push(issue);
+            }
+
             task.node.scanned = true;
             job.progress.directoriesCompleted += 1;
             touchJob(job);
-            emitProgress(job);
-            emitBranch(job, toTreemapNode(task.node));
+            emitProgressIfDue(job);
             if (task.node.pendingChildren === 0) {
               finalizeNode(task.node);
             }
@@ -675,12 +865,14 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
 async function runJob(job: DiskAnalysisJobInternal): Promise<void> {
   touchJob(job, "scanning");
   emitStatus(job);
+  emitProgressIfDue(job, true);
 
   try {
     const snapshot = await executeScan(job);
     job.snapshot = snapshot;
+    emitProgressIfDue(job, true);
     await writePersistedCache(job.mount, snapshot);
-    setJobFinalState(job, job.issues.length > 0 ? "partial" : "completed");
+    setJobFinalState(job, hasPartialResult(job) ? "partial" : "completed");
     emitSnapshot(job, snapshot);
     emitStatus(job);
   } catch (error) {
@@ -739,6 +931,7 @@ async function ensureJob(
     limits: getLimits(),
     controller: new AbortController(),
     createdAtMs: Date.now(),
+    lastProgressEmitAtMs: 0,
   };
   jobs.set(job.jobId, job);
   activeJobIdByMount.set(mountKey, job.jobId);

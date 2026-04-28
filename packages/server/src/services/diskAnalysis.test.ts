@@ -11,6 +11,7 @@ const DEFAULT_ENV = {
   workers: process.env.DECKOS_DISK_ANALYSIS_MAX_WORKERS,
   pending: process.env.DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES,
   nodes: process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES,
+  smallThreshold: process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES,
 };
 
 async function createTempDir(prefix: string): Promise<string> {
@@ -64,6 +65,7 @@ describe("diskAnalysis service", () => {
     process.env.DECKOS_DISK_ANALYSIS_MAX_WORKERS = DEFAULT_ENV.workers;
     process.env.DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES = DEFAULT_ENV.pending;
     process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = DEFAULT_ENV.nodes;
+    process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES = DEFAULT_ENV.smallThreshold;
     vi.resetModules();
     vi.clearAllMocks();
   });
@@ -108,6 +110,16 @@ describe("diskAnalysis service", () => {
     const cached = await diskAnalysis.getCachedSnapshot(mount);
     expect(cached?.cache.state).toBe("fresh");
     expect(cached?.snapshot.totals.totalFiles).toBe(2);
+    expect(
+      cached?.snapshot.root.children.every(
+        (child) =>
+          child.type === "directory" &&
+          child.children.some(
+            (grandchild) =>
+              grandchild.type === "file" && grandchild.name.startsWith("Small Files (")
+          )
+      )
+    ).toBe(true);
     expect(cached?.snapshot.extensionLegend.map((entry) => entry.extension)).toEqual([
       "mkv",
       "txt",
@@ -185,6 +197,97 @@ describe("diskAnalysis service", () => {
       snapshot?.snapshot.issues.some((issue) => issue.code === "partial-scan")
     ).toBe(true);
     expect(snapshot?.snapshot.totals.totalDirectories).toBeLessThan(4);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("bucketed small files do not consume the indexed node budget", async () => {
+    process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = "10";
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.ensureDir(path.join(mountDir, "tiny"));
+    for (let index = 0; index < 50; index += 1) {
+      await fs.writeFile(path.join(mountDir, "tiny", `file-${index}.txt`), "x", "utf8");
+    }
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+    const tinyDir = snapshot?.snapshot.root.children.find((child) => child.path.endsWith("tiny"));
+    const bucketNode =
+      tinyDir?.type === "directory"
+        ? tinyDir.children.find(
+            (child) =>
+              child.type === "file" &&
+              child.path.includes("__deckos_small_files__") &&
+              child.name.includes("x 50")
+          )
+        : undefined;
+
+    expect(finalJob?.phase).toBe("completed");
+    expect(snapshot?.snapshot.issues.some((issue) => issue.code === "partial-scan")).toBe(false);
+    expect(tinyDir?.type).toBe("directory");
+    expect(bucketNode).toBeTruthy();
+    expect(snapshot?.snapshot.totals.totalFiles).toBe(50);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("adaptive small-file threshold buckets dense directories before hitting the node cap", async () => {
+    process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = "20";
+    process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES = "1";
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.ensureDir(path.join(mountDir, "dense"));
+    for (let index = 0; index < 1000; index += 1) {
+      await fs.writeFile(path.join(mountDir, "dense", `f-${index}.bin`), "x", "utf8");
+    }
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+    const denseDir = snapshot?.snapshot.root.children.find((child) => child.path.endsWith("dense"));
+
+    expect(finalJob?.phase).toBe("completed");
+    expect(snapshot?.snapshot.issues.some((issue) => issue.code === "partial-scan")).toBe(false);
+    expect(snapshot?.snapshot.totals.totalFiles).toBe(1000);
+    expect(
+      denseDir?.type === "directory" &&
+        denseDir.children.some((child) => child.path.includes("__deckos_small_files__"))
+    ).toBe(true);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("cache file can be replaced by a later scan", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.writeFile(path.join(mountDir, "first.bin"), Buffer.alloc(1024 * 1024 + 128));
+
+    let diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const firstStart = await diskAnalysis.startScan(mount);
+    await waitForTerminalJob(diskAnalysis, firstStart.jobId);
+
+    await fs.remove(path.join(mountDir, "first.bin"));
+    await fs.writeFile(path.join(mountDir, "second.bin"), Buffer.alloc(2 * 1024 * 1024 + 64));
+
+    const secondStart = await diskAnalysis.startScan(mount);
+    await waitForTerminalJob(diskAnalysis, secondStart.jobId);
+    const cached = await diskAnalysis.getCachedSnapshot(mount);
+
+    expect(cached?.snapshot.root.children.some((child) => child.name === "first.bin")).toBe(false);
+    expect(cached?.snapshot.root.children.some((child) => child.name === "second.bin")).toBe(true);
 
     await diskAnalysis.__testing.clearState();
     await fs.remove(dataDir);

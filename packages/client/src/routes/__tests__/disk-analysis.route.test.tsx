@@ -345,13 +345,6 @@ describe("disk analysis route", () => {
     const eventSource = MockEventSource.latest();
     const initialEventSourceCount = MockEventSource.instances.length;
     eventSource.dispatchOpen();
-    eventSource.dispatchMessage("branch", {
-      event: "branch",
-      jobId: "11111111-1111-1111-1111-111111111111",
-      mount: { mount: "C:\\", fs: "ntfs" },
-      branch: makeDirectory("C:\\", [makeDirectory("C:\\media", []), makeDirectory("C:\\cache", [])]),
-    });
-
     eventSource.dispatchMessage("progress", {
       event: "progress",
       job: {
@@ -368,7 +361,7 @@ describe("disk analysis route", () => {
       event: "branch",
       jobId: "11111111-1111-1111-1111-111111111111",
       mount: { mount: "C:\\", fs: "ntfs" },
-      branch: makeDirectory("C:\\media", [makeFile("C:\\media\\clip.mp4", 512, "mp4")]),
+      branch: makeDirectory("C:\\media\\videos", [makeFile("C:\\media\\videos\\clip.mp4", 512, "mp4")]),
     });
 
     expect(MockEventSource.instances).toHaveLength(initialEventSourceCount);

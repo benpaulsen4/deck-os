@@ -44,7 +44,7 @@ type TreemapRect = {
   height: number;
 };
 
-const MIN_RENDER_PERCENT = 2.8;
+const MIN_RENDER_PERCENT = 0.6;
 
 function DiskAnalysisPage() {
   const search = Route.useSearch();
