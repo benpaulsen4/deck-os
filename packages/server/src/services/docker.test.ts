@@ -42,6 +42,7 @@ import {
   getStackStatus,
   pullStack,
   pullImagesWithProgress,
+  removeContainer,
   restartStack,
   startStack,
   stopStack,
@@ -256,6 +257,18 @@ describe("docker service", () => {
     });
     const failed = await getContainerStats("cid-2");
     expect(failed).toBeNull();
+  });
+
+  test("removeContainer forces removal for a single container id", async () => {
+    const removeMock = vi.fn(async () => undefined);
+    (dockerClient.getContainer as any).mockReturnValue({
+      remove: removeMock,
+    });
+
+    await removeContainer("cid-remove");
+
+    expect(dockerClient.getContainer).toHaveBeenCalledWith("cid-remove");
+    expect(removeMock).toHaveBeenCalledWith({ force: true });
   });
 
   test("pullStack streams output and resolves/rejects by exit code", async () => {

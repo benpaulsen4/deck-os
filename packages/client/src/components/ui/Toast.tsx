@@ -14,6 +14,11 @@ export function Toast({ message, type = "info", duration = 3000, onClose }: Toas
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startTimeRef = useRef<number>(0);
   const remainingRef = useRef<number>(duration);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -25,8 +30,8 @@ export function Toast({ message, type = "info", duration = 3000, onClose }: Toas
   const startTimer = useCallback(() => {
     clearTimer();
     startTimeRef.current = Date.now();
-    timerRef.current = setTimeout(onClose, remainingRef.current);
-  }, [clearTimer, onClose]);
+    timerRef.current = setTimeout(() => onCloseRef.current(), remainingRef.current);
+  }, [clearTimer]);
 
   useEffect(() => {
     remainingRef.current = duration;
@@ -42,11 +47,11 @@ export function Toast({ message, type = "info", duration = 3000, onClose }: Toas
 
   const handleMouseLeave = useCallback(() => {
     if (remainingRef.current <= 0) {
-      onClose();
+      onCloseRef.current();
       return;
     }
     startTimer();
-  }, [onClose, startTimer]);
+  }, [startTimer]);
 
   const icons = {
     success: <Check size={16} style={{ color: "var(--status-running)" }} />,

@@ -20,6 +20,11 @@ export const Route = createFileRoute("/apps/$appId")({
 function AppDetailPage() {
   const [showLogs, setShowLogs] = useState(false);
   const [isMetadataEditOpen, setIsMetadataEditOpen] = useState(false);
+  const [removeContainerTarget, setRemoveContainerTarget] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [removingContainerId, setRemovingContainerId] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     action: string;
@@ -90,6 +95,19 @@ function AppDetailPage() {
       await invalidateStatusQueries();
     },
     onError: (err) => addToast(`Failed to restart: ${getErrorMessage(err)}`, "error"),
+  });
+
+  const removeUnknownContainerMutation = useMutation({
+    mutationFn: async (containerId: string) =>
+      await trpcClient.docker.removeContainer.mutate({ appId, containerId }),
+    onSuccess: async () => {
+      addToast("Unknown container removed", "success");
+      await invalidateStatusQueries();
+    },
+    onError: (err) => addToast(`Failed to remove container: ${getErrorMessage(err)}`, "error"),
+    onSettled: () => {
+      setRemovingContainerId(null);
+    },
   });
 
   const deleteMutation = useMutation({
@@ -239,7 +257,16 @@ function AppDetailPage() {
             <div className="app-detail-section app-detail-containers">
               <div className="app-detail-section-label">CONTAINERS</div>
               <div className="panel app-detail-containers-panel">
-                <ContainerTable containers={stackStatus?.containers || []} />
+                <ContainerTable
+                  containers={stackStatus?.containers || []}
+                  removingContainerId={removingContainerId}
+                  onRemoveUnknownContainer={(container) => {
+                    setRemoveContainerTarget({
+                      id: container.id,
+                      name: container.names[0]?.replace(/^\//, "") || container.id.slice(0, 12),
+                    });
+                  }}
+                />
               </div>
             </div>
           </div>
@@ -292,6 +319,28 @@ function AppDetailPage() {
         variant={confirmDialog.action === "delete" ? "danger" : "default"}
         onConfirm={handleDialogConfirm}
         onCancel={() => setConfirmDialog({ isOpen: false, action: "", message: "" })}
+      />
+
+      <ConfirmDialog
+        isOpen={removeContainerTarget !== null}
+        title="REMOVE UNKNOWN CONTAINER"
+        message={
+          removeContainerTarget
+            ? `Remove ${removeContainerTarget.name}? This only deletes the selected unknown container, not the full app stack.`
+            : ""
+        }
+        confirmText="REMOVE"
+        variant="danger"
+        onConfirm={() => {
+          if (!removeContainerTarget) {
+            return;
+          }
+          const target = removeContainerTarget;
+          setRemovingContainerId(target.id);
+          setRemoveContainerTarget(null);
+          removeUnknownContainerMutation.mutate(target.id);
+        }}
+        onCancel={() => setRemoveContainerTarget(null)}
       />
 
       <PullProgress
