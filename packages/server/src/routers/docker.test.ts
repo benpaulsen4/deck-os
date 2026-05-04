@@ -72,6 +72,10 @@ describe("docker router", () => {
   });
 
   it("rejects removing a container that is not in unknown state", async () => {
+    const expectedError: Partial<TRPCError> = {
+      code: "BAD_REQUEST",
+    };
+
     getStackContainersMock.mockResolvedValue([
       {
         id: "cid-stopped",
@@ -93,9 +97,7 @@ describe("docker router", () => {
 
     await expect(
       caller.removeContainer({ appId: "app-1", containerId: "cid-stopped" })
-    ).rejects.toMatchObject<Partial<TRPCError>>({
-      code: "BAD_REQUEST",
-    });
+    ).rejects.toMatchObject(expectedError);
 
     expect(removeContainerMock).not.toHaveBeenCalled();
   });
