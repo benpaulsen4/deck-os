@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { trpcClient } from "../../trpc";
+import { Button } from "./Button";
 
 interface ContainerInfo {
   id: string;
@@ -37,9 +38,15 @@ interface ContainerInfo {
 
 interface ContainerTableProps {
   containers: ContainerInfo[];
+  onRemoveUnknownContainer?: (container: ContainerInfo) => void;
+  removingContainerId?: string | null;
 }
 
-export function ContainerTable({ containers }: ContainerTableProps) {
+export function ContainerTable({
+  containers,
+  onRemoveUnknownContainer,
+  removingContainerId = null,
+}: ContainerTableProps) {
   const [containerStats, setContainerStats] = useState<
     Record<string, { cpu: number; memory: number; memoryBytes: number }>
   >({});
@@ -94,11 +101,16 @@ export function ContainerTable({ containers }: ContainerTableProps) {
   };
 
   const getStatusText = (state: string) => {
-    if (state.includes("running") || state.includes("Up")) return "RUNNING";
-    if (state.includes("stopped") || state.includes("Exited")) return "STOPPED";
-    if (state.includes("restarting")) return "RESTARTING";
+    const normalized = state.toLowerCase();
+    if (normalized.includes("running") || normalized.includes("up")) return "RUNNING";
+    if (normalized.includes("stopped") || normalized.includes("exited")) return "STOPPED";
+    if (normalized.includes("restarting")) return "RESTARTING";
     return "UNKNOWN";
   };
+
+  const showActionsColumn =
+    typeof onRemoveUnknownContainer === "function" &&
+    containers.some((container) => getStatusText(container.state.status) === "UNKNOWN");
 
   const portsFromList = (ports: ContainerInfo["ports"]) => {
     return (
@@ -200,6 +212,7 @@ export function ContainerTable({ containers }: ContainerTableProps) {
             <th style={thStyle}>CPU</th>
             <th style={thStyle}>Memory</th>
             <th style={thStyle}>Ports</th>
+            {showActionsColumn && <th style={thStyle}>Actions</th>}
           </tr>
         </thead>
         <tbody>
@@ -208,6 +221,11 @@ export function ContainerTable({ containers }: ContainerTableProps) {
             const cpu = stats?.cpu || 0;
             const memory = stats?.memory || 0;
             const memoryBytes = stats?.memoryBytes || 0;
+            const statusText = getStatusText(container.state.status);
+            const canRemove =
+              showActionsColumn &&
+              statusText === "UNKNOWN" &&
+              typeof onRemoveUnknownContainer === "function";
 
             return (
               <tr
@@ -229,7 +247,7 @@ export function ContainerTable({ containers }: ContainerTableProps) {
                 </td>
                 <td style={statusStyle}>
                   <span style={{ color: getStatusColor(container.state.running) }}>
-                    {getStatusText(container.state.status)}
+                    {statusText}
                   </span>
                 </td>
                 <td style={cellStyle}>
@@ -283,6 +301,22 @@ export function ContainerTable({ containers }: ContainerTableProps) {
                 <td style={{ ...cellStyle, fontSize: "var(--text-xs)" }}>
                   {portsFromList(container.ports)}
                 </td>
+                {showActionsColumn && (
+                  <td style={cellStyle}>
+                    {canRemove ? (
+                      <Button
+                        variant="danger"
+                        onClick={() => onRemoveUnknownContainer(container)}
+                        disabled={removingContainerId === container.id}
+                        style={{ minHeight: "32px", padding: "6px 12px", fontSize: "var(--text-xs)" }}
+                      >
+                        {removingContainerId === container.id ? "REMOVING" : "REMOVE"}
+                      </Button>
+                    ) : (
+                      <span style={{ color: "var(--text-muted)" }}>—</span>
+                    )}
+                  </td>
+                )}
               </tr>
             );
           })}

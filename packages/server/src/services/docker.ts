@@ -141,6 +141,12 @@ export async function restartStack(appId: string): Promise<void> {
   await execFileAsync("docker", args);
 }
 
+export async function removeContainer(containerId: string): Promise<void> {
+  const dockerClient = await ensureDockerAvailable();
+  const container = dockerClient.getContainer(containerId);
+  await container.remove({ force: true });
+}
+
 export async function pullStack(
   appId: string,
   onOutput?: (line: string) => void,
