@@ -574,7 +574,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
   const rootNode = createDirectoryNode(rootPath, null);
   const nodesByPath = new Map<string, MutableDirectoryNode>([[rootPath, rootNode]]);
   const pending: DirectoryTask[] = [{ directoryPath: rootPath, node: rootNode }];
-  const extensionCounts = new Map<string, number>();
+  const extensionCounts = new Map<string, { count: number; totalBytes: number }>();
   let totalFiles = 0;
   let totalDirectories = 1;
   let indexedNodes = 1;
@@ -611,12 +611,18 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
 
       const generatedAt = new Date().toISOString();
       const extensionLegend = [...extensionCounts.entries()]
-        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+        .sort(
+          (left, right) =>
+            right[1].totalBytes - left[1].totalBytes ||
+            right[1].count - left[1].count ||
+            left[0].localeCompare(right[0])
+        )
         .slice(0, 20)
-        .map(([extension, count], index) => ({
+        .map(([extension, stats], index) => ({
           extension,
           colorToken: `disk-ext-${index + 1}`,
-          count,
+          count: stats.count,
+          totalBytes: stats.totalBytes,
         }));
 
       const snapshot = DiskAnalysisSnapshotSchema.parse({
@@ -763,7 +769,10 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
 
               const extension = getFileExtension(entryPath);
               if (extension) {
-                extensionCounts.set(extension, (extensionCounts.get(extension) ?? 0) + 1);
+                const current = extensionCounts.get(extension) ?? { count: 0, totalBytes: 0 };
+                current.count += 1;
+                current.totalBytes += stat.size;
+                extensionCounts.set(extension, current);
               }
               totalFiles += 1;
               task.node.childCount += 1;

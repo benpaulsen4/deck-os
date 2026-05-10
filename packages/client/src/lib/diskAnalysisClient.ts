@@ -10,6 +10,7 @@ export type DiskAnalysisLegendItem = {
   extension: string;
   colorToken: string;
   count: number;
+  totalBytes: number;
 };
 
 const EXTENSION_COLOR_PALETTE = [
@@ -525,18 +526,27 @@ export function deriveLegendFromTree(
   if (!root) {
     return [];
   }
-  const counts = new Map<string, number>();
+  const counts = new Map<string, { count: number; totalBytes: number }>();
   for (const node of flattenVisibleNodes(root)) {
     if (node.type === "file" && node.extension) {
-      counts.set(node.extension, (counts.get(node.extension) ?? 0) + 1);
+      const current = counts.get(node.extension) ?? { count: 0, totalBytes: 0 };
+      current.count += 1;
+      current.totalBytes += node.recursiveSize;
+      counts.set(node.extension, current);
     }
   }
   return [...counts.entries()]
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .sort(
+      (left, right) =>
+        right[1].totalBytes - left[1].totalBytes ||
+        right[1].count - left[1].count ||
+        left[0].localeCompare(right[0])
+    )
     .slice(0, 20)
-    .map(([extension, count], index) => ({
+    .map(([extension, stats], index) => ({
       extension,
-      count,
+      count: stats.count,
+      totalBytes: stats.totalBytes,
       colorToken: `disk-ext-${index + 1}`,
     }));
 }

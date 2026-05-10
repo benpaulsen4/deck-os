@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeftRight, FolderSearch, RefreshCcw } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { useToastStore } from "../stores/toast";
 import { emitUnauthorizedEvent, fetchAuthStatus } from "../lib/auth";
@@ -45,11 +45,15 @@ type TreemapRect = {
 
 const MIN_RENDER_PERCENT = 0.6;
 const MIN_NODE_PIXELS = 6;
+const MIN_DIRECTORY_LABEL_PIXELS = 20;
+const DIRECTORY_TITLE_STRIP_PX = 18;
 const LIVE_BRANCH_FLUSH_MS = 120;
 const LIVE_PRESENTATION_REFRESH_MS = 350;
 type TreemapRenderThreshold = {
   width: number;
   height: number;
+  canvasWidth: number;
+  canvasHeight: number;
 };
 
 function DiskAnalysisPage() {
@@ -355,7 +359,11 @@ function DiskAnalysisPage() {
         : cachedSnapshot
           ? "cached"
           : ("live" satisfies ViewMode);
-  const currentRoot = activeView === "cached" ? cachedSnapshot?.root ?? null : liveRoot;
+  const liveRootForView =
+    liveJob?.phase === "queued" || liveJob?.phase === "scanning"
+      ? liveRoot
+      : liveSnapshot?.root ?? liveRoot;
+  const currentRoot = activeView === "cached" ? cachedSnapshot?.root ?? null : liveRootForView;
   const currentSnapshot = activeView === "cached" ? cachedSnapshot : liveSnapshot;
   const legend =
     activeView === "cached"
@@ -385,6 +393,24 @@ function DiskAnalysisPage() {
   const showViewSwitcher = !!cachedSnapshot && (mountState?.cache.state === "stale" || !!liveJob);
   const generatedAt = currentSnapshot?.generatedAt ?? cachedSnapshot?.generatedAt;
   const totals = currentSnapshot?.totals ?? null;
+  const progressPercent = Math.min(
+    100,
+    liveJob?.progress.directoriesDiscovered
+      ? (liveJob.progress.directoriesCompleted / liveJob.progress.directoriesDiscovered) * 100
+      : 0
+  );
+  const cacheStatus =
+    mountState?.cache.state === "fresh"
+      ? "Fresh"
+      : mountState?.cache.state === "stale"
+        ? "Stale"
+        : "Missing";
+  const liveStatus = liveJob
+    ? liveJob.phase
+    : mountState?.cache.state === "fresh"
+      ? "Idle"
+      : "Preparing";
+  const processedBytes = liveJob?.progress.bytesProcessed ?? totals?.totalBytes ?? 0;
 
   const openInFiles = (node: DiskAnalysisTreemapNode) => {
     void navigate({
@@ -415,151 +441,111 @@ function DiskAnalysisPage() {
   return (
     <div className="page-container page-container--viewport">
       <div className="page-header">
-        <div className="disk-analysis-header">
-          <div className="disk-analysis-header__eyebrow">Storage Analysis</div>
-          <h1 className="page-title">{getMountLabel(mount.mount)}</h1>
-          <div className="disk-analysis-header__path">{mount.mount}</div>
-        </div>
-        <div className="disk-analysis-header__actions">
+        <div className="disk-analysis-toolbar">
           <Button variant="secondary" onClick={() => void navigate({ to: "/settings" })}>
-            <RefreshCcw size={14} />
+            <ArrowLeft size={14} />
             <span>Back To Settings</span>
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => void navigate({ to: "/files", search: { path: mount.mount } })}
-          >
-            <FolderSearch size={14} />
-            <span>Open Mount In Files</span>
           </Button>
         </div>
       </div>
 
       <div className="page-body disk-analysis-page">
-        <section className="panel disk-analysis-summary">
-          <div className="disk-analysis-summary__head">
-            <div className="label">Mount Status</div>
+        <div className="disk-analysis-layout">
+          <aside className="panel disk-analysis-sidebar">
             {showViewSwitcher ? (
               <div className="disk-analysis-mode-switch">
                 <Button
                   variant={activeView === "cached" ? "primary" : "secondary"}
                   onClick={() => setViewMode("cached")}
                 >
-                  Cached Snapshot
+                  Cached
                 </Button>
                 <Button
                   variant={activeView === "live" ? "primary" : "secondary"}
                   onClick={() => setViewMode("live")}
                   disabled={!liveAvailable}
                 >
-                  Live Refresh
+                  Live
                 </Button>
               </div>
             ) : null}
-          </div>
 
-          <div className="disk-analysis-summary__status">
-            <StatusPill
-              tone={
-                mountState?.cache.state === "fresh"
-                  ? "good"
-                  : mountState?.cache.state === "stale"
-                    ? "warn"
-                    : "neutral"
-              }
-            >
-              {mountState?.cache.state === "fresh"
-                ? "Fresh cache"
-                : mountState?.cache.state === "stale"
-                  ? "Stale cache"
-                  : "No cache"}
-            </StatusPill>
-            <StatusPill
-              tone={
-                liveJob?.phase === "completed"
-                  ? "good"
-                  : liveJob?.phase === "failed" || liveJob?.phase === "cancelled"
-                    ? "bad"
-                    : liveJob
-                      ? "info"
-                      : "neutral"
-              }
-            >
-              {liveJob
-                ? `Live job: ${liveJob.phase}`
-                : mountState?.cache.state === "fresh"
-                  ? "No live scan running"
-                  : "Preparing live scan"}
-            </StatusPill>
-            <StatusPill tone={activeView === "cached" ? "neutral" : "info"}>
-              {activeView === "cached" ? "Viewing cached snapshot" : "Viewing live result"}
-            </StatusPill>
-            {streamError ? <StatusPill tone="bad">{streamError}</StatusPill> : null}
-          </div>
-
-          <div className="disk-analysis-summary__grid">
-            <SummaryStat label="Filesystem" value={mount.fs} />
-            <SummaryStat label="Generated" value={formatRelativeGeneratedAt(generatedAt)} />
-            <SummaryStat
-              label="Visible Size"
-              value={formatBytes(currentRoot?.recursiveSize ?? totals?.totalBytes ?? 0)}
-            />
-            <SummaryStat
-              label="Files"
-              value={formatCount(totals?.totalFiles ?? liveJob?.progress.filesDiscovered ?? 0)}
-            />
-            <SummaryStat
-              label="Folders"
-              value={formatCount(
-                totals?.totalDirectories ?? liveJob?.progress.directoriesDiscovered ?? 0
-              )}
-            />
-            <SummaryStat label="Issues" value={formatCount(issueList.length)} />
-          </div>
-
-          {liveJob ? (
-            <div className="disk-analysis-progress">
-              <div className="disk-analysis-progress__bar">
-                <div
-                  className="disk-analysis-progress__fill"
-                  style={{
-                    width: `${Math.min(
-                      100,
-                      liveJob.progress.directoriesDiscovered > 0
-                        ? (liveJob.progress.directoriesCompleted /
-                            liveJob.progress.directoriesDiscovered) *
-                            100
-                        : 4
-                    )}%`,
-                  }}
-                />
-              </div>
-              <div className="disk-analysis-progress__meta">
-                <span>
-                  {formatCount(liveJob.progress.directoriesCompleted)} /{" "}
-                  {formatCount(liveJob.progress.directoriesDiscovered)} directories
-                </span>
-                <span>{formatCount(liveJob.progress.filesDiscovered)} files</span>
-                <span>{formatBytes(liveJob.progress.bytesProcessed)} processed</span>
-              </div>
+            <div className="disk-analysis-meta">
+              <SidebarStat label="Mount" value={getMountLabel(mount.mount)} />
+              <SidebarStat label="Cache" value={cacheStatus} />
+              <SidebarStat label="Job" value={liveStatus} />
+              <SidebarStat label="Generated" value={formatRelativeGeneratedAt(generatedAt)} />
+              {streamError ? <SidebarStat label="Stream" value={streamError} tone="bad" /> : null}
             </div>
-          ) : null}
-        </section>
 
-        <div className="disk-analysis-layout">
-          <section className="panel disk-analysis-treemap-panel">
-            <div className="disk-analysis-panel-head">
-              <div>
-                <div className="label">Treemap</div>
-                <div className="disk-analysis-panel-subtitle">
-                  Double-click a block to open it in Files. File names appear on hover.
+            {liveJob ? (
+              <div className="disk-analysis-progress">
+                <div className="disk-analysis-progress__bar">
+                  <div
+                    className="disk-analysis-progress__fill"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+                <div className="disk-analysis-progress__meta">
+                  <span>
+                    {formatCount(liveJob.progress.directoriesCompleted)} /{" "}
+                    {formatCount(liveJob.progress.directoriesDiscovered)} directories
+                  </span>
+                  <span>{formatCount(liveJob.progress.filesDiscovered)} files</span>
+                  <span>{formatBytes(processedBytes)} processed</span>
                 </div>
               </div>
-              <div className="disk-analysis-panel-hint">
-                <ArrowLeftRight size={14} />
-                <span>{showViewSwitcher ? "Switch cached/live above" : "Live updates appear here"}</span>
-              </div>
-            </div>
+            ) : null}
+
+            <section className="disk-analysis-sidebar-section">
+              <div className="label">Hover Details</div>
+              {hoveredNode ? (
+                <div className="disk-analysis-details__content">
+                  <div className="disk-analysis-details__name">{hoveredNode.name}</div>
+                  <div className="disk-analysis-details__type">
+                    {getNodeDisplayType(hoveredNode)}
+                  </div>
+                  <div className="disk-analysis-details__path">{hoveredNode.path}</div>
+                  <DetailRow label="Recursive Size" value={formatBytes(hoveredNode.recursiveSize)} />
+                  <DetailRow label="Children" value={formatCount(hoveredNode.childCount)} />
+                </div>
+              ) : (
+                <div className="disk-analysis-sidebar-empty">Hover a block to inspect it.</div>
+              )}
+            </section>
+
+            <section className="disk-analysis-sidebar-section">
+              <div className="label">Extension Legend</div>
+              {legend.length > 0 ? (
+                <div className="disk-analysis-legend__list">
+                  {legend.map((item) => (
+                    <LegendRow key={item.extension} item={item} />
+                  ))}
+                </div>
+              ) : (
+                <div className="disk-analysis-sidebar-empty">Legend data will appear after scanning.</div>
+              )}
+            </section>
+
+            <section className="disk-analysis-sidebar-section">
+              <div className="label">Scan Issues</div>
+              {issueList.length > 0 ? (
+                <div className="disk-analysis-issues__list">
+                  {issueList.slice(0, 8).map((issue) => (
+                    <div key={`${issue.code}:${issue.path}:${issue.message}`} className="disk-analysis-issue">
+                      <div className="disk-analysis-issue__code">{issue.code}</div>
+                      <div className="disk-analysis-issue__message">{issue.message}</div>
+                      <div className="disk-analysis-issue__path">{issue.path}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="disk-analysis-sidebar-empty">No scan issues reported.</div>
+              )}
+            </section>
+          </aside>
+
+          <section className="panel disk-analysis-treemap-panel">
 
             {mountStateQuery.isLoading || snapshotQuery.isLoading ? (
               <div className="disk-analysis-empty">
@@ -599,82 +585,33 @@ function DiskAnalysisPage() {
               </div>
             )}
           </section>
-
-          <aside className="disk-analysis-sidebar">
-            <section className="panel disk-analysis-details">
-              <div className="label">Hover Details</div>
-              {hoveredNode ? (
-                <div className="disk-analysis-details__content">
-                  <div className="disk-analysis-details__name">{hoveredNode.name}</div>
-                  <div className="disk-analysis-details__type">
-                    {getNodeDisplayType(hoveredNode)}
-                  </div>
-                  <div className="disk-analysis-details__path">{hoveredNode.path}</div>
-                  <DetailRow label="Recursive Size" value={formatBytes(hoveredNode.recursiveSize)} />
-                  <DetailRow label="Children" value={formatCount(hoveredNode.childCount)} />
-                  <DetailRow
-                    label="Scan Notes"
-                    value={
-                      hoveredNode.truncated
-                        ? "Partial branch"
-                        : hoveredNode.issues.length > 0
-                          ? `${hoveredNode.issues.length} issue(s)`
-                          : "Complete"
-                    }
-                  />
-                </div>
-              ) : (
-                <div className="disk-analysis-empty__body">
-                  Hover or focus a treemap block to inspect its path, size, and scan status.
-                </div>
-              )}
-            </section>
-
-            <section className="panel disk-analysis-legend">
-              <div className="label">Extension Legend</div>
-              {legend.length > 0 ? (
-                <div className="disk-analysis-legend__list">
-                  {legend.map((item) => (
-                    <LegendRow key={item.extension} item={item} />
-                  ))}
-                </div>
-              ) : (
-                <div className="disk-analysis-empty__body">
-                  Extension colors appear after file types are discovered.
-                </div>
-              )}
-            </section>
-
-            <section className="panel disk-analysis-issues">
-              <div className="label">Scan Issues</div>
-              {issueList.length > 0 ? (
-                <div className="disk-analysis-issues__list">
-                  {issueList.slice(0, 8).map((issue) => (
-                    <div key={`${issue.code}:${issue.path}:${issue.message}`} className="disk-analysis-issue">
-                      <div className="disk-analysis-issue__code">{issue.code}</div>
-                      <div className="disk-analysis-issue__message">{issue.message}</div>
-                      <div className="disk-analysis-issue__path">{issue.path}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="disk-analysis-empty__body">
-                  No permission or traversal issues are currently reported.
-                </div>
-              )}
-            </section>
-          </aside>
         </div>
       </div>
     </div>
   );
 }
 
-function SummaryStat({ label, value }: { label: string; value: string }) {
+function SidebarStat({
+  label,
+  value,
+  mono = false,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  tone?: "default" | "bad";
+}) {
   return (
-    <div className="disk-analysis-stat">
-      <span className="disk-analysis-stat__label">{label}</span>
-      <span className="disk-analysis-stat__value">{value}</span>
+    <div className="disk-analysis-meta__row">
+      <span className="disk-analysis-meta__label">{label}</span>
+      <span
+        className={`disk-analysis-meta__value${mono ? " disk-analysis-meta__value--mono" : ""}${
+          tone === "bad" ? " disk-analysis-meta__value--bad" : ""
+        }`}
+      >
+        {value}
+      </span>
     </div>
   );
 }
@@ -696,19 +633,11 @@ function LegendRow({ item }: { item: DiskAnalysisLegendItem }) {
         style={{ background: getLegendColor(item.colorToken) }}
       />
       <span className="disk-analysis-legend__label">.{item.extension}</span>
-      <span className="disk-analysis-legend__count">{formatCount(item.count)}</span>
+      <span className="disk-analysis-legend__count">
+        {formatBytes(item.totalBytes)} ({formatCount(item.count)})
+      </span>
     </div>
   );
-}
-
-function StatusPill({
-  children,
-  tone,
-}: {
-  children: React.ReactNode;
-  tone: "good" | "warn" | "bad" | "info" | "neutral";
-}) {
-  return <span className={`disk-analysis-pill disk-analysis-pill--${tone}`}>{children}</span>;
 }
 
 function TreemapCanvas({
@@ -737,6 +666,8 @@ function TreemapCanvas({
           ? (MIN_NODE_PIXELS / containerSize.height) * 100
           : MIN_RENDER_PERCENT
       ),
+      canvasWidth: containerSize.width,
+      canvasHeight: containerSize.height,
     };
   }, [containerSize.height, containerSize.width]);
 
@@ -769,14 +700,13 @@ function TreemapCanvas({
 
   return (
     <div ref={containerRef} className="disk-analysis-treemap" role="tree" aria-label="Disk usage treemap">
-      {layoutNodes(nodes, { x: 0, y: 0, width: 100, height: 100 }, true, threshold).map(
-        ({ node, rect, vertical }) => (
+      {layoutNodes(nodes, { x: 0, y: 0, width: 100, height: 100 }, threshold).map(
+        ({ node, rect }) => (
           <TreemapNodeView
             key={node.path}
             node={node}
             rect={rect}
             depth={0}
-            vertical={vertical}
             legendByExtension={legendByExtension}
             onHoverNode={onHoverNode}
             onOpenNode={onOpenNode}
@@ -792,7 +722,6 @@ function TreemapNodeView({
   node,
   rect,
   depth,
-  vertical,
   legendByExtension,
   onHoverNode,
   onOpenNode,
@@ -801,15 +730,22 @@ function TreemapNodeView({
   node: DiskAnalysisTreemapNode;
   rect: TreemapRect;
   depth: number;
-  vertical: boolean;
   legendByExtension: Map<string, DiskAnalysisLegendItem>;
   onHoverNode: (path: string | null) => void;
   onOpenNode: (node: DiskAnalysisTreemapNode) => void;
   threshold: TreemapRenderThreshold;
 }) {
   const hasChildren = node.type === "directory" && node.children.length > 0;
+  const nodePixelWidth = (rect.width / 100) * threshold.canvasWidth;
+  const nodePixelHeight = (rect.height / 100) * threshold.canvasHeight;
+  const showDirectoryLabel =
+    node.type === "directory" &&
+    nodePixelWidth >= MIN_DIRECTORY_LABEL_PIXELS &&
+    nodePixelHeight >= MIN_DIRECTORY_LABEL_PIXELS;
   const stripPercent =
-    hasChildren && rect.height > 10 ? Math.min(24, Math.max(10, rect.height * 0.16)) : 0;
+    hasChildren && showDirectoryLabel && nodePixelHeight > 0
+      ? Math.min(30, (DIRECTORY_TITLE_STRIP_PX / nodePixelHeight) * 100)
+      : 0;
   const nextRect: TreemapRect = {
     x: 0,
     y: stripPercent,
@@ -818,7 +754,7 @@ function TreemapNodeView({
   };
   const childLayouts =
     hasChildren && nextRect.width > threshold.width && nextRect.height > threshold.height
-      ? layoutNodes(node.children, nextRect, !vertical, threshold)
+      ? layoutNodes(node.children, nextRect, threshold)
       : [];
   const color = getNodeColor(node, legendByExtension, depth);
 
@@ -854,7 +790,7 @@ function TreemapNodeView({
           }
         }}
       >
-        {node.type === "directory" ? (
+        {node.type === "directory" && showDirectoryLabel ? (
           <div className="disk-analysis-node__strip">
             <span className="disk-analysis-node__title">{node.name}</span>
           </div>
@@ -871,13 +807,12 @@ function TreemapNodeView({
         ) : null}
       </div>
 
-      {childLayouts.map(({ node: child, rect: childRect, vertical: childVertical }) => (
+      {childLayouts.map(({ node: child, rect: childRect }) => (
         <TreemapNodeView
           key={child.path}
           node={child}
           rect={childRect}
           depth={depth + 1}
-          vertical={childVertical}
           legendByExtension={legendByExtension}
           onHoverNode={onHoverNode}
           onOpenNode={onOpenNode}
@@ -891,48 +826,121 @@ function TreemapNodeView({
 function layoutNodes(
   nodes: DiskAnalysisTreemapNode[],
   rect: TreemapRect,
-  vertical: boolean,
   threshold: TreemapRenderThreshold
-): Array<{ node: DiskAnalysisTreemapNode; rect: TreemapRect; vertical: boolean }> {
-  const total = nodes.reduce((sum, node) => sum + Math.max(node.recursiveSize, 1), 0);
-  if (total <= 0) {
+): Array<{ node: DiskAnalysisTreemapNode; rect: TreemapRect }> {
+  const filtered = nodes
+    .filter((node) => node.recursiveSize > 0)
+    .slice()
+    .sort((left, right) => right.recursiveSize - left.recursiveSize);
+  const total = filtered.reduce((sum, node) => sum + Math.max(node.recursiveSize, 1), 0);
+  const totalArea = rect.width * rect.height;
+  if (total <= 0 || totalArea <= 0) {
     return [];
   }
-  let cursor = 0;
 
-  return nodes
-    .filter((node) => node.recursiveSize > 0)
-    .map((node, index, filtered) => {
-      const ratio = Math.max(node.recursiveSize, 1) / total;
-      const remaining = vertical ? rect.width - cursor : rect.height - cursor;
-      const span =
-        index === filtered.length - 1
-          ? remaining
-          : Math.max(0, (vertical ? rect.width : rect.height) * ratio);
-      const nodeRect: TreemapRect = vertical
-        ? {
-            x: rect.x + cursor,
-            y: rect.y,
-            width: span,
-            height: rect.height,
-          }
-        : {
-            x: rect.x,
-            y: rect.y + cursor,
-            width: rect.width,
-            height: span,
-          };
-      cursor += span;
-      return {
-        node,
-        rect: nodeRect,
-        vertical,
-      };
-    })
-    .filter(
-      (item) =>
-        item.rect.width >= threshold.width && item.rect.height >= threshold.height
+  type WeightedNode = { node: DiskAnalysisTreemapNode; area: number };
+  const weighted = filtered.map((node) => ({
+    node,
+    area: (Math.max(node.recursiveSize, 1) / total) * totalArea,
+  }));
+  const layouts: Array<{ node: DiskAnalysisTreemapNode; rect: TreemapRect }> = [];
+  let remainingRect = { ...rect };
+  let row: WeightedNode[] = [];
+  let remaining = [...weighted];
+
+  const shortSide = (value: TreemapRect) => Math.max(Math.min(value.width, value.height), 0.0001);
+  const sumArea = (items: WeightedNode[]) => items.reduce((sum, item) => sum + item.area, 0);
+  const worstAspectRatio = (items: WeightedNode[], side: number) => {
+    if (items.length === 0) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const totalRowArea = sumArea(items);
+    if (totalRowArea <= 0) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const maxArea = Math.max(...items.map((item) => item.area));
+    const minArea = Math.min(...items.map((item) => item.area));
+    const sideSquared = side * side;
+    return Math.max(
+      sideSquared * maxArea / (totalRowArea * totalRowArea),
+      (totalRowArea * totalRowArea) / (sideSquared * Math.max(minArea, 0.0001))
     );
+  };
+
+  const pushRow = (items: WeightedNode[]) => {
+    if (items.length === 0) {
+      return;
+    }
+    const rowArea = sumArea(items);
+    const horizontalSplit = remainingRect.width >= remainingRect.height;
+    if (horizontalSplit) {
+      const rowHeight = rowArea / Math.max(remainingRect.width, 0.0001);
+      let cursorX = remainingRect.x;
+      for (const item of items) {
+        const itemWidth = item.area / Math.max(rowHeight, 0.0001);
+        layouts.push({
+          node: item.node,
+          rect: {
+            x: cursorX,
+            y: remainingRect.y,
+            width: itemWidth,
+            height: rowHeight,
+          },
+        });
+        cursorX += itemWidth;
+      }
+      remainingRect = {
+        x: remainingRect.x,
+        y: remainingRect.y + rowHeight,
+        width: remainingRect.width,
+        height: Math.max(0, remainingRect.height - rowHeight),
+      };
+      return;
+    }
+
+    const columnWidth = rowArea / Math.max(remainingRect.height, 0.0001);
+    let cursorY = remainingRect.y;
+    for (const item of items) {
+      const itemHeight = item.area / Math.max(columnWidth, 0.0001);
+      layouts.push({
+        node: item.node,
+        rect: {
+          x: remainingRect.x,
+          y: cursorY,
+          width: columnWidth,
+          height: itemHeight,
+        },
+      });
+      cursorY += itemHeight;
+    }
+    remainingRect = {
+      x: remainingRect.x + columnWidth,
+      y: remainingRect.y,
+      width: Math.max(0, remainingRect.width - columnWidth),
+      height: remainingRect.height,
+    };
+  };
+
+  while (remaining.length > 0) {
+    const next = remaining[0];
+    const currentRow = [...row, next];
+    if (
+      row.length === 0 ||
+      worstAspectRatio(currentRow, shortSide(remainingRect)) <=
+        worstAspectRatio(row, shortSide(remainingRect))
+    ) {
+      row = currentRow;
+      remaining.shift();
+      continue;
+    }
+    pushRow(row);
+    row = [];
+  }
+  pushRow(row);
+
+  return layouts.filter(
+    (item) => item.rect.width >= threshold.width && item.rect.height >= threshold.height
+  );
 }
 
 function getNodeColor(
@@ -942,16 +950,16 @@ function getNodeColor(
 ) {
   if (node.type === "file") {
     const legendItem = node.extension ? legendByExtension.get(node.extension) : undefined;
-    const base = legendItem ? getLegendColor(legendItem.colorToken) : "rgba(122, 132, 155, 0.5)";
+    const base = legendItem ? getLegendColor(legendItem.colorToken) : "#5f6877";
     return {
-      background: `linear-gradient(180deg, ${base} 0%, rgba(10, 10, 10, 0.26) 100%)`,
+      background: base,
       border: legendItem ? base : "rgba(122, 132, 155, 0.55)",
       text: "var(--text-primary)",
     };
   }
-  const tint = Math.max(0.16, 0.34 - depth * 0.035);
+  const tint = Math.max(34, 74 - depth * 8);
   return {
-    background: `linear-gradient(180deg, rgba(255, 255, 255, ${tint}) 0%, rgba(0, 0, 0, 0.18) 100%)`,
+    background: `rgb(${tint}, ${tint}, ${tint})`,
     border: "rgba(255, 255, 255, 0.16)",
     text: "var(--text-primary)",
   };

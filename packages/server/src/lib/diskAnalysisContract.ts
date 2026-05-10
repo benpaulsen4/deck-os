@@ -140,6 +140,7 @@ const DiskAnalysisSnapshotSchema = z.object({
       extension: z.string().min(1).max(64),
       colorToken: z.string().min(1).max(64),
       count: z.number().int().nonnegative(),
+      totalBytes: z.number().nonnegative().default(0),
     })
   ),
   totals: z.object({

@@ -240,6 +240,8 @@ function makeDirectory(path: string, children: DiskTreeNode[]): DiskTreeNode {
 
 describe("disk analysis route", () => {
   beforeEach(() => {
+    window.scrollTo = vi.fn();
+    Element.prototype.scrollIntoView = vi.fn();
     installEventSourceMock();
     resetEventSourceMocks();
     startScanSpy.mockClear();
@@ -286,7 +288,7 @@ describe("disk analysis route", () => {
         root: makeDirectory("C:\\", [
           makeDirectory("C:\\cache", [makeFile("C:\\cache\\old.tmp", 64, "tmp")]),
         ]),
-        extensionLegend: [{ extension: "tmp", colorToken: "disk-ext-1", count: 1 }],
+        extensionLegend: [{ extension: "tmp", colorToken: "disk-ext-1", count: 1, totalBytes: 64 }],
         totals: {
           totalBytes: 64,
           totalFiles: 1,
@@ -335,12 +337,11 @@ describe("disk analysis route", () => {
   it("switches from stale cache to live mode and assembles streamed branches incrementally", async () => {
     renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
 
-    expect(await screen.findByText("Viewing cached snapshot")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Cached" })).toBeInTheDocument();
     expect(screen.getByText("cache")).toBeInTheDocument();
     expect(startScanSpy).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Live Refresh" }));
-    expect(screen.getByText("Viewing live result")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Live" }));
 
     const eventSource = MockEventSource.latest();
     const initialEventSourceCount = MockEventSource.instances.length;
@@ -395,7 +396,7 @@ describe("disk analysis route", () => {
         root: makeDirectory("C:\\", [
           makeDirectory("C:\\reports", [makeFile("C:\\reports\\archive.log", 256, "log")]),
         ]),
-        extensionLegend: [{ extension: "log", colorToken: "disk-ext-1", count: 1 }],
+        extensionLegend: [{ extension: "log", colorToken: "disk-ext-1", count: 1, totalBytes: 256 }],
         totals: {
           totalBytes: 256,
           totalFiles: 1,
