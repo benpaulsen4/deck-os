@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createPresentationTree,
   createSyntheticLiveRoot,
   integrateBranchIntoTree,
 } from "./diskAnalysisClient";
@@ -71,5 +72,28 @@ describe("diskAnalysisClient", () => {
     }
 
     expect(root.children.some((child) => child.path === "C:\\d1")).toBe(true);
+  });
+
+  it("builds a pruned presentation tree with an aggregate bucket for tiny siblings", () => {
+    const root = makeDirectory("C:\\", [
+      makeDirectory("C:\\games", [makeFile("C:\\games\\huge.bin", 8_000)]),
+      ...Array.from({ length: 60 }, (_, index) =>
+        makeFile(`C:\\tiny-${index}.txt`, 10)
+      ),
+    ]);
+
+    const presentation = createPresentationTree(root, {
+      maxDepth: 3,
+      maxChildrenPerDirectory: 12,
+      minShareByDepth: [0, 0.02, 0.01],
+    });
+
+    expect(presentation).not.toBeNull();
+    expect(
+      presentation?.children.some((child) => child.path === "C:\\games")
+    ).toBe(true);
+    expect(
+      presentation?.children.some((child) => child.path.endsWith("__deckos_other_entries__"))
+    ).toBe(true);
   });
 });

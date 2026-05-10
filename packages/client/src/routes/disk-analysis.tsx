@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeftRight, FolderSearch, RefreshCcw } from "lucide-react";
@@ -6,11 +6,10 @@ import { Button } from "../components/ui/Button";
 import { useToastStore } from "../stores/toast";
 import { emitUnauthorizedEvent, fetchAuthStatus } from "../lib/auth";
 import {
-  collectIssues,
+  createPresentationTree,
   createSyntheticLiveRoot,
   deriveLegendFromSnapshot,
-  deriveLegendFromTree,
-  flattenVisibleNodes,
+  findNodeByPath,
   formatBytes,
   formatCount,
   formatRelativeGeneratedAt,
@@ -45,6 +44,13 @@ type TreemapRect = {
 };
 
 const MIN_RENDER_PERCENT = 0.6;
+const MIN_NODE_PIXELS = 6;
+const LIVE_BRANCH_FLUSH_MS = 120;
+const LIVE_PRESENTATION_REFRESH_MS = 350;
+type TreemapRenderThreshold = {
+  width: number;
+  height: number;
+};
 
 function DiskAnalysisPage() {
   const search = Route.useSearch();
@@ -86,6 +92,7 @@ function DiskAnalysisPage() {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [hoveredPath, setHoveredPath] = useState<string | null>(null);
   const requestedStreamKeyRef = useRef<string | null>(null);
+  const liveRawRootRef = useRef<DiskAnalysisTreemapNode | null>(null);
 
   useEffect(() => {
     setLiveRoot(null);
@@ -95,6 +102,7 @@ function DiskAnalysisPage() {
     setStreamError(null);
     setHoveredPath(null);
     requestedStreamKeyRef.current = null;
+    liveRawRootRef.current = null;
   }, [mountKey]);
 
   const mountStateQuery = useQuery(
@@ -172,7 +180,86 @@ function DiskAnalysisPage() {
     }
 
     let disposed = false;
+    let flushTimer: number | null = null;
+    let presentationTimer: number | null = null;
+    const pendingBranches = new Map<string, DiskAnalysisTreemapNode>();
+    let pendingJob: DiskAnalysisJobState | null = null;
     const source = new EventSource(streamPath);
+
+    const publishPresentation = () => {
+      if (disposed) {
+        return;
+      }
+      presentationTimer = null;
+      const nextPresentation = createPresentationTree(liveRawRootRef.current, {
+        maxDepth: 4,
+        maxChildrenPerDirectory: 36,
+      });
+      startTransition(() => {
+        setLiveRoot(nextPresentation);
+      });
+    };
+
+    const schedulePresentation = (immediate: boolean = false) => {
+      if (disposed) {
+        return;
+      }
+      if (immediate) {
+        if (presentationTimer !== null) {
+          window.clearTimeout(presentationTimer);
+          presentationTimer = null;
+        }
+        publishPresentation();
+        return;
+      }
+      if (presentationTimer !== null) {
+        return;
+      }
+      presentationTimer = window.setTimeout(publishPresentation, LIVE_PRESENTATION_REFRESH_MS);
+    };
+
+    const flushPending = () => {
+      if (disposed) {
+        return;
+      }
+      flushTimer = null;
+      const nextJob = pendingJob;
+      pendingJob = null;
+      const branches = [...pendingBranches.values()];
+      pendingBranches.clear();
+
+      if (nextJob) {
+        setLiveJob(nextJob);
+      }
+      if (branches.length === 0) {
+        return;
+      }
+      const hadRawRoot = !!liveRawRootRef.current;
+      let nextRoot = liveRawRootRef.current ?? createSyntheticLiveRoot(mount);
+      for (const branch of branches) {
+        nextRoot = integrateBranchIntoTree(nextRoot, mount, branch);
+      }
+      liveRawRootRef.current = nextRoot;
+      schedulePresentation(!hadRawRoot);
+    };
+
+    const scheduleFlush = (immediate: boolean = false) => {
+      if (disposed) {
+        return;
+      }
+      if (immediate) {
+        if (flushTimer !== null) {
+          window.clearTimeout(flushTimer);
+          flushTimer = null;
+        }
+        flushPending();
+        return;
+      }
+      if (flushTimer !== null) {
+        return;
+      }
+      flushTimer = window.setTimeout(flushPending, LIVE_BRANCH_FLUSH_MS);
+    };
 
     const handleEvent = (event: Event) => {
       if (disposed) {
@@ -182,31 +269,31 @@ function DiskAnalysisPage() {
         const messageEvent = event as MessageEvent<string>;
         const parsed = DiskAnalysisScanEventSchema.parse(JSON.parse(messageEvent.data));
         if (parsed.event === "status" || parsed.event === "progress") {
-          setLiveJob(parsed.job);
+          pendingJob = parsed.job;
           if (
             parsed.job.phase === "completed" ||
             parsed.job.phase === "partial" ||
             parsed.job.phase === "failed" ||
             parsed.job.phase === "cancelled"
           ) {
+            scheduleFlush(true);
             setStreamPath(null);
+            return;
           }
+          scheduleFlush();
           return;
         }
         if (parsed.event === "branch") {
-          setLiveRoot((current) =>
-            integrateBranchIntoTree(
-              current ?? createSyntheticLiveRoot(mount),
-              mount,
-              parsed.branch
-            )
-          );
+          pendingBranches.set(parsed.branch.path, parsed.branch);
+          scheduleFlush();
           return;
         }
         if (parsed.event === "snapshot") {
+          scheduleFlush(true);
           setLiveJob(parsed.job);
           setLiveSnapshot(parsed.snapshot);
-          setLiveRoot(parsed.snapshot.root);
+          liveRawRootRef.current = parsed.snapshot.root;
+          schedulePresentation(true);
           setStreamPath(null);
           void queryClient.invalidateQueries({
             queryKey: mountStateQueryKey,
@@ -245,6 +332,12 @@ function DiskAnalysisPage() {
 
     return () => {
       disposed = true;
+      if (flushTimer !== null) {
+        window.clearTimeout(flushTimer);
+      }
+      if (presentationTimer !== null) {
+        window.clearTimeout(presentationTimer);
+      }
       source.removeEventListener("status", handleEvent);
       source.removeEventListener("progress", handleEvent);
       source.removeEventListener("branch", handleEvent);
@@ -253,8 +346,7 @@ function DiskAnalysisPage() {
     };
   }, [mount, mountStateQueryKey, queryClient, snapshotQueryKey, streamPath]);
 
-  const liveRootOrSnapshot = liveSnapshot?.root ?? liveRoot;
-  const liveAvailable = !!streamPath || !!liveJob || !!liveRootOrSnapshot;
+  const liveAvailable = !!streamPath || !!liveJob || !!liveRoot || !!liveSnapshot;
   const activeView =
     viewMode === "cached" && cachedSnapshot
       ? "cached"
@@ -263,37 +355,32 @@ function DiskAnalysisPage() {
         : cachedSnapshot
           ? "cached"
           : ("live" satisfies ViewMode);
-  const currentRoot =
-    activeView === "cached" ? cachedSnapshot?.root ?? null : liveRootOrSnapshot;
+  const currentRoot = activeView === "cached" ? cachedSnapshot?.root ?? null : liveRoot;
   const currentSnapshot = activeView === "cached" ? cachedSnapshot : liveSnapshot;
   const legend =
     activeView === "cached"
       ? deriveLegendFromSnapshot(cachedSnapshot)
       : currentSnapshot
         ? deriveLegendFromSnapshot(currentSnapshot)
-        : deriveLegendFromTree(currentRoot);
+        : deriveLegendFromSnapshot(cachedSnapshot);
   const legendByExtension = useMemo(
     () => new Map(legend.map((item) => [item.extension, item])),
     [legend]
   );
-  const visibleNodes = useMemo(() => flattenVisibleNodes(currentRoot), [currentRoot]);
-  const hoveredNode =
-    visibleNodes.find((node) => node.path === hoveredPath) ??
-    currentRoot ??
-    cachedSnapshot?.root ??
-    null;
+  const hoveredNode = useMemo(
+    () =>
+      findNodeByPath(activeView === "live" ? liveRawRootRef.current : currentRoot, hoveredPath) ??
+      currentRoot ??
+      cachedSnapshot?.root ??
+      null,
+    [activeView, cachedSnapshot?.root, currentRoot, hoveredPath]
+  );
   const issueList = useMemo(() => {
-    const currentIssues = currentSnapshot?.issues ?? [];
-    const treeIssues = collectIssues(currentRoot);
-    const deduped = new Map<string, (typeof currentIssues)[number]>();
-    for (const issue of [...currentIssues, ...treeIssues]) {
-      const key = `${issue.code}:${issue.path}:${issue.message}`;
-      if (!deduped.has(key)) {
-        deduped.set(key, issue);
-      }
+    if (activeView === "live" && liveJob) {
+      return liveJob.issues;
     }
-    return [...deduped.values()];
-  }, [currentRoot, currentSnapshot]);
+    return currentSnapshot?.issues ?? cachedSnapshot?.issues ?? [];
+  }, [activeView, cachedSnapshot?.issues, currentSnapshot, liveJob]);
 
   const showViewSwitcher = !!cachedSnapshot && (mountState?.cache.state === "stale" || !!liveJob);
   const generatedAt = currentSnapshot?.generatedAt ?? cachedSnapshot?.generatedAt;
@@ -419,15 +506,12 @@ function DiskAnalysisPage() {
             />
             <SummaryStat
               label="Files"
-              value={formatCount(
-                totals?.totalFiles ?? visibleNodes.filter((node) => node.type === "file").length
-              )}
+              value={formatCount(totals?.totalFiles ?? liveJob?.progress.filesDiscovered ?? 0)}
             />
             <SummaryStat
               label="Folders"
               value={formatCount(
-                totals?.totalDirectories ??
-                  visibleNodes.filter((node) => node.type === "directory").length
+                totals?.totalDirectories ?? liveJob?.progress.directoriesDiscovered ?? 0
               )}
             />
             <SummaryStat label="Issues" value={formatCount(issueList.length)} />
@@ -638,11 +722,54 @@ function TreemapCanvas({
   onHoverNode: (path: string | null) => void;
   onOpenNode: (node: DiskAnalysisTreemapNode) => void;
 }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const nodes = root.children.length > 0 ? root.children : [root];
+  const threshold = useMemo<TreemapRenderThreshold>(() => {
+    return {
+      width: Math.max(
+        MIN_RENDER_PERCENT,
+        containerSize.width > 0 ? (MIN_NODE_PIXELS / containerSize.width) * 100 : MIN_RENDER_PERCENT
+      ),
+      height: Math.max(
+        MIN_RENDER_PERCENT,
+        containerSize.height > 0
+          ? (MIN_NODE_PIXELS / containerSize.height) * 100
+          : MIN_RENDER_PERCENT
+      ),
+    };
+  }, [containerSize.height, containerSize.width]);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) {
+      return;
+    }
+    const updateSize = () => {
+      setContainerSize({
+        width: element.clientWidth,
+        height: element.clientHeight,
+      });
+    };
+    updateSize();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateSize);
+      return () => {
+        window.removeEventListener("resize", updateSize);
+      };
+    }
+    const observer = new ResizeObserver(() => {
+      updateSize();
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   return (
-    <div className="disk-analysis-treemap" role="tree" aria-label="Disk usage treemap">
-      {layoutNodes(nodes, { x: 0, y: 0, width: 100, height: 100 }, true).map(
+    <div ref={containerRef} className="disk-analysis-treemap" role="tree" aria-label="Disk usage treemap">
+      {layoutNodes(nodes, { x: 0, y: 0, width: 100, height: 100 }, true, threshold).map(
         ({ node, rect, vertical }) => (
           <TreemapNodeView
             key={node.path}
@@ -653,6 +780,7 @@ function TreemapCanvas({
             legendByExtension={legendByExtension}
             onHoverNode={onHoverNode}
             onOpenNode={onOpenNode}
+            threshold={threshold}
           />
         )
       )}
@@ -668,6 +796,7 @@ function TreemapNodeView({
   legendByExtension,
   onHoverNode,
   onOpenNode,
+  threshold,
 }: {
   node: DiskAnalysisTreemapNode;
   rect: TreemapRect;
@@ -676,6 +805,7 @@ function TreemapNodeView({
   legendByExtension: Map<string, DiskAnalysisLegendItem>;
   onHoverNode: (path: string | null) => void;
   onOpenNode: (node: DiskAnalysisTreemapNode) => void;
+  threshold: TreemapRenderThreshold;
 }) {
   const hasChildren = node.type === "directory" && node.children.length > 0;
   const stripPercent =
@@ -687,8 +817,8 @@ function TreemapNodeView({
     height: Math.max(0, 100 - stripPercent),
   };
   const childLayouts =
-    hasChildren && nextRect.width > MIN_RENDER_PERCENT && nextRect.height > MIN_RENDER_PERCENT
-      ? layoutNodes(node.children, nextRect, !vertical)
+    hasChildren && nextRect.width > threshold.width && nextRect.height > threshold.height
+      ? layoutNodes(node.children, nextRect, !vertical, threshold)
       : [];
   const color = getNodeColor(node, legendByExtension, depth);
 
@@ -751,6 +881,7 @@ function TreemapNodeView({
           legendByExtension={legendByExtension}
           onHoverNode={onHoverNode}
           onOpenNode={onOpenNode}
+          threshold={threshold}
         />
       ))}
     </div>
@@ -760,9 +891,13 @@ function TreemapNodeView({
 function layoutNodes(
   nodes: DiskAnalysisTreemapNode[],
   rect: TreemapRect,
-  vertical: boolean
+  vertical: boolean,
+  threshold: TreemapRenderThreshold
 ): Array<{ node: DiskAnalysisTreemapNode; rect: TreemapRect; vertical: boolean }> {
   const total = nodes.reduce((sum, node) => sum + Math.max(node.recursiveSize, 1), 0);
+  if (total <= 0) {
+    return [];
+  }
   let cursor = 0;
 
   return nodes
@@ -796,7 +931,7 @@ function layoutNodes(
     })
     .filter(
       (item) =>
-        item.rect.width >= MIN_RENDER_PERCENT && item.rect.height >= MIN_RENDER_PERCENT
+        item.rect.width >= threshold.width && item.rect.height >= threshold.height
     );
 }
 

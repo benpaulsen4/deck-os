@@ -35,6 +35,13 @@ const EXTENSION_COLOR_PALETTE = [
   "#f6ff7a",
 ];
 const SMALL_FILE_BUCKET_SUFFIX = "__deckos_small_files__";
+const OTHER_ENTRIES_BUCKET_SUFFIX = "__deckos_other_entries__";
+
+export type PresentationTreeOptions = {
+  maxDepth?: number;
+  maxChildrenPerDirectory?: number;
+  minShareByDepth?: number[];
+};
 
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) {
@@ -147,10 +154,7 @@ function recomputeDirectoryNode(node: DiskAnalysisTreemapNode): DiskAnalysisTree
       return sum + (child.type === "directory" ? child.descendantsScanned + 1 : 0);
     }, 0),
     truncated: node.truncated || children.some((child) => child.truncated),
-    issues: dedupeIssues([
-      ...node.issues,
-      ...children.flatMap((child) => child.issues),
-    ]),
+    issues: dedupeIssues(node.issues),
     children,
   };
 }
@@ -189,6 +193,133 @@ export function createSyntheticLiveRoot(
     issues: [],
     children: [],
   };
+}
+
+function createAggregateBucket(
+  directoryPath: string,
+  fileCount: number,
+  directoryCount: number,
+  totalBytes: number,
+  hasIssues: boolean
+): DiskAnalysisTreemapNode {
+  const entryCount = fileCount + directoryCount;
+  const directoryLabel =
+    directoryCount > 0 ? `${directoryCount} folder${directoryCount === 1 ? "" : "s"}` : null;
+  const fileLabel = fileCount > 0 ? `${fileCount} file${fileCount === 1 ? "" : "s"}` : null;
+  const detail = [directoryLabel, fileLabel].filter(Boolean).join(", ");
+  return {
+    path: `${directoryPath}\\${OTHER_ENTRIES_BUCKET_SUFFIX}`,
+    name: detail ? `Other (${detail})` : "Other",
+    type: "file",
+    size: totalBytes,
+    recursiveSize: totalBytes,
+    extension: null,
+    childCount: entryCount,
+    descendantsScanned: 0,
+    truncated: false,
+    issues: hasIssues
+      ? [
+          {
+            code: "partial-scan",
+            path: directoryPath,
+            message: `Additional entries were hidden to keep the live treemap responsive.`,
+            recoverable: true,
+          },
+        ]
+      : [],
+    children: [],
+  };
+}
+
+export function createPresentationTree(
+  root: DiskAnalysisTreemapNode | null,
+  options: PresentationTreeOptions = {}
+): DiskAnalysisTreemapNode | null {
+  if (!root) {
+    return null;
+  }
+
+  const maxDepth = options.maxDepth ?? 4;
+  const maxChildrenPerDirectory = options.maxChildrenPerDirectory ?? 40;
+  const minShareByDepth = options.minShareByDepth ?? [0, 0.0025, 0.0012, 0.0005, 0.0002];
+  const totalBytes = Math.max(root.recursiveSize, 1);
+
+  const pruneNode = (node: DiskAnalysisTreemapNode, depth: number): DiskAnalysisTreemapNode => {
+    if (node.type === "file") {
+      return {
+        ...node,
+        issues: dedupeIssues(node.issues),
+        children: [],
+      };
+    }
+
+    if (node.children.length === 0) {
+      return {
+        ...node,
+        issues: dedupeIssues(node.issues),
+        children: [],
+      };
+    }
+
+    const threshold =
+      minShareByDepth[Math.min(depth, minShareByDepth.length - 1)] ?? minShareByDepth.at(-1) ?? 0;
+    const keptChildren: DiskAnalysisTreemapNode[] = [];
+    let hiddenBytes = 0;
+    let hiddenFileCount = 0;
+    let hiddenDirectoryCount = 0;
+    let hiddenHasIssues = false;
+
+    for (const [index, child] of node.children.entries()) {
+      const share = child.recursiveSize / totalBytes;
+      const forceKeep = depth === 0 ? index < 24 : depth === 1 ? index < 16 : index < 10;
+      const withinBudget = keptChildren.length < maxChildrenPerDirectory;
+      const shouldKeep = forceKeep || (withinBudget && share >= threshold);
+
+      if (!shouldKeep) {
+        hiddenBytes += child.recursiveSize;
+        hiddenHasIssues ||= child.truncated || child.issues.length > 0;
+        if (child.type === "directory") {
+          hiddenDirectoryCount += 1;
+        } else {
+          hiddenFileCount += 1;
+        }
+        continue;
+      }
+
+      if (depth >= maxDepth) {
+        hiddenBytes += child.recursiveSize;
+        hiddenHasIssues ||= child.truncated || child.issues.length > 0;
+        if (child.type === "directory") {
+          hiddenDirectoryCount += 1;
+        } else {
+          hiddenFileCount += 1;
+        }
+        continue;
+      }
+
+      keptChildren.push(pruneNode(child, depth + 1));
+    }
+
+    if (hiddenBytes > 0) {
+      keptChildren.push(
+        createAggregateBucket(
+          node.path,
+          hiddenFileCount,
+          hiddenDirectoryCount,
+          hiddenBytes,
+          hiddenHasIssues
+        )
+      );
+    }
+
+    return {
+      ...node,
+      issues: dedupeIssues(node.issues),
+      children: sortChildren(keptChildren),
+    };
+  };
+
+  return pruneNode(root, 0);
 }
 
 function createSyntheticDirectory(pathValue: string): DiskAnalysisTreemapNode {
@@ -349,6 +480,39 @@ export function flattenVisibleNodes(
   return nodes;
 }
 
+export function findNodeByPath(
+  root: DiskAnalysisTreemapNode | null,
+  targetPath: string | null
+): DiskAnalysisTreemapNode | null {
+  if (!root || !targetPath) {
+    return null;
+  }
+  const stack: DiskAnalysisTreemapNode[] = [root];
+  const visited = new Set<string>();
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) {
+      continue;
+    }
+    if (node.path === targetPath) {
+      return node;
+    }
+    if (visited.has(node.path)) {
+      continue;
+    }
+    visited.add(node.path);
+    if (node.type === "directory") {
+      for (let index = node.children.length - 1; index >= 0; index -= 1) {
+        const child = node.children[index];
+        if (child.path !== node.path) {
+          stack.push(child);
+        }
+      }
+    }
+  }
+  return null;
+}
+
 export function deriveLegendFromSnapshot(
   snapshot: DiskAnalysisSnapshot | null
 ): DiskAnalysisLegendItem[] {
@@ -387,6 +551,9 @@ export function getNodeDisplayType(node: DiskAnalysisTreemapNode): string {
   if (node.path.endsWith(SMALL_FILE_BUCKET_SUFFIX)) {
     return "Small Files Bucket";
   }
+  if (node.path.endsWith(OTHER_ENTRIES_BUCKET_SUFFIX)) {
+    return "Other Entries";
+  }
   if (node.type === "directory") {
     return "Folder";
   }
@@ -398,7 +565,10 @@ export function getNodeNavigationSearch(node: DiskAnalysisTreemapNode): {
   reveal?: string;
   source: "disk-analysis";
 } {
-  if (node.path.endsWith(SMALL_FILE_BUCKET_SUFFIX)) {
+  if (
+    node.path.endsWith(SMALL_FILE_BUCKET_SUFFIX) ||
+    node.path.endsWith(OTHER_ENTRIES_BUCKET_SUFFIX)
+  ) {
     return {
       path: getPathParent(node.path),
       source: "disk-analysis",
