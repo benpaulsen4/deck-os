@@ -122,7 +122,10 @@ function getLimits(): DiskAnalysisResourceLimits {
 }
 
 function getSmallFileThresholdBytes(): number {
-  return getConfiguredPositiveInt("DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES", 1024 * 1024);
+  return getConfiguredPositiveInt(
+    "DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES",
+    2 * 1024 * 1024
+  );
 }
 
 function getAdaptiveSmallFileThresholdBytes(
@@ -246,7 +249,11 @@ function createIssue(
 function getIssueForFsError(targetPath: string, error: unknown): DiskAnalysisIssue {
   const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
   if (code === "EACCES" || code === "EPERM") {
-    return createIssue("permission-denied", targetPath, `Permission denied: ${targetPath}`);
+    return createIssue(
+      "permission-denied",
+      targetPath,
+      `Permission denied: ${targetPath}`
+    );
   }
   if (code === "ENOENT") {
     return createIssue("path-not-found", targetPath, `Path not found: ${targetPath}`);
@@ -255,7 +262,9 @@ function getIssueForFsError(targetPath: string, error: unknown): DiskAnalysisIss
 }
 
 function getCacheState(generatedAt: string): "fresh" | "stale" {
-  return Date.now() - new Date(generatedAt).getTime() < CACHE_FRESH_MS ? "fresh" : "stale";
+  return Date.now() - new Date(generatedAt).getTime() < CACHE_FRESH_MS
+    ? "fresh"
+    : "stale";
 }
 
 function countNodes(node: DiskAnalysisTreemapNode): number {
@@ -296,7 +305,9 @@ async function buildSnapshotEnvelope(
   snapshotBytes?: number
 ): Promise<DiskAnalysisSnapshotEnvelope> {
   const state = getCacheState(snapshot.generatedAt);
-  const staleAt = new Date(new Date(snapshot.generatedAt).getTime() + CACHE_FRESH_MS).toISOString();
+  const staleAt = new Date(
+    new Date(snapshot.generatedAt).getTime() + CACHE_FRESH_MS
+  ).toISOString();
   return DiskAnalysisSnapshotEnvelopeSchema.parse({
     mount,
     cache: {
@@ -342,10 +353,7 @@ async function writePersistedCache(
     mount,
     snapshot,
   } satisfies PersistedCacheFile);
-  await fs.writeFile(
-    tempPath,
-    serialized
-  );
+  await fs.writeFile(tempPath, serialized);
   await fs.move(tempPath, cachePath, { overwrite: true });
   return await buildSnapshotEnvelope(mount, snapshot, Buffer.byteLength(serialized));
 }
@@ -400,7 +408,10 @@ function emitSnapshot(job: DiskAnalysisJobInternal, snapshot: DiskAnalysisSnapsh
   });
 }
 
-function createDirectoryNode(directoryPath: string, parentPath: string | null): MutableDirectoryNode {
+function createDirectoryNode(
+  directoryPath: string,
+  parentPath: string | null
+): MutableDirectoryNode {
   return {
     path: directoryPath,
     name: parentPath ? getNodeName(directoryPath) : getMountName(directoryPath),
@@ -481,9 +492,7 @@ function serializeChildNode(
   }
 
   const children =
-    mode === "deep"
-      ? node.children.map((child) => serializeChildNode(child, mode))
-      : [];
+    mode === "deep" ? node.children.map((child) => serializeChildNode(child, mode)) : [];
   return {
     ...node,
     issues: [...node.issues],
@@ -498,7 +507,10 @@ function toTreemapNode(
   const children = [...node.children]
     .map((child) => serializeChildNode(child, mode))
     .sort((left, right) => right.recursiveSize - left.recursiveSize);
-  const recursiveSize = children.reduce((sum, child) => sum + child.recursiveSize, node.size);
+  const recursiveSize = children.reduce(
+    (sum, child) => sum + child.recursiveSize,
+    node.size
+  );
   const descendantsScanned = children.reduce((sum, child) => {
     return sum + (child.type === "directory" ? child.descendantsScanned + 1 : 0);
   }, 0);
@@ -526,7 +538,9 @@ function isActivePhase(phase: JobPhase): boolean {
 }
 
 function hasPartialResult(job: DiskAnalysisJobInternal): boolean {
-  return job.issues.some((issue) => issue.code === "partial-scan" || issue.recoverable === false);
+  return job.issues.some(
+    (issue) => issue.code === "partial-scan" || issue.recoverable === false
+  );
 }
 
 async function ensureMountAvailable(mount: DiskAnalysisMountIdentity): Promise<string> {
@@ -743,7 +757,10 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
 
               if (stat.isDirectory()) {
                 task.node.childCount += 1;
-                if (pending.length >= job.limits.maxPendingDirectories || !addNodeWithinLimit()) {
+                if (
+                  pending.length >= job.limits.maxPendingDirectories ||
+                  !addNodeWithinLimit()
+                ) {
                   task.node.truncated = true;
                   if (pending.length >= job.limits.maxPendingDirectories) {
                     pendingLimitSkips += 1;
@@ -769,7 +786,10 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
 
               const extension = getFileExtension(entryPath);
               if (extension) {
-                const current = extensionCounts.get(extension) ?? { count: 0, totalBytes: 0 };
+                const current = extensionCounts.get(extension) ?? {
+                  count: 0,
+                  totalBytes: 0,
+                };
                 current.count += 1;
                 current.totalBytes += stat.size;
                 extensionCounts.set(extension, current);
@@ -852,7 +872,11 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
             if (!settled) {
               if (pending.length > 0) {
                 schedule();
-              } else if (activeWorkers === 0 && rootNode.scanned && rootNode.pendingChildren === 0) {
+              } else if (
+                activeWorkers === 0 &&
+                rootNode.scanned &&
+                rootNode.pendingChildren === 0
+              ) {
                 finalizeNode(rootNode);
               }
             }
@@ -951,7 +975,9 @@ async function ensureJob(
   return job;
 }
 
-async function maybeStartRefreshJob(mount: DiskAnalysisMountIdentity): Promise<DiskAnalysisJobInternal | null> {
+async function maybeStartRefreshJob(
+  mount: DiskAnalysisMountIdentity
+): Promise<DiskAnalysisJobInternal | null> {
   const cached = await readPersistedCache(mount);
   if (!cached || cached.cache.state === "fresh") {
     return ensureJob(mount, { allowAutoStart: cached === null });
