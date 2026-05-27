@@ -96,4 +96,40 @@ describe("diskAnalysisClient", () => {
       presentation?.children.some((child) => child.path.endsWith("__deckos_other_entries__"))
     ).toBe(true);
   });
+
+  it("trusts newer shallow branch sizes over older preserved live totals", () => {
+    const mount: DiskAnalysisMountIdentity = { mount: "C:\\", fs: "ntfs" };
+    let root = createSyntheticLiveRoot(mount);
+
+    root = integrateBranchIntoTree(
+      root,
+      mount,
+      makeDirectory("C:\\Users", [makeDirectory("C:\\Users\\benp", [makeFile("C:\\Users\\benp\\a.txt", 700)])])
+    );
+
+    root = integrateBranchIntoTree(
+      root,
+      mount,
+      {
+        ...makeDirectory("C:\\Users", []),
+        recursiveSize: 300,
+        childCount: 1,
+        children: [
+          {
+            ...makeDirectory("C:\\Users\\benp", []),
+            recursiveSize: 300,
+            childCount: 1,
+            children: [],
+          },
+        ],
+      }
+    );
+
+    const users = root.children.find((child) => child.path === "C:\\Users");
+    const benp = users?.children.find((child) => child.path === "C:\\Users\\benp");
+
+    expect(users?.recursiveSize).toBe(300);
+    expect(benp?.recursiveSize).toBe(300);
+    expect(benp?.children.some((child) => child.path === "C:\\Users\\benp\\a.txt")).toBe(true);
+  });
 });

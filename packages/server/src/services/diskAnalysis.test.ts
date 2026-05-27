@@ -110,6 +110,8 @@ describe("diskAnalysis service", () => {
     const cached = await diskAnalysis.getCachedSnapshot(mount);
     expect(cached?.cache.state).toBe("fresh");
     expect(cached?.snapshot.totals.totalFiles).toBe(2);
+    expect(cached?.snapshot.totals.totalBytes).toBe(75);
+    expect(cached?.snapshot.root.recursiveSize).toBe(75);
     expect(
       cached?.snapshot.root.children.every(
         (child) =>
@@ -124,6 +126,10 @@ describe("diskAnalysis service", () => {
       "mkv",
       "txt",
     ]);
+    const alphaDir = cached?.snapshot.root.children.find((child) => child.path.endsWith("alpha"));
+    const betaDir = cached?.snapshot.root.children.find((child) => child.path.endsWith("beta"));
+    expect(alphaDir?.recursiveSize).toBe(11);
+    expect(betaDir?.recursiveSize).toBe(64);
 
     await diskAnalysis.__testing.clearState();
     await fs.remove(dataDir);

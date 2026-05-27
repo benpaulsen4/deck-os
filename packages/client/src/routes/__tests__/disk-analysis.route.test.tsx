@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithAppRouter } from "../../test/helpers/router";
 import {
   MockEventSource,
@@ -242,6 +242,36 @@ describe("disk analysis route", () => {
   beforeEach(() => {
     window.scrollTo = vi.fn();
     Element.prototype.scrollIntoView = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
+      () =>
+        ({
+          setTransform: vi.fn(),
+          clearRect: vi.fn(),
+          fillRect: vi.fn(),
+          strokeRect: vi.fn(),
+          fillText: vi.fn(),
+          measureText: (value: string) => ({ width: value.length * 6 }),
+          font: "10px monospace",
+          fillStyle: "",
+          strokeStyle: "",
+          lineWidth: 1,
+          textBaseline: "middle",
+        }) as unknown as CanvasRenderingContext2D
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockImplementation(
+      () =>
+        ({
+          x: 0,
+          y: 0,
+          top: 0,
+          left: 0,
+          right: 960,
+          bottom: 640,
+          width: 960,
+          height: 640,
+          toJSON: () => ({}),
+        }) as DOMRect
+    );
     installEventSourceMock();
     resetEventSourceMocks();
     startScanSpy.mockClear();
@@ -334,11 +364,14 @@ describe("disk analysis route", () => {
     };
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("switches from stale cache to live mode and assembles streamed branches incrementally", async () => {
     renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
 
     expect(await screen.findByRole("button", { name: "Cached" })).toBeInTheDocument();
-    expect(screen.getByText("cache")).toBeInTheDocument();
     expect(startScanSpy).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Live" }));
@@ -366,8 +399,10 @@ describe("disk analysis route", () => {
     });
 
     expect(MockEventSource.instances).toHaveLength(initialEventSourceCount);
-    expect(await screen.findByText("media")).toBeInTheDocument();
-    fireEvent.doubleClick(screen.getByText("media"));
+    const treemap = await screen.findByRole("img", { name: "Disk usage treemap" });
+    fireEvent.mouseMove(treemap, { clientX: 480, clientY: 10 });
+    await waitFor(() => expect(screen.getByText("media")).toBeInTheDocument());
+    fireEvent.doubleClick(treemap, { clientX: 480, clientY: 10 });
     await waitFor(() =>
       expect(screen.getByDisplayValue("C:\\media")).toBeInTheDocument()
     );
@@ -408,12 +443,74 @@ describe("disk analysis route", () => {
 
     renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
 
-    const fileBlock = await screen.findByLabelText(/archive\.log/i);
-    fireEvent.doubleClick(fileBlock);
+    const treemap = await screen.findByRole("img", { name: "Disk usage treemap" });
+    fireEvent.mouseMove(treemap, { clientX: 480, clientY: 340 });
+    await waitFor(() => expect(screen.getByText("archive.log")).toBeInTheDocument());
+    fireEvent.doubleClick(treemap, { clientX: 480, clientY: 340 });
 
     await waitFor(() =>
       expect(screen.getByDisplayValue("C:\\reports")).toBeInTheDocument()
     );
     expect(await screen.findByText("archive.log")).toBeInTheDocument();
+  });
+
+  it("moves scan issues into a header modal", async () => {
+    const manyIssues = Array.from({ length: 205 }, (_, index) => ({
+      code: "permission-denied" as const,
+      path: `C:\\restricted\\folder-${index}`,
+      message: `Permission denied: C:\\restricted\\folder-${index}`,
+      recoverable: true,
+    }));
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      activeJob: null,
+    };
+    state.snapshotEnvelope = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      snapshot: {
+        mount: { mount: "C:\\", fs: "ntfs" },
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        root: makeDirectory("C:\\", [makeFile("C:\\error.log", 256, "log")]),
+        extensionLegend: [{ extension: "log", colorToken: "disk-ext-1", count: 1, totalBytes: 256 }],
+        totals: {
+          totalBytes: 256,
+          totalFiles: 1,
+          totalDirectories: 1,
+        },
+        issues: manyIssues,
+      },
+    };
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    expect(screen.queryByText("Scan Issues")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /View Issues/i }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("1-100 of 205")).toBeInTheDocument();
+    expect(
+      screen.getByText("Permission denied: C:\\restricted\\folder-0")
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("101-200 of 205")).toBeInTheDocument();
+    expect(
+      screen.getByText("Permission denied: C:\\restricted\\folder-100")
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Search code, path, or message"), {
+      target: { value: "folder-204" },
+    });
+    expect(await screen.findByText("1-1 of 1")).toBeInTheDocument();
+    expect(
+      screen.getByText("Permission denied: C:\\restricted\\folder-204")
+    ).toBeInTheDocument();
   });
 });

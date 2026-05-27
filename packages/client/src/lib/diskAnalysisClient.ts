@@ -150,7 +150,7 @@ function recomputeDirectoryNode(node: DiskAnalysisTreemapNode): DiskAnalysisTree
   return {
     ...node,
     childCount: children.length,
-    recursiveSize: children.reduce((sum, child) => sum + child.recursiveSize, node.size),
+    recursiveSize: children.reduce((sum, child) => sum + child.recursiveSize, 0),
     descendantsScanned: children.reduce((sum, child) => {
       return sum + (child.type === "directory" ? child.descendantsScanned + 1 : 0);
     }, 0),
@@ -364,7 +364,7 @@ function mergeLiveBranch(
       ) {
         return {
           ...child,
-          recursiveSize: Math.max(child.recursiveSize, prior.recursiveSize),
+          recursiveSize: child.recursiveSize,
           childCount: Math.max(child.childCount, prior.childCount, prior.children.length),
           descendantsScanned: Math.max(child.descendantsScanned, prior.descendantsScanned),
           truncated: child.truncated || prior.truncated,

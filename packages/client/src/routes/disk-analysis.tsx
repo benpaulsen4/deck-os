@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { useToastStore } from "../stores/toast";
 import { emitUnauthorizedEvent, fetchAuthStatus } from "../lib/auth";
@@ -24,6 +24,7 @@ import { useTRPC, trpcClient } from "../trpc";
 import {
   DiskAnalysisRouteSearchSchema,
   DiskAnalysisScanEventSchema,
+  type DiskAnalysisIssue,
   type DiskAnalysisJobState,
   type DiskAnalysisMountIdentity,
   type DiskAnalysisSnapshot,
@@ -43,18 +44,66 @@ type TreemapRect = {
   height: number;
 };
 
-const MIN_RENDER_PERCENT = 0.6;
-const MIN_NODE_PIXELS = 6;
-const MIN_DIRECTORY_LABEL_PIXELS = 20;
-const DIRECTORY_TITLE_STRIP_PX = 18;
-const LIVE_BRANCH_FLUSH_MS = 120;
-const LIVE_PRESENTATION_REFRESH_MS = 350;
-type TreemapRenderThreshold = {
-  width: number;
-  height: number;
-  canvasWidth: number;
-  canvasHeight: number;
+type TreemapDrawable = {
+  node: DiskAnalysisTreemapNode;
+  rect: TreemapRect;
+  depth: number;
+  headerHeight: number;
+  headerLabel: string | null;
+  showDirectoryChrome: boolean;
+  color: ReturnType<typeof getNodeColor>;
 };
+
+type IssuesPageState = {
+  query: string;
+  page: number;
+};
+
+const DEFAULT_TREEMAP_WIDTH = 960;
+const DEFAULT_TREEMAP_HEIGHT = 640;
+const MIN_NODE_PIXELS = 4;
+const TREEMAP_NODE_GAP_PX = 1;
+const DIRECTORY_HEADER_HEIGHT_PX = 20;
+const MIN_DIRECTORY_HEADER_WIDTH_PX = 120;
+const MIN_DIRECTORY_HEADER_HEIGHT_PX = 32;
+const DIRECTORY_CHROME_MIN_SHARE = 0.01;
+const FILE_LABEL_MIN_WIDTH_PX = 84;
+const FILE_LABEL_MIN_HEIGHT_PX = 28;
+const LIVE_EVENT_BATCH_MS = 0;
+const LIVE_MERGE_PUBLISH_MS = 250;
+const HOVER_EVENT_COOLDOWN_MS = 40;
+const ISSUES_PAGE_SIZE = 100;
+const LIVE_PRESENTATION_OPTIONS = {
+  maxDepth: 4,
+  maxChildrenPerDirectory: 36,
+};
+const LIVE_SCANNING_PRESENTATION_OPTIONS = {
+  maxDepth: 3,
+  maxChildrenPerDirectory: 24,
+};
+const BLOCK_TEXT_COLOR_BY_FILL = new Map<string, string>([
+  ["#00ff88", "#03140c"],
+  ["#58d5ff", "#07131d"],
+  ["#aa44ff", "#f5f7fa"],
+  ["#ff8f3d", "#1b0d04"],
+  ["#ffe066", "#1f1800"],
+  ["#ff5470", "#20050c"],
+  ["#53f5c7", "#031512"],
+  ["#7aa2ff", "#071324"],
+  ["#d68cff", "#16081c"],
+  ["#ffb86b", "#1b1002"],
+  ["#7df5a6", "#041309"],
+  ["#ff7ad9", "#1f0616"],
+  ["#9eff6b", "#0d1704"],
+  ["#6af2ff", "#04141a"],
+  ["#ffd36a", "#181101"],
+  ["#8cc8ff", "#07131f"],
+  ["#ff9f9f", "#1c0b0b"],
+  ["#b8ff7a", "#101802"],
+  ["#b18cff", "#12091d"],
+  ["#f6ff7a", "#171a02"],
+  ["#8aa3e3", "#0a1020"],
+]);
 
 function DiskAnalysisPage() {
   const search = Route.useSearch();
@@ -95,6 +144,7 @@ function DiskAnalysisPage() {
   const [streamPath, setStreamPath] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [hoveredPath, setHoveredPath] = useState<string | null>(null);
+  const [isIssuesModalOpen, setIsIssuesModalOpen] = useState(false);
   const requestedStreamKeyRef = useRef<string | null>(null);
   const liveRawRootRef = useRef<DiskAnalysisTreemapNode | null>(null);
 
@@ -105,6 +155,7 @@ function DiskAnalysisPage() {
     setStreamPath(null);
     setStreamError(null);
     setHoveredPath(null);
+    setIsIssuesModalOpen(false);
     requestedStreamKeyRef.current = null;
     liveRawRootRef.current = null;
   }, [mountKey]);
@@ -177,6 +228,10 @@ function DiskAnalysisPage() {
     }
     setViewMode("live");
   }, [cachedSnapshot, liveRoot, liveSnapshot]);
+  const livePresentationOptions =
+    liveJob?.phase === "queued" || liveJob?.phase === "scanning"
+      ? LIVE_SCANNING_PRESENTATION_OPTIONS
+      : LIVE_PRESENTATION_OPTIONS;
 
   useEffect(() => {
     if (!streamPath || !mount) {
@@ -185,41 +240,63 @@ function DiskAnalysisPage() {
 
     let disposed = false;
     let flushTimer: number | null = null;
-    let presentationTimer: number | null = null;
+    let mergeTimer: number | null = null;
     const pendingBranches = new Map<string, DiskAnalysisTreemapNode>();
+    const queuedBranches: DiskAnalysisTreemapNode[] = [];
     let pendingJob: DiskAnalysisJobState | null = null;
+    let mergeRoot = liveRawRootRef.current;
+    let lastPublishedAtMs = 0;
     const source = new EventSource(streamPath);
 
-    const publishPresentation = () => {
-      if (disposed) {
-        return;
-      }
-      presentationTimer = null;
-      const nextPresentation = createPresentationTree(liveRawRootRef.current, {
-        maxDepth: 4,
-        maxChildrenPerDirectory: 36,
-      });
+    const publishPresentation = (root: DiskAnalysisTreemapNode | null) => {
+      const nextPresentation = createPresentationTree(root, livePresentationOptions);
       startTransition(() => {
         setLiveRoot(nextPresentation);
       });
     };
 
-    const schedulePresentation = (immediate: boolean = false) => {
-      if (disposed) {
+    const scheduleMerge = () => {
+      if (disposed || mergeTimer !== null) {
         return;
       }
-      if (immediate) {
-        if (presentationTimer !== null) {
-          window.clearTimeout(presentationTimer);
-          presentationTimer = null;
+      mergeTimer = window.setTimeout(() => {
+        mergeTimer = null;
+        if (disposed) {
+          return;
         }
-        publishPresentation();
-        return;
-      }
-      if (presentationTimer !== null) {
-        return;
-      }
-      presentationTimer = window.setTimeout(publishPresentation, LIVE_PRESENTATION_REFRESH_MS);
+        if (queuedBranches.length === 0) {
+          if (mergeRoot !== liveRawRootRef.current) {
+            liveRawRootRef.current = mergeRoot;
+            publishPresentation(mergeRoot);
+          }
+          return;
+        }
+
+        const mergeStartedAt = performance.now();
+        let nextRoot = mergeRoot ?? createSyntheticLiveRoot(mount);
+        while (queuedBranches.length > 0) {
+          const branch = queuedBranches.shift();
+          if (!branch) {
+            continue;
+          }
+          nextRoot = integrateBranchIntoTree(nextRoot, mount, branch);
+          if (performance.now() - mergeStartedAt >= 12) {
+            break;
+          }
+        }
+        mergeRoot = nextRoot;
+        liveRawRootRef.current = nextRoot;
+        if (queuedBranches.length > 0) {
+          if (performance.now() - lastPublishedAtMs >= LIVE_MERGE_PUBLISH_MS) {
+            lastPublishedAtMs = performance.now();
+            publishPresentation(nextRoot);
+          }
+          scheduleMerge();
+          return;
+        }
+        lastPublishedAtMs = performance.now();
+        publishPresentation(nextRoot);
+      }, 0);
     };
 
     const flushPending = () => {
@@ -238,13 +315,8 @@ function DiskAnalysisPage() {
       if (branches.length === 0) {
         return;
       }
-      const hadRawRoot = !!liveRawRootRef.current;
-      let nextRoot = liveRawRootRef.current ?? createSyntheticLiveRoot(mount);
-      for (const branch of branches) {
-        nextRoot = integrateBranchIntoTree(nextRoot, mount, branch);
-      }
-      liveRawRootRef.current = nextRoot;
-      schedulePresentation(!hadRawRoot);
+      queuedBranches.push(...branches);
+      scheduleMerge();
     };
 
     const scheduleFlush = (immediate: boolean = false) => {
@@ -262,7 +334,7 @@ function DiskAnalysisPage() {
       if (flushTimer !== null) {
         return;
       }
-      flushTimer = window.setTimeout(flushPending, LIVE_BRANCH_FLUSH_MS);
+      flushTimer = window.setTimeout(flushPending, LIVE_EVENT_BATCH_MS);
     };
 
     const handleEvent = (event: Event) => {
@@ -294,10 +366,17 @@ function DiskAnalysisPage() {
         }
         if (parsed.event === "snapshot") {
           scheduleFlush(true);
+          if (mergeTimer !== null) {
+            window.clearTimeout(mergeTimer);
+            mergeTimer = null;
+          }
+          queuedBranches.length = 0;
           setLiveJob(parsed.job);
           setLiveSnapshot(parsed.snapshot);
+          mergeRoot = parsed.snapshot.root;
           liveRawRootRef.current = parsed.snapshot.root;
-          schedulePresentation(true);
+          lastPublishedAtMs = performance.now();
+          publishPresentation(parsed.snapshot.root);
           setStreamPath(null);
           void queryClient.invalidateQueries({
             queryKey: mountStateQueryKey,
@@ -339,8 +418,8 @@ function DiskAnalysisPage() {
       if (flushTimer !== null) {
         window.clearTimeout(flushTimer);
       }
-      if (presentationTimer !== null) {
-        window.clearTimeout(presentationTimer);
+      if (mergeTimer !== null) {
+        window.clearTimeout(mergeTimer);
       }
       source.removeEventListener("status", handleEvent);
       source.removeEventListener("progress", handleEvent);
@@ -348,7 +427,7 @@ function DiskAnalysisPage() {
       source.removeEventListener("snapshot", handleEvent);
       source.close();
     };
-  }, [mount, mountStateQueryKey, queryClient, snapshotQueryKey, streamPath]);
+  }, [livePresentationOptions, mount, mountStateQueryKey, queryClient, snapshotQueryKey, streamPath]);
 
   const liveAvailable = !!streamPath || !!liveJob || !!liveRoot || !!liveSnapshot;
   const activeView =
@@ -389,6 +468,12 @@ function DiskAnalysisPage() {
     }
     return currentSnapshot?.issues ?? cachedSnapshot?.issues ?? [];
   }, [activeView, cachedSnapshot?.issues, currentSnapshot, liveJob]);
+
+  useEffect(() => {
+    if (issueList.length === 0) {
+      setIsIssuesModalOpen(false);
+    }
+  }, [issueList.length]);
 
   const showViewSwitcher = !!cachedSnapshot && (mountState?.cache.state === "stale" || !!liveJob);
   const generatedAt = currentSnapshot?.generatedAt ?? cachedSnapshot?.generatedAt;
@@ -446,6 +531,14 @@ function DiskAnalysisPage() {
             <ArrowLeft size={14} />
             <span>Back To Settings</span>
           </Button>
+          {issueList.length > 0 ? (
+            <div className="disk-analysis-toolbar__actions">
+              <Button variant="secondary" onClick={() => setIsIssuesModalOpen(true)}>
+                <span>View Issues</span>
+                <span>({formatCount(issueList.length)})</span>
+              </Button>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -526,23 +619,6 @@ function DiskAnalysisPage() {
                 <div className="disk-analysis-sidebar-empty">Legend data will appear after scanning.</div>
               )}
             </section>
-
-            <section className="disk-analysis-sidebar-section">
-              <div className="label">Scan Issues</div>
-              {issueList.length > 0 ? (
-                <div className="disk-analysis-issues__list">
-                  {issueList.slice(0, 8).map((issue) => (
-                    <div key={`${issue.code}:${issue.path}:${issue.message}`} className="disk-analysis-issue">
-                      <div className="disk-analysis-issue__code">{issue.code}</div>
-                      <div className="disk-analysis-issue__message">{issue.message}</div>
-                      <div className="disk-analysis-issue__path">{issue.path}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="disk-analysis-sidebar-empty">No scan issues reported.</div>
-              )}
-            </section>
           </aside>
 
           <section className="panel disk-analysis-treemap-panel">
@@ -587,6 +663,11 @@ function DiskAnalysisPage() {
           </section>
         </div>
       </div>
+      <ScanIssuesModal
+        isOpen={isIssuesModalOpen}
+        issues={issueList}
+        onClose={() => setIsIssuesModalOpen(false)}
+      />
     </div>
   );
 }
@@ -640,6 +721,173 @@ function LegendRow({ item }: { item: DiskAnalysisLegendItem }) {
   );
 }
 
+function ScanIssuesModal({
+  isOpen,
+  issues,
+  onClose,
+}: {
+  isOpen: boolean;
+  issues: DiskAnalysisIssue[];
+  onClose: () => void;
+}) {
+  const [pageState, setPageState] = useState<IssuesPageState>({
+    query: "",
+    page: 1,
+  });
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setPageState({
+        query: "",
+        page: 1,
+      });
+    }
+  }, [isOpen]);
+
+  const filteredIssues = useMemo(() => {
+    const query = pageState.query.trim().toLowerCase();
+    if (!query) {
+      return issues;
+    }
+    return issues.filter((issue) =>
+      [issue.code, issue.message, issue.path].some((value) => value.toLowerCase().includes(query))
+    );
+  }, [issues, pageState.query]);
+  const totalPages = Math.max(1, Math.ceil(filteredIssues.length / ISSUES_PAGE_SIZE));
+  const currentPage = Math.min(pageState.page, totalPages);
+  const pagedIssues = filteredIssues.slice(
+    (currentPage - 1) * ISSUES_PAGE_SIZE,
+    currentPage * ISSUES_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setPageState((current) =>
+      current.page === currentPage ? current : { ...current, page: currentPage }
+    );
+  }, [currentPage]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  return (
+    <div className="disk-analysis-modal" role="presentation">
+      <button
+        type="button"
+        className="disk-analysis-modal__backdrop"
+        aria-label="Close scan issues dialog"
+        onClick={onClose}
+      />
+      <div className="disk-analysis-modal__dialog" role="dialog" aria-modal="true">
+        <div className="disk-analysis-modal__header">
+          <div>
+            <div className="label">Disk Analysis</div>
+            <h2 className="disk-analysis-modal__title">
+              Scan Issues ({formatCount(issues.length)})
+            </h2>
+          </div>
+          <Button variant="icon" onClick={onClose} aria-label="Close scan issues dialog">
+            <X size={16} />
+          </Button>
+        </div>
+        <div className="disk-analysis-modal__body">
+          <div className="disk-analysis-modal__toolbar">
+            <label className="disk-analysis-modal__search">
+              <span className="label">Search Issues</span>
+              <input
+                type="search"
+                value={pageState.query}
+                onChange={(event) =>
+                  setPageState({
+                    query: event.target.value,
+                    page: 1,
+                  })
+                }
+                placeholder="Search code, path, or message"
+              />
+            </label>
+            <div className="disk-analysis-modal__pagination">
+              <span className="disk-analysis-modal__pagination-summary">
+                {filteredIssues.length > 0
+                  ? `${formatCount((currentPage - 1) * ISSUES_PAGE_SIZE + 1)}-${formatCount(
+                      Math.min(currentPage * ISSUES_PAGE_SIZE, filteredIssues.length)
+                    )} of ${formatCount(filteredIssues.length)}`
+                  : "0 results"}
+              </span>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  setPageState((current) => ({
+                    ...current,
+                    page: Math.max(1, current.page - 1),
+                  }))
+                }
+                disabled={currentPage <= 1}
+              >
+                Prev
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  setPageState((current) => ({
+                    ...current,
+                    page: Math.min(totalPages, current.page + 1),
+                  }))
+                }
+                disabled={currentPage >= totalPages}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+          {issues.length > 0 ? (
+            <div className="disk-analysis-issues__list">
+              {pagedIssues.map((issue) => (
+                <div
+                  key={`${issue.code}:${issue.path}:${issue.message}`}
+                  className="disk-analysis-issue"
+                >
+                  <div className="disk-analysis-issue__code">{issue.code}</div>
+                  <div className="disk-analysis-issue__message">{issue.message}</div>
+                  <div className="disk-analysis-issue__path">{issue.path}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="disk-analysis-sidebar-empty">No scan issues reported.</div>
+          )}
+          {issues.length > 0 && filteredIssues.length === 0 ? (
+            <div className="disk-analysis-sidebar-empty">
+              No scan issues match the current search.
+            </div>
+          ) : (
+            filteredIssues.length > ISSUES_PAGE_SIZE ? (
+              <div className="disk-analysis-modal__page-indicator">
+                Page {formatCount(currentPage)} of {formatCount(totalPages)}
+              </div>
+            ) : null
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TreemapCanvas({
   root,
   legendByExtension,
@@ -652,24 +900,19 @@ function TreemapCanvas({
   onOpenNode: (node: DiskAnalysisTreemapNode) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const hoveredNodeRef = useRef<DiskAnalysisTreemapNode | null>(null);
+  const hoverTimerRef = useRef<number | null>(null);
+  const pendingHoverPointRef = useRef<{ x: number; y: number } | null>(null);
+  const lastHoverUpdateAtRef = useRef(0);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
-  const nodes = root.children.length > 0 ? root.children : [root];
-  const threshold = useMemo<TreemapRenderThreshold>(() => {
-    return {
-      width: Math.max(
-        MIN_RENDER_PERCENT,
-        containerSize.width > 0 ? (MIN_NODE_PIXELS / containerSize.width) * 100 : MIN_RENDER_PERCENT
-      ),
-      height: Math.max(
-        MIN_RENDER_PERCENT,
-        containerSize.height > 0
-          ? (MIN_NODE_PIXELS / containerSize.height) * 100
-          : MIN_RENDER_PERCENT
-      ),
-      canvasWidth: containerSize.width,
-      canvasHeight: containerSize.height,
-    };
-  }, [containerSize.height, containerSize.width]);
+  const [hoveredPath, setHoveredPath] = useState<string | null>(null);
+  const canvasWidth = containerSize.width > 0 ? containerSize.width : DEFAULT_TREEMAP_WIDTH;
+  const canvasHeight = containerSize.height > 0 ? containerSize.height : DEFAULT_TREEMAP_HEIGHT;
+  const drawables = useMemo(
+    () => buildTreemapDrawables(root, legendByExtension, canvasWidth, canvasHeight),
+    [canvasHeight, canvasWidth, legendByExtension, root]
+  );
 
   useEffect(() => {
     const element = containerRef.current;
@@ -698,127 +941,111 @@ function TreemapCanvas({
     };
   }, []);
 
-  return (
-    <div ref={containerRef} className="disk-analysis-treemap" role="tree" aria-label="Disk usage treemap">
-      {layoutNodes(nodes, { x: 0, y: 0, width: 100, height: 100 }, threshold).map(
-        ({ node, rect }) => (
-          <TreemapNodeView
-            key={node.path}
-            node={node}
-            rect={rect}
-            depth={0}
-            legendByExtension={legendByExtension}
-            onHoverNode={onHoverNode}
-            onOpenNode={onOpenNode}
-            threshold={threshold}
-          />
-        )
-      )}
-    </div>
-  );
-}
+  useEffect(() => {
+    drawTreemapCanvas(canvasRef.current, drawables, canvasWidth, canvasHeight, hoveredPath);
+  }, [canvasHeight, canvasWidth, drawables, hoveredPath]);
 
-function TreemapNodeView({
-  node,
-  rect,
-  depth,
-  legendByExtension,
-  onHoverNode,
-  onOpenNode,
-  threshold,
-}: {
-  node: DiskAnalysisTreemapNode;
-  rect: TreemapRect;
-  depth: number;
-  legendByExtension: Map<string, DiskAnalysisLegendItem>;
-  onHoverNode: (path: string | null) => void;
-  onOpenNode: (node: DiskAnalysisTreemapNode) => void;
-  threshold: TreemapRenderThreshold;
-}) {
-  const hasChildren = node.type === "directory" && node.children.length > 0;
-  const nodePixelWidth = (rect.width / 100) * threshold.canvasWidth;
-  const nodePixelHeight = (rect.height / 100) * threshold.canvasHeight;
-  const showDirectoryLabel =
-    node.type === "directory" &&
-    nodePixelWidth >= MIN_DIRECTORY_LABEL_PIXELS &&
-    nodePixelHeight >= MIN_DIRECTORY_LABEL_PIXELS;
-  const stripPercent =
-    hasChildren && showDirectoryLabel && nodePixelHeight > 0
-      ? Math.min(30, (DIRECTORY_TITLE_STRIP_PX / nodePixelHeight) * 100)
-      : 0;
-  const nextRect: TreemapRect = {
-    x: 0,
-    y: stripPercent,
-    width: 100,
-    height: Math.max(0, 100 - stripPercent),
+  useEffect(() => {
+    return () => {
+      if (hoverTimerRef.current !== null) {
+        window.clearTimeout(hoverTimerRef.current);
+      }
+      onHoverNode(null);
+    };
+  }, [onHoverNode]);
+
+  const updateHoveredNode = (node: DiskAnalysisTreemapNode | null) => {
+    hoveredNodeRef.current = node;
+    const nextPath = node?.path ?? null;
+    setHoveredPath((current) => (current === nextPath ? current : nextPath));
+    onHoverNode(nextPath);
   };
-  const childLayouts =
-    hasChildren && nextRect.width > threshold.width && nextRect.height > threshold.height
-      ? layoutNodes(node.children, nextRect, threshold)
-      : [];
-  const color = getNodeColor(node, legendByExtension, depth);
+
+  const resolveNodeFromPointer = (
+    event:
+      | React.MouseEvent<HTMLCanvasElement>
+      | React.KeyboardEvent<HTMLCanvasElement>
+      | React.FocusEvent<HTMLCanvasElement>
+  ) => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return null;
+    }
+    const bounds = canvas.getBoundingClientRect();
+    const pointerEvent = "clientX" in event ? event : null;
+    const x =
+      pointerEvent && bounds.width > 0 ? pointerEvent.clientX - bounds.left : canvasWidth / 2;
+    const y =
+      pointerEvent && bounds.height > 0 ? pointerEvent.clientY - bounds.top : canvasHeight / 2;
+    return findDrawableAtPoint(drawables, x, y)?.node ?? null;
+  };
+
+  const resolveNodeFromPoint = (x: number, y: number) => findDrawableAtPoint(drawables, x, y)?.node ?? null;
+
+  const flushQueuedHover = () => {
+    hoverTimerRef.current = null;
+    const point = pendingHoverPointRef.current;
+    pendingHoverPointRef.current = null;
+    lastHoverUpdateAtRef.current = performance.now();
+    updateHoveredNode(point ? resolveNodeFromPoint(point.x, point.y) : null);
+  };
+
+  const queueHoverUpdate = (x: number, y: number) => {
+    pendingHoverPointRef.current = { x, y };
+    const elapsedMs = performance.now() - lastHoverUpdateAtRef.current;
+    if (elapsedMs >= HOVER_EVENT_COOLDOWN_MS && hoverTimerRef.current === null) {
+      flushQueuedHover();
+      return;
+    }
+    if (hoverTimerRef.current !== null) {
+      return;
+    }
+    hoverTimerRef.current = window.setTimeout(
+      flushQueuedHover,
+      Math.max(0, HOVER_EVENT_COOLDOWN_MS - elapsedMs)
+    );
+  };
 
   return (
-    <div
-      className={`disk-analysis-node disk-analysis-node--${node.type}`}
-      style={{
-        left: `${rect.x}%`,
-        top: `${rect.y}%`,
-        width: `${rect.width}%`,
-        height: `${rect.height}%`,
-      }}
-    >
-      <div
-        role="button"
+    <div ref={containerRef} className="disk-analysis-treemap">
+      <canvas
+        ref={canvasRef}
+        className="disk-analysis-treemap__canvas"
+        role="img"
+        aria-label="Disk usage treemap"
         tabIndex={0}
-        className="disk-analysis-node__surface"
-        aria-label={`${node.name} ${getNodeDisplayType(node)} ${formatBytes(node.recursiveSize)}`}
-        style={{
-          background: color.background,
-          borderColor: color.border,
-          color: color.text,
+        onMouseMove={(event) => {
+          const bounds = event.currentTarget.getBoundingClientRect();
+          queueHoverUpdate(event.clientX - bounds.left, event.clientY - bounds.top);
         }}
-        onMouseEnter={() => onHoverNode(node.path)}
-        onMouseLeave={() => onHoverNode(null)}
-        onFocus={() => onHoverNode(node.path)}
-        onBlur={() => onHoverNode(null)}
-        onDoubleClick={() => onOpenNode(node)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
+        onMouseLeave={() => {
+          if (hoverTimerRef.current !== null) {
+            window.clearTimeout(hoverTimerRef.current);
+            hoverTimerRef.current = null;
+          }
+          pendingHoverPointRef.current = null;
+          updateHoveredNode(null);
+        }}
+        onDoubleClick={(event) => {
+          const node = resolveNodeFromPointer(event);
+          if (node) {
             onOpenNode(node);
           }
         }}
-      >
-        {node.type === "directory" && showDirectoryLabel ? (
-          <div className="disk-analysis-node__strip">
-            <span className="disk-analysis-node__title">{node.name}</span>
-          </div>
-        ) : (
-          <div className="disk-analysis-node__hover-label">
-            <span>{node.name}</span>
-            <span>{formatBytes(node.recursiveSize)}</span>
-          </div>
-        )}
-        {node.truncated || node.issues.length > 0 ? (
-          <div className="disk-analysis-node__flag">
-            {node.truncated ? "Partial" : `${node.issues.length} issue(s)`}
-          </div>
-        ) : null}
-      </div>
-
-      {childLayouts.map(({ node: child, rect: childRect }) => (
-        <TreemapNodeView
-          key={child.path}
-          node={child}
-          rect={childRect}
-          depth={depth + 1}
-          legendByExtension={legendByExtension}
-          onHoverNode={onHoverNode}
-          onOpenNode={onOpenNode}
-          threshold={threshold}
-        />
-      ))}
+        onFocus={(event) => {
+          updateHoveredNode(resolveNodeFromPointer(event));
+        }}
+        onBlur={() => {
+          updateHoveredNode(null);
+        }}
+        onKeyDown={(event) => {
+          if ((event.key === "Enter" || event.key === " ") && hoveredNodeRef.current) {
+            event.preventDefault();
+            onOpenNode(hoveredNodeRef.current);
+          }
+        }}
+      />
+      <div className="disk-analysis-treemap__hint">Double-click a block to open it in Files.</div>
     </div>
   );
 }
@@ -826,121 +1053,328 @@ function TreemapNodeView({
 function layoutNodes(
   nodes: DiskAnalysisTreemapNode[],
   rect: TreemapRect,
-  threshold: TreemapRenderThreshold
+  minNodePixels: number
 ): Array<{ node: DiskAnalysisTreemapNode; rect: TreemapRect }> {
-  const filtered = nodes
+  const weighted = nodes
     .filter((node) => node.recursiveSize > 0)
     .slice()
-    .sort((left, right) => right.recursiveSize - left.recursiveSize);
-  const total = filtered.reduce((sum, node) => sum + Math.max(node.recursiveSize, 1), 0);
-  const totalArea = rect.width * rect.height;
-  if (total <= 0 || totalArea <= 0) {
+    .sort((left, right) => right.recursiveSize - left.recursiveSize)
+    .map((node) => ({
+      node,
+      weight: Math.max(node.recursiveSize, 1),
+    }));
+  const totalWeight = weighted.reduce((sum, item) => sum + item.weight, 0);
+  if (totalWeight <= 0 || rect.width <= 0 || rect.height <= 0) {
     return [];
   }
 
-  type WeightedNode = { node: DiskAnalysisTreemapNode; area: number };
-  const weighted = filtered.map((node) => ({
-    node,
-    area: (Math.max(node.recursiveSize, 1) / total) * totalArea,
-  }));
   const layouts: Array<{ node: DiskAnalysisTreemapNode; rect: TreemapRect }> = [];
-  let remainingRect = { ...rect };
-  let row: WeightedNode[] = [];
-  let remaining = [...weighted];
-
-  const shortSide = (value: TreemapRect) => Math.max(Math.min(value.width, value.height), 0.0001);
-  const sumArea = (items: WeightedNode[]) => items.reduce((sum, item) => sum + item.area, 0);
-  const worstAspectRatio = (items: WeightedNode[], side: number) => {
-    if (items.length === 0) {
-      return Number.POSITIVE_INFINITY;
-    }
-    const totalRowArea = sumArea(items);
-    if (totalRowArea <= 0) {
-      return Number.POSITIVE_INFINITY;
-    }
-    const maxArea = Math.max(...items.map((item) => item.area));
-    const minArea = Math.min(...items.map((item) => item.area));
-    const sideSquared = side * side;
-    return Math.max(
-      sideSquared * maxArea / (totalRowArea * totalRowArea),
-      (totalRowArea * totalRowArea) / (sideSquared * Math.max(minArea, 0.0001))
-    );
-  };
-
-  const pushRow = (items: WeightedNode[]) => {
-    if (items.length === 0) {
+  const sumWeight = (items: Array<{ node: DiskAnalysisTreemapNode; weight: number }>) =>
+    items.reduce((sum, item) => sum + item.weight, 0);
+  const recurse = (
+    items: Array<{ node: DiskAnalysisTreemapNode; weight: number }>,
+    nextRect: TreemapRect
+  ) => {
+    if (items.length === 0 || nextRect.width < minNodePixels || nextRect.height < minNodePixels) {
       return;
     }
-    const rowArea = sumArea(items);
-    const horizontalSplit = remainingRect.width >= remainingRect.height;
-    if (horizontalSplit) {
-      const rowHeight = rowArea / Math.max(remainingRect.width, 0.0001);
-      let cursorX = remainingRect.x;
-      for (const item of items) {
-        const itemWidth = item.area / Math.max(rowHeight, 0.0001);
-        layouts.push({
-          node: item.node,
-          rect: {
-            x: cursorX,
-            y: remainingRect.y,
-            width: itemWidth,
-            height: rowHeight,
-          },
-        });
-        cursorX += itemWidth;
-      }
-      remainingRect = {
-        x: remainingRect.x,
-        y: remainingRect.y + rowHeight,
-        width: remainingRect.width,
-        height: Math.max(0, remainingRect.height - rowHeight),
-      };
-      return;
-    }
-
-    const columnWidth = rowArea / Math.max(remainingRect.height, 0.0001);
-    let cursorY = remainingRect.y;
-    for (const item of items) {
-      const itemHeight = item.area / Math.max(columnWidth, 0.0001);
+    if (items.length === 1) {
       layouts.push({
-        node: item.node,
-        rect: {
-          x: remainingRect.x,
-          y: cursorY,
-          width: columnWidth,
-          height: itemHeight,
-        },
+        node: items[0].node,
+        rect: nextRect,
       });
-      cursorY += itemHeight;
+      return;
     }
-    remainingRect = {
-      x: remainingRect.x + columnWidth,
-      y: remainingRect.y,
-      width: Math.max(0, remainingRect.width - columnWidth),
-      height: remainingRect.height,
-    };
-  };
 
-  while (remaining.length > 0) {
-    const next = remaining[0];
-    const currentRow = [...row, next];
-    if (
-      row.length === 0 ||
-      worstAspectRatio(currentRow, shortSide(remainingRect)) <=
-        worstAspectRatio(row, shortSide(remainingRect))
-    ) {
-      row = currentRow;
-      remaining.shift();
-      continue;
+    const itemsTotalWeight = sumWeight(items);
+    const splitTarget = itemsTotalWeight / 2;
+    const firstGroup: Array<{ node: DiskAnalysisTreemapNode; weight: number }> = [];
+    const secondGroup: Array<{ node: DiskAnalysisTreemapNode; weight: number }> = [];
+    let runningWeight = 0;
+
+    for (const item of items) {
+      const nextWeight = runningWeight + item.weight;
+      if (
+        firstGroup.length === 0 ||
+        (nextWeight <= splitTarget && secondGroup.length === 0)
+      ) {
+        firstGroup.push(item);
+        runningWeight = nextWeight;
+      } else {
+        secondGroup.push(item);
+      }
     }
-    pushRow(row);
-    row = [];
-  }
-  pushRow(row);
+
+    if (secondGroup.length === 0) {
+      secondGroup.push(firstGroup.pop()!);
+    }
+
+    const firstWeight = sumWeight(firstGroup);
+    const splitHorizontal = nextRect.width >= nextRect.height;
+    if (splitHorizontal) {
+      const leftWidth = nextRect.width * (firstWeight / itemsTotalWeight);
+      recurse(firstGroup, {
+        x: nextRect.x,
+        y: nextRect.y,
+        width: leftWidth,
+        height: nextRect.height,
+      });
+      recurse(secondGroup, {
+        x: nextRect.x + leftWidth,
+        y: nextRect.y,
+        width: Math.max(0, nextRect.width - leftWidth),
+        height: nextRect.height,
+      });
+      return;
+    }
+
+    const topHeight = nextRect.height * (firstWeight / itemsTotalWeight);
+    recurse(firstGroup, {
+      x: nextRect.x,
+      y: nextRect.y,
+      width: nextRect.width,
+      height: topHeight,
+    });
+    recurse(secondGroup, {
+      x: nextRect.x,
+      y: nextRect.y + topHeight,
+      width: nextRect.width,
+      height: Math.max(0, nextRect.height - topHeight),
+    });
+  };
+  recurse(weighted, rect);
 
   return layouts.filter(
-    (item) => item.rect.width >= threshold.width && item.rect.height >= threshold.height
+    (item) => item.rect.width >= minNodePixels && item.rect.height >= minNodePixels
   );
+}
+
+function buildTreemapDrawables(
+  root: DiskAnalysisTreemapNode,
+  legendByExtension: Map<string, DiskAnalysisLegendItem>,
+  canvasWidth: number,
+  canvasHeight: number
+): TreemapDrawable[] {
+  const visibleNodes = root.children.length > 0 ? root.children : [root];
+  const totalBytes = Math.max(root.recursiveSize, 1);
+  const drawables: TreemapDrawable[] = [];
+
+  const visitNode = (node: DiskAnalysisTreemapNode, rect: TreemapRect, depth: number) => {
+    if (rect.width < MIN_NODE_PIXELS || rect.height < MIN_NODE_PIXELS) {
+      return;
+    }
+
+    const sizeShare = node.recursiveSize / totalBytes;
+    const showDirectoryChrome =
+      node.type === "directory" && sizeShare >= DIRECTORY_CHROME_MIN_SHARE;
+    const headerLabel =
+      node.type === "directory" &&
+      showDirectoryChrome &&
+      rect.width >= MIN_DIRECTORY_HEADER_WIDTH_PX &&
+      rect.height >= MIN_DIRECTORY_HEADER_HEIGHT_PX
+        ? `${node.name} (${formatBytes(node.recursiveSize)})`
+        : null;
+    const headerHeight =
+      node.type === "directory" && headerLabel
+        ? Math.min(DIRECTORY_HEADER_HEIGHT_PX, Math.max(0, rect.height * 0.3))
+        : 0;
+    drawables.push({
+      node,
+      rect,
+      depth,
+      headerHeight,
+      headerLabel,
+      showDirectoryChrome,
+      color: getNodeColor(node, legendByExtension, depth),
+    });
+
+    if (node.type !== "directory" || node.children.length === 0) {
+      return;
+    }
+
+    const inset = showDirectoryChrome ? TREEMAP_NODE_GAP_PX : 0;
+    const childRect = {
+      x: rect.x + inset,
+      y: rect.y + headerHeight + inset,
+      width: Math.max(0, rect.width - inset * 2),
+      height: Math.max(0, rect.height - headerHeight - inset * 2),
+    };
+    if (childRect.width < MIN_NODE_PIXELS || childRect.height < MIN_NODE_PIXELS) {
+      return;
+    }
+
+    for (const childLayout of layoutNodes(node.children, childRect, MIN_NODE_PIXELS)) {
+      visitNode(childLayout.node, childLayout.rect, depth + 1);
+    }
+  };
+
+  for (const childLayout of layoutNodes(
+    visibleNodes,
+    {
+      x: 0,
+      y: 0,
+      width: canvasWidth,
+      height: canvasHeight,
+    },
+    MIN_NODE_PIXELS
+  )) {
+    visitNode(childLayout.node, insetTreemapRect(childLayout.rect, TREEMAP_NODE_GAP_PX), 0);
+  }
+
+  return drawables;
+}
+
+function insetTreemapRect(rect: TreemapRect, amount: number): TreemapRect {
+  if (amount <= 0) {
+    return rect;
+  }
+  const insetX = Math.min(amount / 2, rect.width / 4);
+  const insetY = Math.min(amount / 2, rect.height / 4);
+  return {
+    x: rect.x + insetX,
+    y: rect.y + insetY,
+    width: Math.max(0, rect.width - insetX * 2),
+    height: Math.max(0, rect.height - insetY * 2),
+  };
+}
+
+function findDrawableAtPoint(drawables: TreemapDrawable[], x: number, y: number): TreemapDrawable | null {
+  for (let index = drawables.length - 1; index >= 0; index -= 1) {
+    const drawable = drawables[index];
+    if (
+      x >= drawable.rect.x &&
+      x <= drawable.rect.x + drawable.rect.width &&
+      y >= drawable.rect.y &&
+      y <= drawable.rect.y + drawable.rect.height
+    ) {
+      return drawable;
+    }
+  }
+  return null;
+}
+
+function drawTreemapCanvas(
+  canvas: HTMLCanvasElement | null,
+  drawables: TreemapDrawable[],
+  width: number,
+  height: number,
+  hoveredPath: string | null
+) {
+  if (!canvas || width <= 0 || height <= 0) {
+    return;
+  }
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return;
+  }
+
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.round(width * dpr));
+  canvas.height = Math.max(1, Math.round(height * dpr));
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  context.clearRect(0, 0, width, height);
+
+  const styles = getComputedStyle(canvas);
+  const textPrimary = styles.getPropertyValue("--text-primary").trim() || "#f5f7fa";
+  const textMuted = styles.getPropertyValue("--text-muted").trim() || "rgba(255, 255, 255, 0.72)";
+  const accent = styles.getPropertyValue("--accent-primary").trim() || "#00ff88";
+
+  for (const drawable of drawables) {
+    context.fillStyle = drawable.color.background;
+    context.fillRect(drawable.rect.x, drawable.rect.y, drawable.rect.width, drawable.rect.height);
+
+    if (drawable.node.type === "file" || drawable.showDirectoryChrome) {
+      context.strokeStyle = drawable.color.border;
+      context.lineWidth = 1;
+      context.strokeRect(
+        drawable.rect.x + 0.5,
+        drawable.rect.y + 0.5,
+        Math.max(0, drawable.rect.width - 1),
+        Math.max(0, drawable.rect.height - 1)
+      );
+    }
+
+    if (drawable.headerLabel && drawable.headerHeight > 0) {
+      context.fillStyle = "rgba(0, 0, 0, 0.3)";
+      context.fillRect(drawable.rect.x, drawable.rect.y, drawable.rect.width, drawable.headerHeight);
+      context.fillStyle = textPrimary;
+      context.font = "500 10px monospace";
+      context.textBaseline = "middle";
+      const label = truncateCanvasText(
+        context,
+        drawable.headerLabel,
+        Math.max(24, drawable.rect.width - 12)
+      );
+      context.fillText(label, drawable.rect.x + 6, drawable.rect.y + drawable.headerHeight / 2);
+    } else if (
+      drawable.node.type === "file" &&
+      drawable.rect.width >= FILE_LABEL_MIN_WIDTH_PX &&
+      drawable.rect.height >= FILE_LABEL_MIN_HEIGHT_PX
+    ) {
+      context.fillStyle = resolveCanvasColor(drawable.color.text, textPrimary) ?? textMuted;
+      context.font = "500 11px monospace";
+      context.textBaseline = "middle";
+      const label = truncateCanvasText(
+        context,
+        drawable.node.name,
+        Math.max(24, drawable.rect.width - 12)
+      );
+      context.fillText(label, drawable.rect.x + 6, drawable.rect.y + drawable.rect.height / 2);
+    }
+
+  }
+
+  if (!hoveredPath) {
+    return;
+  }
+  const hoveredDrawable = drawables.find((drawable) => drawable.node.path === hoveredPath);
+  if (!hoveredDrawable) {
+    return;
+  }
+  context.strokeStyle = accent;
+  context.lineWidth = 2;
+  context.strokeRect(
+    hoveredDrawable.rect.x + 1,
+    hoveredDrawable.rect.y + 1,
+    Math.max(0, hoveredDrawable.rect.width - 2),
+    Math.max(0, hoveredDrawable.rect.height - 2)
+  );
+}
+
+function truncateCanvasText(
+  context: CanvasRenderingContext2D,
+  value: string,
+  maxWidth: number
+): string {
+  if (maxWidth <= 0 || context.measureText(value).width <= maxWidth) {
+    return value;
+  }
+  const ellipsis = "...";
+  let endIndex = value.length;
+  while (endIndex > 0) {
+    const candidate = `${value.slice(0, endIndex)}${ellipsis}`;
+    if (context.measureText(candidate).width <= maxWidth) {
+      return candidate;
+    }
+    endIndex -= 1;
+  }
+  return ellipsis;
+}
+
+function resolveCanvasColor(value: string, fallback: string): string {
+  const match = value.match(/^var\((--[^)]+)\)$/);
+  if (!match) {
+    return value || fallback;
+  }
+  const resolved = getComputedStyle(document.documentElement).getPropertyValue(match[1]).trim();
+  return resolved || fallback;
+}
+
+function getCanvasTextColorForFill(fill: string, fallback: string): string {
+  const normalizedFill = fill.trim().toLowerCase();
+  return BLOCK_TEXT_COLOR_BY_FILL.get(normalizedFill) ?? fallback;
 }
 
 function getNodeColor(
@@ -948,13 +1382,20 @@ function getNodeColor(
   legendByExtension: Map<string, DiskAnalysisLegendItem>,
   depth: number
 ) {
+  if (node.path.endsWith("__deckos_other_entries__")) {
+    return {
+      background: "#8aa3e3",
+      border: "#abc0f5",
+      text: getCanvasTextColorForFill("#8aa3e3", "#0a1020"),
+    };
+  }
   if (node.type === "file") {
     const legendItem = node.extension ? legendByExtension.get(node.extension) : undefined;
     const base = legendItem ? getLegendColor(legendItem.colorToken) : "#5f6877";
     return {
       background: base,
       border: legendItem ? base : "rgba(122, 132, 155, 0.55)",
-      text: "var(--text-primary)",
+      text: getCanvasTextColorForFill(base, "#f5f7fa"),
     };
   }
   const tint = Math.max(34, 74 - depth * 8);

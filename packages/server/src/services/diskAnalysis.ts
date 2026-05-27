@@ -61,7 +61,10 @@ type DiskAnalysisJobInternal = {
   createdAtMs: number;
   finishedAtMs?: number;
   snapshot?: DiskAnalysisSnapshot;
-  lastProgressEmitAtMs: number;
+  lastLiveEmitAtMs: number;
+  pendingProgressEmit: boolean;
+  pendingBranchesByPath: Map<string, DiskAnalysisTreemapNode>;
+  liveEmitTimer: ReturnType<typeof setTimeout> | null;
 };
 
 export class DiskAnalysisJobNotFoundError extends Error {
@@ -382,13 +385,55 @@ function emitProgress(job: DiskAnalysisJobInternal) {
   });
 }
 
-function emitProgressIfDue(job: DiskAnalysisJobInternal, force: boolean = false) {
-  const now = Date.now();
-  if (!force && now - job.lastProgressEmitAtMs < PROGRESS_EMIT_INTERVAL_MS) {
+function clearLiveEmitTimer(job: DiskAnalysisJobInternal) {
+  if (job.liveEmitTimer !== null) {
+    clearTimeout(job.liveEmitTimer);
+    job.liveEmitTimer = null;
+  }
+}
+
+function flushQueuedLiveEvents(job: DiskAnalysisJobInternal) {
+  clearLiveEmitTimer(job);
+  if (!job.pendingProgressEmit && job.pendingBranchesByPath.size === 0) {
     return;
   }
-  job.lastProgressEmitAtMs = now;
-  emitProgress(job);
+  job.lastLiveEmitAtMs = Date.now();
+  if (job.pendingProgressEmit) {
+    job.pendingProgressEmit = false;
+    emitProgress(job);
+  }
+  if (job.pendingBranchesByPath.size === 0) {
+    return;
+  }
+  const branches = [...job.pendingBranchesByPath.values()];
+  job.pendingBranchesByPath.clear();
+  for (const branch of branches) {
+    emitBranch(job, branch);
+  }
+}
+
+function scheduleQueuedLiveEvents(job: DiskAnalysisJobInternal, force: boolean = false) {
+  if (force) {
+    flushQueuedLiveEvents(job);
+    return;
+  }
+  if (job.liveEmitTimer !== null) {
+    return;
+  }
+  const elapsedMs = Date.now() - job.lastLiveEmitAtMs;
+  const delayMs = Math.max(0, PROGRESS_EMIT_INTERVAL_MS - elapsedMs);
+  if (delayMs === 0) {
+    flushQueuedLiveEvents(job);
+    return;
+  }
+  job.liveEmitTimer = setTimeout(() => {
+    flushQueuedLiveEvents(job);
+  }, delayMs);
+}
+
+function queueProgressEmit(job: DiskAnalysisJobInternal, force: boolean = false) {
+  job.pendingProgressEmit = true;
+  scheduleQueuedLiveEvents(job, force);
 }
 
 function emitBranch(job: DiskAnalysisJobInternal, branch: DiskAnalysisTreemapNode) {
@@ -398,6 +443,15 @@ function emitBranch(job: DiskAnalysisJobInternal, branch: DiskAnalysisTreemapNod
     mount: job.mount,
     branch,
   });
+}
+
+function queueBranchEmit(
+  job: DiskAnalysisJobInternal,
+  branch: DiskAnalysisTreemapNode,
+  force: boolean = false
+) {
+  job.pendingBranchesByPath.set(branch.path, branch);
+  scheduleQueuedLiveEvents(job, force);
 }
 
 function emitSnapshot(job: DiskAnalysisJobInternal, snapshot: DiskAnalysisSnapshot) {
@@ -507,10 +561,7 @@ function toTreemapNode(
   const children = [...node.children]
     .map((child) => serializeChildNode(child, mode))
     .sort((left, right) => right.recursiveSize - left.recursiveSize);
-  const recursiveSize = children.reduce(
-    (sum, child) => sum + child.recursiveSize,
-    node.size
-  );
+  const recursiveSize = children.reduce((sum, child) => sum + child.recursiveSize, 0);
   const descendantsScanned = children.reduce((sum, child) => {
     return sum + (child.type === "directory" ? child.descendantsScanned + 1 : 0);
   }, 0);
@@ -606,7 +657,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
         deepBranch.truncated ||
         deepBranch.issues.length > 0
       ) {
-        emitBranch(job, toTreemapNode(node, "shallow"));
+        queueBranchEmit(job, toTreemapNode(node, "shallow"));
       }
 
       if (node.parentPath) {
@@ -708,7 +759,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
               task.node.scanned = true;
               job.progress.directoriesCompleted += 1;
               touchJob(job);
-              emitProgress(job);
+              queueProgressEmit(job);
               if (task.node.pendingChildren === 0) {
                 finalizeNode(task.node);
               }
@@ -861,7 +912,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
             task.node.scanned = true;
             job.progress.directoriesCompleted += 1;
             touchJob(job);
-            emitProgressIfDue(job);
+            queueProgressEmit(job);
             if (task.node.pendingChildren === 0) {
               finalizeNode(task.node);
             }
@@ -898,23 +949,25 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
 async function runJob(job: DiskAnalysisJobInternal): Promise<void> {
   touchJob(job, "scanning");
   emitStatus(job);
-  emitProgressIfDue(job, true);
+  queueProgressEmit(job, true);
 
   try {
     const snapshot = await executeScan(job);
     job.snapshot = snapshot;
-    emitProgressIfDue(job, true);
+    flushQueuedLiveEvents(job);
     await writePersistedCache(job.mount, snapshot);
     setJobFinalState(job, hasPartialResult(job) ? "partial" : "completed");
     emitSnapshot(job, snapshot);
     emitStatus(job);
   } catch (error) {
     if (job.controller.signal.aborted) {
+      clearLiveEmitTimer(job);
       setJobFinalState(job, "cancelled");
       emitStatus(job);
       return;
     }
 
+    clearLiveEmitTimer(job);
     const issue = createIssue(
       "unknown",
       job.mount.mount,
@@ -964,7 +1017,10 @@ async function ensureJob(
     limits: getLimits(),
     controller: new AbortController(),
     createdAtMs: Date.now(),
-    lastProgressEmitAtMs: 0,
+    lastLiveEmitAtMs: 0,
+    pendingProgressEmit: false,
+    pendingBranchesByPath: new Map(),
+    liveEmitTimer: null,
   };
   jobs.set(job.jobId, job);
   activeJobIdByMount.set(mountKey, job.jobId);
