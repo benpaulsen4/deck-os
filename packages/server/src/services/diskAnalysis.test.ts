@@ -161,17 +161,76 @@ describe("diskAnalysis service", () => {
     diskAnalysis.__testing.resetState();
     diskAnalysis = await loadDiskAnalysisModule(dataDir);
 
+    const originalStat = fs.stat.bind(fs);
+    const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (target) => {
+      const targetPath = typeof target === "string" ? target : String(target);
+      if (path.resolve(targetPath) === path.resolve(mountDir)) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return await originalStat(target);
+    });
+
     const snapshotBeforeRefresh = await diskAnalysis.getCachedSnapshot(mount);
     expect(snapshotBeforeRefresh?.cache.state).toBe("stale");
 
+    const startedAt = Date.now();
     const state = await diskAnalysis.getMountState(mount);
+    const elapsedMs = Date.now() - startedAt;
     expect(state.cache.state).toBe("stale");
-    expect(state.activeJob).not.toBeNull();
+    expect(elapsedMs).toBeLessThan(50);
+    expect(state.activeJob).toBeNull();
 
-    const refreshedJob = await waitForTerminalJob(diskAnalysis, state.activeJob!.jobId);
+    let refreshState = diskAnalysis.getJob(state.activeJob?.jobId ?? "");
+    for (let attempt = 0; attempt < 20 && refreshState === null; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const nextState = await diskAnalysis.getMountState(mount);
+      refreshState = nextState.activeJob ? diskAnalysis.getJob(nextState.activeJob.jobId) : null;
+    }
+    expect(refreshState).not.toBeNull();
+
+    const refreshedJob = await waitForTerminalJob(diskAnalysis, refreshState!.jobId);
     expect(refreshedJob?.phase).toBe("completed");
     const refreshedSnapshot = await diskAnalysis.getCachedSnapshot(mount);
     expect(refreshedSnapshot?.cache.state).toBe("fresh");
+    statSpy.mockRestore();
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("legacy cached snapshots without persisted metadata remain readable", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.writeFile(path.join(mountDir, "notes.txt"), "cached", "utf8");
+
+    let diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    await waitForTerminalJob(diskAnalysis, start.jobId);
+
+    const cacheFile = path.join(
+      dataDir,
+      "disk-analysis",
+      `${getMountCacheHash(mount)}.json`
+    );
+    const persisted = (await fs.readJson(cacheFile)) as {
+      mount: DiskAnalysisMountIdentity;
+      snapshot: { generatedAt: string; totals: { totalFiles: number } };
+      cache?: unknown;
+    };
+    delete persisted.cache;
+    await fs.writeJson(cacheFile, persisted, { spaces: 2 });
+
+    diskAnalysis.__testing.resetState();
+    diskAnalysis = await loadDiskAnalysisModule(dataDir);
+
+    const mountState = await diskAnalysis.getMountState(mount);
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+
+    expect(mountState.cache.state).toBe("fresh");
+    expect(mountState.cache.nodeCount).toBeUndefined();
+    expect(snapshot?.snapshot.totals.totalFiles).toBe(1);
 
     await diskAnalysis.__testing.clearState();
     await fs.remove(dataDir);

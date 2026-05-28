@@ -145,6 +145,7 @@ function DiskAnalysisPage() {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [hoveredPath, setHoveredPath] = useState<string | null>(null);
   const [isIssuesModalOpen, setIsIssuesModalOpen] = useState(false);
+  const [hasRequestedLive, setHasRequestedLive] = useState(false);
   const requestedStreamKeyRef = useRef<string | null>(null);
   const liveRawRootRef = useRef<DiskAnalysisTreemapNode | null>(null);
 
@@ -156,6 +157,7 @@ function DiskAnalysisPage() {
     setStreamError(null);
     setHoveredPath(null);
     setIsIssuesModalOpen(false);
+    setHasRequestedLive(false);
     requestedStreamKeyRef.current = null;
     liveRawRootRef.current = null;
   }, [mountKey]);
@@ -191,45 +193,143 @@ function DiskAnalysisPage() {
 
   const cachedSnapshot = snapshotQuery.data?.snapshot ?? null;
   const mountState = mountStateQuery.data ?? null;
+  const activeJob = liveJob ?? mountState?.activeJob ?? null;
+
+  const resetLiveState = () => {
+    setLiveRoot(null);
+    setLiveSnapshot(null);
+    setLiveJob(null);
+    setStreamError(null);
+    requestedStreamKeyRef.current = null;
+    liveRawRootRef.current = null;
+  };
+
+  const requestLiveStream = (options?: { resetLiveState?: boolean }) => {
+    if (!mount || startScanMutation.isPending) {
+      return;
+    }
+    if (options?.resetLiveState) {
+      resetLiveState();
+    }
+    const requestKey = `${mountKey}::${mountState?.activeJob?.jobId ?? "pending"}`;
+    if (requestedStreamKeyRef.current === requestKey) {
+      return;
+    }
+    requestedStreamKeyRef.current = requestKey;
+    startScanMutation.mutate(mount);
+  };
+
+  const openLiveView = () => {
+    setHasRequestedLive(true);
+    setViewMode("live");
+    if (!mount) {
+      return;
+    }
+    if (streamPath) {
+      return;
+    }
+    if (!mountState?.activeJob && (liveSnapshot || liveRoot)) {
+      return;
+    }
+    requestLiveStream({
+      resetLiveState: mountState?.activeJob ? liveJob?.jobId !== mountState.activeJob.jobId : true,
+    });
+  };
+
+  const showCachedView = () => {
+    setViewMode("cached");
+    if (streamPath) {
+      requestedStreamKeyRef.current = null;
+      setStreamPath(null);
+    }
+  };
+
+  const startManualScan = () => {
+    setHasRequestedLive(true);
+    setViewMode("live");
+    requestLiveStream({
+      resetLiveState: true,
+    });
+  };
+
+  const hasTerminalLiveResult =
+    !!liveSnapshot ||
+    !!liveRoot ||
+    liveJob?.phase === "completed" ||
+    liveJob?.phase === "partial" ||
+    liveJob?.phase === "failed" ||
+    liveJob?.phase === "cancelled";
 
   useEffect(() => {
     if (!mount || !mountState) {
       return;
     }
-    const shouldStartLive =
-      mountState.cache.state === "missing" || mountState.activeJob !== null;
-    if (!shouldStartLive) {
+    if (mountState.cache.state !== "missing") {
       return;
     }
-    const requestKey = `${mountKey}::${mountState.activeJob?.jobId ?? "pending"}`;
-    if (requestedStreamKeyRef.current === requestKey || startScanMutation.isPending) {
+    if (hasRequestedLive) {
       return;
     }
-    requestedStreamKeyRef.current = requestKey;
-    startScanMutation.mutate(mount);
+    if (hasTerminalLiveResult) {
+      return;
+    }
+    setHasRequestedLive(true);
+    setViewMode("live");
+    requestLiveStream({
+      resetLiveState: true,
+    });
   }, [
     mount,
-    mountKey,
     mountState,
-    mountState?.activeJob?.jobId,
     mountState?.cache.state,
-    startScanMutation,
+    mountState?.activeJob?.jobId,
+    mountKey,
+    streamPath,
+    hasRequestedLive,
+    hasTerminalLiveResult,
   ]);
 
   useEffect(() => {
     if (cachedSnapshot) {
       setViewMode((current) => {
-        if (current === "cached") {
+        if (current === "cached" || (current === "live" && hasRequestedLive)) {
           return current;
         }
-        return liveRoot || liveSnapshot ? current : "cached";
+        return "cached";
       });
       return;
     }
     setViewMode("live");
-  }, [cachedSnapshot, liveRoot, liveSnapshot]);
+  }, [cachedSnapshot, hasRequestedLive]);
+
+  useEffect(() => {
+    if (viewMode === "live" || !streamPath) {
+      return;
+    }
+    requestedStreamKeyRef.current = null;
+    setStreamPath(null);
+  }, [streamPath, viewMode]);
+
+  useEffect(() => {
+    if (!activeJob || liveSnapshot || !cachedSnapshot) {
+      return;
+    }
+    if (activeJob.phase !== "completed" && activeJob.phase !== "partial") {
+      return;
+    }
+    if (mountState?.cache.state !== "fresh") {
+      return;
+    }
+    if (mountState.cache.generatedAt !== cachedSnapshot.generatedAt) {
+      return;
+    }
+
+    liveRawRootRef.current = cachedSnapshot.root;
+    setLiveSnapshot(cachedSnapshot);
+    setLiveRoot(createPresentationTree(cachedSnapshot.root, LIVE_PRESENTATION_OPTIONS));
+  }, [activeJob, cachedSnapshot, liveSnapshot, mountState]);
   const livePresentationOptions =
-    liveJob?.phase === "queued" || liveJob?.phase === "scanning"
+    activeJob?.phase === "queued" || activeJob?.phase === "scanning"
       ? LIVE_SCANNING_PRESENTATION_OPTIONS
       : LIVE_PRESENTATION_OPTIONS;
 
@@ -353,6 +453,15 @@ function DiskAnalysisPage() {
             parsed.job.phase === "cancelled"
           ) {
             scheduleFlush(true);
+            requestedStreamKeyRef.current = null;
+            if (parsed.job.phase === "completed" || parsed.job.phase === "partial") {
+              void queryClient.invalidateQueries({
+                queryKey: mountStateQueryKey,
+              });
+              void queryClient.invalidateQueries({
+                queryKey: snapshotQueryKey,
+              });
+            }
             setStreamPath(null);
             return;
           }
@@ -377,6 +486,7 @@ function DiskAnalysisPage() {
           liveRawRootRef.current = parsed.snapshot.root;
           lastPublishedAtMs = performance.now();
           publishPresentation(parsed.snapshot.root);
+          requestedStreamKeyRef.current = null;
           setStreamPath(null);
           void queryClient.invalidateQueries({
             queryKey: mountStateQueryKey,
@@ -398,6 +508,8 @@ function DiskAnalysisPage() {
         return;
       }
       setStreamError("Live scan stream disconnected.");
+      requestedStreamKeyRef.current = null;
+      setStreamPath(null);
       source.close();
       void fetchAuthStatus()
         .then((status) => {
@@ -429,7 +541,8 @@ function DiskAnalysisPage() {
     };
   }, [livePresentationOptions, mount, mountStateQueryKey, queryClient, snapshotQueryKey, streamPath]);
 
-  const liveAvailable = !!streamPath || !!liveJob || !!liveRoot || !!liveSnapshot;
+  const liveAvailable =
+    !!mountState?.activeJob || !!streamPath || !!liveJob || !!liveRoot || !!liveSnapshot;
   const activeView =
     viewMode === "cached" && cachedSnapshot
       ? "cached"
@@ -439,7 +552,7 @@ function DiskAnalysisPage() {
           ? "cached"
           : ("live" satisfies ViewMode);
   const liveRootForView =
-    liveJob?.phase === "queued" || liveJob?.phase === "scanning"
+    activeJob?.phase === "queued" || activeJob?.phase === "scanning"
       ? liveRoot
       : liveSnapshot?.root ?? liveRoot;
   const currentRoot = activeView === "cached" ? cachedSnapshot?.root ?? null : liveRootForView;
@@ -463,11 +576,11 @@ function DiskAnalysisPage() {
     [activeView, cachedSnapshot?.root, currentRoot, hoveredPath]
   );
   const issueList = useMemo(() => {
-    if (activeView === "live" && liveJob) {
-      return liveJob.issues;
+    if (activeView === "live" && activeJob) {
+      return activeJob.issues;
     }
     return currentSnapshot?.issues ?? cachedSnapshot?.issues ?? [];
-  }, [activeView, cachedSnapshot?.issues, currentSnapshot, liveJob]);
+  }, [activeJob, activeView, cachedSnapshot?.issues, currentSnapshot]);
 
   useEffect(() => {
     if (issueList.length === 0) {
@@ -475,13 +588,14 @@ function DiskAnalysisPage() {
     }
   }, [issueList.length]);
 
-  const showViewSwitcher = !!cachedSnapshot && (mountState?.cache.state === "stale" || !!liveJob);
+  const showViewSwitcher =
+    !!cachedSnapshot && (mountState?.cache.state === "stale" || liveAvailable);
   const generatedAt = currentSnapshot?.generatedAt ?? cachedSnapshot?.generatedAt;
   const totals = currentSnapshot?.totals ?? null;
   const progressPercent = Math.min(
     100,
-    liveJob?.progress.directoriesDiscovered
-      ? (liveJob.progress.directoriesCompleted / liveJob.progress.directoriesDiscovered) * 100
+    activeJob?.progress.directoriesDiscovered
+      ? (activeJob.progress.directoriesCompleted / activeJob.progress.directoriesDiscovered) * 100
       : 0
   );
   const cacheStatus =
@@ -490,12 +604,16 @@ function DiskAnalysisPage() {
       : mountState?.cache.state === "stale"
         ? "Stale"
         : "Missing";
-  const liveStatus = liveJob
-    ? liveJob.phase
+  const liveStatus = activeJob
+    ? activeJob.phase
     : mountState?.cache.state === "fresh"
       ? "Idle"
       : "Preparing";
-  const processedBytes = liveJob?.progress.bytesProcessed ?? totals?.totalBytes ?? 0;
+  const processedBytes = activeJob?.progress.bytesProcessed ?? totals?.totalBytes ?? 0;
+  const canStartManualScan =
+    !!mount && !mountStateQuery.isLoading && !snapshotQuery.isLoading && !mountState?.activeJob;
+  const manualScanLabel = cachedSnapshot ? "Start New Scan" : "Start Scan";
+  const showToolbarActions = canStartManualScan || issueList.length > 0;
 
   const openInFiles = (node: DiskAnalysisTreemapNode) => {
     void navigate({
@@ -531,12 +649,19 @@ function DiskAnalysisPage() {
             <ArrowLeft size={14} />
             <span>Back To Settings</span>
           </Button>
-          {issueList.length > 0 ? (
+          {showToolbarActions ? (
             <div className="disk-analysis-toolbar__actions">
-              <Button variant="secondary" onClick={() => setIsIssuesModalOpen(true)}>
-                <span>View Issues</span>
-                <span>({formatCount(issueList.length)})</span>
-              </Button>
+              {canStartManualScan ? (
+                <Button onClick={startManualScan} disabled={startScanMutation.isPending}>
+                  {startScanMutation.isPending ? "STARTING..." : manualScanLabel}
+                </Button>
+              ) : null}
+              {issueList.length > 0 ? (
+                <Button variant="secondary" onClick={() => setIsIssuesModalOpen(true)}>
+                  <span>View Issues</span>
+                  <span>({formatCount(issueList.length)})</span>
+                </Button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -549,13 +674,13 @@ function DiskAnalysisPage() {
               <div className="disk-analysis-mode-switch">
                 <Button
                   variant={activeView === "cached" ? "primary" : "secondary"}
-                  onClick={() => setViewMode("cached")}
+                  onClick={showCachedView}
                 >
                   Cached
                 </Button>
                 <Button
                   variant={activeView === "live" ? "primary" : "secondary"}
-                  onClick={() => setViewMode("live")}
+                  onClick={openLiveView}
                   disabled={!liveAvailable}
                 >
                   Live
@@ -571,7 +696,7 @@ function DiskAnalysisPage() {
               {streamError ? <SidebarStat label="Stream" value={streamError} tone="bad" /> : null}
             </div>
 
-            {liveJob ? (
+            {activeJob ? (
               <div className="disk-analysis-progress">
                 <div className="disk-analysis-progress__bar">
                   <div
@@ -581,10 +706,10 @@ function DiskAnalysisPage() {
                 </div>
                 <div className="disk-analysis-progress__meta">
                   <span>
-                    {formatCount(liveJob.progress.directoriesCompleted)} /{" "}
-                    {formatCount(liveJob.progress.directoriesDiscovered)} directories
+                    {formatCount(activeJob.progress.directoriesCompleted)} /{" "}
+                    {formatCount(activeJob.progress.directoriesDiscovered)} directories
                   </span>
-                  <span>{formatCount(liveJob.progress.filesDiscovered)} files</span>
+                  <span>{formatCount(activeJob.progress.filesDiscovered)} files</span>
                   <span>{formatBytes(processedBytes)} processed</span>
                 </div>
               </div>
@@ -644,7 +769,7 @@ function DiskAnalysisPage() {
                 onHoverNode={setHoveredPath}
                 onOpenNode={openInFiles}
               />
-            ) : liveJob ? (
+            ) : activeJob ? (
               <div className="disk-analysis-empty">
                 <div className="disk-analysis-empty__title">Assembling live tree</div>
                 <div className="disk-analysis-empty__body">

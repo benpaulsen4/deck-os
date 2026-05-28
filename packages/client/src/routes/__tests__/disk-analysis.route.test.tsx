@@ -372,10 +372,14 @@ describe("disk analysis route", () => {
     renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
 
     expect(await screen.findByRole("button", { name: "Cached" })).toBeInTheDocument();
-    expect(startScanSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Live" })).toBeEnabled();
+    expect(startScanSpy).not.toHaveBeenCalled();
+    expect(MockEventSource.instances).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Live" }));
 
+    expect(startScanSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
     const eventSource = MockEventSource.latest();
     const initialEventSourceCount = MockEventSource.instances.length;
     eventSource.dispatchOpen();
@@ -406,6 +410,138 @@ describe("disk analysis route", () => {
     await waitFor(() =>
       expect(screen.getByDisplayValue("C:\\media")).toBeInTheDocument()
     );
+  });
+
+  it("keeps a fresh cached scan idle until the user explicitly starts a new scan", async () => {
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      activeJob: null,
+    };
+    state.snapshotEnvelope = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      snapshot: {
+        mount: { mount: "C:\\", fs: "ntfs" },
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        root: makeDirectory("C:\\", [
+          makeDirectory("C:\\reports", [makeFile("C:\\reports\\archive.log", 256, "log")]),
+        ]),
+        extensionLegend: [{ extension: "log", colorToken: "disk-ext-1", count: 1, totalBytes: 256 }],
+        totals: {
+          totalBytes: 256,
+          totalFiles: 1,
+          totalDirectories: 2,
+        },
+        issues: [],
+      },
+    };
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    expect(await screen.findByRole("button", { name: "Start New Scan" })).toBeInTheDocument();
+    expect(startScanSpy).not.toHaveBeenCalled();
+    expect(MockEventSource.instances).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Start New Scan" }));
+
+    expect(startScanSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+  });
+
+  it("refreshes cached queries when a live scan ends with status before snapshot", async () => {
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Live" }));
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+    const eventSource = MockEventSource.latest();
+    eventSource.dispatchOpen();
+    eventSource.dispatchMessage("status", {
+      event: "status",
+      job: {
+        ...state.mountState!.activeJob!,
+        phase: "completed",
+      },
+    });
+
+    await waitFor(() =>
+      expect(invalidateQueriesSpy).toHaveBeenCalledWith({
+        queryKey: ["diskAnalysis.getMountState", "C:\\", "ntfs"],
+      })
+    );
+    expect(invalidateQueriesSpy).toHaveBeenCalledWith({
+      queryKey: ["diskAnalysis.getSnapshot", "C:\\", "ntfs"],
+    });
+    expect(startScanSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not auto-start a second scan after a missing-cache live scan completes", async () => {
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "missing",
+      },
+      activeJob: {
+        jobId: "11111111-1111-1111-1111-111111111111",
+        mount: { mount: "C:\\", fs: "ntfs" },
+        phase: "scanning",
+        startedAt: "2026-04-27T00:00:00.000Z",
+        updatedAt: "2026-04-27T00:00:00.000Z",
+        progress: {
+          directoriesDiscovered: 4,
+          directoriesCompleted: 2,
+          filesDiscovered: 10,
+          bytesProcessed: 1024,
+        },
+        issues: [],
+        limits: {
+          maxWorkers: 4,
+          maxPendingDirectories: 1024,
+          maxIndexedNodes: 50000,
+        },
+      },
+    };
+    state.snapshotEnvelope = null;
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    await waitFor(() => expect(startScanSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+    const eventSource = MockEventSource.latest();
+    eventSource.dispatchOpen();
+    eventSource.dispatchMessage("snapshot", {
+      event: "snapshot",
+      job: {
+        ...state.mountState.activeJob!,
+        phase: "completed",
+      },
+      snapshot: {
+        mount: { mount: "C:\\", fs: "ntfs" },
+        generatedAt: "2026-04-27T01:00:00.000Z",
+        root: makeDirectory("C:\\", [makeFile("C:\\done.txt", 128, "txt")]),
+        extensionLegend: [{ extension: "txt", colorToken: "disk-ext-1", count: 1, totalBytes: 128 }],
+        totals: {
+          totalBytes: 128,
+          totalFiles: 1,
+          totalDirectories: 1,
+        },
+        issues: [],
+      },
+    });
+
+    await waitFor(() => expect(screen.getByRole("img", { name: "Disk usage treemap" })).toBeInTheDocument());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(startScanSpy).toHaveBeenCalledTimes(1);
   });
 
   it("double-clicks a file block to reveal it in Files", async () => {

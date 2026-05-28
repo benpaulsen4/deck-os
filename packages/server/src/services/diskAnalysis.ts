@@ -3,7 +3,6 @@ import path from "node:path";
 import crypto from "node:crypto";
 import {
   DiskAnalysisMountStateSchema,
-  DiskAnalysisSnapshotEnvelopeSchema,
   DiskAnalysisSnapshotSchema,
   type DiskAnalysisIssue,
   type DiskAnalysisJobState,
@@ -46,6 +45,15 @@ type DirectoryTask = {
 type PersistedCacheFile = {
   mount: DiskAnalysisMountIdentity;
   snapshot: DiskAnalysisSnapshot;
+  cache?: PersistedCacheMetadata;
+};
+
+type PersistedCacheMetadata = {
+  generatedAt: string;
+  staleAt: string;
+  nodeCount: number;
+  issueCount: number;
+  snapshotBytes: number;
 };
 
 type DiskAnalysisJobInternal = {
@@ -96,6 +104,7 @@ const DEFAULT_LIMITS: DiskAnalysisResourceLimits = {
 
 const jobs = new Map<string, DiskAnalysisJobInternal>();
 const activeJobIdByMount = new Map<string, string>();
+const pendingJobStartByMount = new Map<string, Promise<DiskAnalysisJobInternal | null>>();
 const listenersByJobId = new Map<string, Set<JobListener>>();
 
 function getConfiguredPositiveInt(name: string, fallback: number): number {
@@ -302,45 +311,165 @@ function countIssues(node: DiskAnalysisTreemapNode): number {
   return count;
 }
 
-async function buildSnapshotEnvelope(
+function getStaleAt(generatedAt: string): string {
+  return new Date(new Date(generatedAt).getTime() + CACHE_FRESH_MS).toISOString();
+}
+
+function buildPersistedCacheMetadata(
+  snapshot: DiskAnalysisSnapshot,
+  snapshotBytes: number
+): PersistedCacheMetadata {
+  return {
+    generatedAt: snapshot.generatedAt,
+    staleAt: getStaleAt(snapshot.generatedAt),
+    nodeCount: countNodes(snapshot.root),
+    issueCount: snapshot.issues.length + countIssues(snapshot.root),
+    snapshotBytes,
+  };
+}
+
+function isPersistedCacheMetadata(value: unknown): value is PersistedCacheMetadata {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<PersistedCacheMetadata>;
+  return (
+    typeof candidate.generatedAt === "string" &&
+    !Number.isNaN(new Date(candidate.generatedAt).getTime()) &&
+    typeof candidate.staleAt === "string" &&
+    !Number.isNaN(new Date(candidate.staleAt).getTime()) &&
+    typeof candidate.nodeCount === "number" &&
+    Number.isFinite(candidate.nodeCount) &&
+    candidate.nodeCount >= 0 &&
+    typeof candidate.issueCount === "number" &&
+    Number.isFinite(candidate.issueCount) &&
+    candidate.issueCount >= 0 &&
+    typeof candidate.snapshotBytes === "number" &&
+    Number.isFinite(candidate.snapshotBytes) &&
+    candidate.snapshotBytes >= 0
+  );
+}
+
+function getCacheMetadata(
+  generatedAt: string,
+  persisted?: PersistedCacheMetadata
+): DiskAnalysisMountState["cache"] {
+  return {
+    state: getCacheState(generatedAt),
+    generatedAt,
+    staleAt: persisted?.staleAt ?? getStaleAt(generatedAt),
+    nodeCount: persisted?.nodeCount,
+    issueCount: persisted?.issueCount,
+    snapshotBytes: persisted?.snapshotBytes,
+  };
+}
+
+function buildSnapshotEnvelope(
   mount: DiskAnalysisMountIdentity,
   snapshot: DiskAnalysisSnapshot,
-  snapshotBytes?: number
-): Promise<DiskAnalysisSnapshotEnvelope> {
-  const state = getCacheState(snapshot.generatedAt);
-  const staleAt = new Date(
-    new Date(snapshot.generatedAt).getTime() + CACHE_FRESH_MS
-  ).toISOString();
-  return DiskAnalysisSnapshotEnvelopeSchema.parse({
+  persisted?: PersistedCacheMetadata
+): DiskAnalysisSnapshotEnvelope {
+  return {
     mount,
-    cache: {
-      state,
-      generatedAt: snapshot.generatedAt,
-      staleAt,
-      nodeCount: countNodes(snapshot.root),
-      issueCount: snapshot.issues.length + countIssues(snapshot.root),
-      snapshotBytes,
-    },
+    cache: getCacheMetadata(snapshot.generatedAt, persisted),
     snapshot,
-  });
+  };
+}
+
+async function moveCorruptCache(cachePath: string): Promise<void> {
+  const corruptPath = `${cachePath}.corrupt-${Date.now()}`;
+  await fs.move(cachePath, corruptPath, { overwrite: true }).catch(() => undefined);
+}
+
+async function readPersistedCacheFile(
+  mount: DiskAnalysisMountIdentity
+): Promise<{ parsed: PersistedCacheFile; snapshotBytes: number; cachePath: string } | null> {
+  const cachePath = getCachePath(mount);
+  try {
+    const serialized = await fs.readFile(cachePath, "utf8");
+    return {
+      parsed: JSON.parse(serialized) as PersistedCacheFile,
+      snapshotBytes: Buffer.byteLength(serialized),
+      cachePath,
+    };
+  } catch (error) {
+    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+    if (code === "ENOENT") {
+      return null;
+    }
+    await moveCorruptCache(cachePath);
+    return null;
+  }
+}
+
+function getPersistedGeneratedAt(parsed: PersistedCacheFile): string | null {
+  const generatedAt =
+    parsed &&
+    typeof parsed === "object" &&
+    parsed.snapshot &&
+    typeof parsed.snapshot === "object" &&
+    "generatedAt" in parsed.snapshot
+      ? parsed.snapshot.generatedAt
+      : null;
+  if (typeof generatedAt !== "string") {
+    return null;
+  }
+  return Number.isNaN(new Date(generatedAt).getTime()) ? null : generatedAt;
+}
+
+function getPersistedMount(parsed: PersistedCacheFile): DiskAnalysisMountIdentity | null {
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    parsed.mount &&
+    typeof parsed.mount === "object" &&
+    typeof parsed.mount.mount === "string" &&
+    typeof parsed.mount.fs === "string"
+  ) {
+    return parsed.mount;
+  }
+  return null;
+}
+
+async function readPersistedCacheMetadata(
+  mount: DiskAnalysisMountIdentity
+): Promise<DiskAnalysisMountState["cache"] | null> {
+  const file = await readPersistedCacheFile(mount);
+  if (!file) {
+    return null;
+  }
+  const persistedMount = getPersistedMount(file.parsed);
+  const generatedAt = getPersistedGeneratedAt(file.parsed);
+  if (!persistedMount || !generatedAt) {
+    await moveCorruptCache(file.cachePath);
+    return null;
+  }
+  const persistedCache = isPersistedCacheMetadata(file.parsed.cache)
+    ? file.parsed.cache
+    : undefined;
+  return getCacheMetadata(generatedAt, persistedCache);
 }
 
 async function readPersistedCache(
   mount: DiskAnalysisMountIdentity
 ): Promise<DiskAnalysisSnapshotEnvelope | null> {
-  const cachePath = getCachePath(mount);
-  const exists = await fs.pathExists(cachePath);
-  if (!exists) {
+  const file = await readPersistedCacheFile(mount);
+  if (!file) {
     return null;
   }
   try {
-    const parsed = (await fs.readJson(cachePath)) as PersistedCacheFile;
-    const snapshot = DiskAnalysisSnapshotSchema.parse(parsed.snapshot);
-    const stat = await fs.stat(cachePath);
-    return await buildSnapshotEnvelope(parsed.mount, snapshot, stat.size);
+    const persistedMount = getPersistedMount(file.parsed);
+    const generatedAt = getPersistedGeneratedAt(file.parsed);
+    if (!persistedMount || !generatedAt) {
+      throw new Error("Invalid persisted disk analysis cache");
+    }
+    const snapshot = file.parsed.snapshot as DiskAnalysisSnapshot;
+    const persistedCache = isPersistedCacheMetadata(file.parsed.cache)
+      ? file.parsed.cache
+      : undefined;
+    return buildSnapshotEnvelope(persistedMount, snapshot, persistedCache);
   } catch {
-    const corruptPath = `${cachePath}.corrupt-${Date.now()}`;
-    await fs.move(cachePath, corruptPath, { overwrite: true }).catch(() => undefined);
+    await moveCorruptCache(file.cachePath);
     return null;
   }
 }
@@ -352,13 +481,16 @@ async function writePersistedCache(
   const cachePath = getCachePath(mount);
   const tempPath = `${cachePath}.${process.pid}.${Date.now()}.tmp`;
   await fs.ensureDir(DISK_ANALYSIS_DIR);
+  const serializedSnapshot = JSON.stringify(snapshot);
+  const cache = buildPersistedCacheMetadata(snapshot, Buffer.byteLength(serializedSnapshot));
   const serialized = JSON.stringify({
     mount,
     snapshot,
+    cache,
   } satisfies PersistedCacheFile);
   await fs.writeFile(tempPath, serialized);
   await fs.move(tempPath, cachePath, { overwrite: true });
-  return await buildSnapshotEnvelope(mount, snapshot, Buffer.byteLength(serialized));
+  return buildSnapshotEnvelope(mount, snapshot, cache);
 }
 
 function notifyListeners(jobId: string, event: DiskAnalysisScanEvent) {
@@ -390,6 +522,13 @@ function clearLiveEmitTimer(job: DiskAnalysisJobInternal) {
     clearTimeout(job.liveEmitTimer);
     job.liveEmitTimer = null;
   }
+}
+
+function getActiveJobForMount(mount: DiskAnalysisMountIdentity): DiskAnalysisJobInternal | null {
+  const mountKey = getMountKey(mount);
+  const activeJobId = activeJobIdByMount.get(mountKey);
+  const existing = activeJobId ? jobs.get(activeJobId) : null;
+  return existing && isActivePhase(existing.phase) ? existing : null;
 }
 
 function flushQueuedLiveEvents(job: DiskAnalysisJobInternal) {
@@ -986,9 +1125,8 @@ async function ensureJob(
 ): Promise<DiskAnalysisJobInternal | null> {
   pruneJobs();
   const mountKey = getMountKey(mount);
-  const activeJobId = activeJobIdByMount.get(mountKey);
-  const existing = activeJobId ? jobs.get(activeJobId) : null;
-  if (existing && isActivePhase(existing.phase)) {
+  const existing = getActiveJobForMount(mount);
+  if (existing) {
     return existing;
   }
 
@@ -996,39 +1134,65 @@ async function ensureJob(
     return null;
   }
 
-  const resolvedMount = await ensureMountAvailable(mount);
-  const now = new Date().toISOString();
-  const job: DiskAnalysisJobInternal = {
-    jobId: crypto.randomUUID(),
-    mount: {
-      mount: resolvedMount,
-      fs: mount.fs,
-    },
-    phase: "queued",
-    startedAt: now,
-    updatedAt: now,
-    progress: {
-      directoriesDiscovered: 0,
-      directoriesCompleted: 0,
-      filesDiscovered: 0,
-      bytesProcessed: 0,
-    },
-    issues: [],
-    limits: getLimits(),
-    controller: new AbortController(),
-    createdAtMs: Date.now(),
-    lastLiveEmitAtMs: 0,
-    pendingProgressEmit: false,
-    pendingBranchesByPath: new Map(),
-    liveEmitTimer: null,
-  };
-  jobs.set(job.jobId, job);
-  activeJobIdByMount.set(mountKey, job.jobId);
-  emitStatus(job);
-  queueMicrotask(() => {
-    void runJob(job);
-  });
-  return job;
+  const pendingStart = pendingJobStartByMount.get(mountKey);
+  if (pendingStart) {
+    return await pendingStart;
+  }
+
+  const startPromise = (async () => {
+    const activeJob = getActiveJobForMount(mount);
+    if (activeJob) {
+      return activeJob;
+    }
+
+    const resolvedMount = await ensureMountAvailable(mount);
+    const latestActiveJob = getActiveJobForMount(mount);
+    if (latestActiveJob) {
+      return latestActiveJob;
+    }
+
+    const now = new Date().toISOString();
+    const job: DiskAnalysisJobInternal = {
+      jobId: crypto.randomUUID(),
+      mount: {
+        mount: resolvedMount,
+        fs: mount.fs,
+      },
+      phase: "queued",
+      startedAt: now,
+      updatedAt: now,
+      progress: {
+        directoriesDiscovered: 0,
+        directoriesCompleted: 0,
+        filesDiscovered: 0,
+        bytesProcessed: 0,
+      },
+      issues: [],
+      limits: getLimits(),
+      controller: new AbortController(),
+      createdAtMs: Date.now(),
+      lastLiveEmitAtMs: 0,
+      pendingProgressEmit: false,
+      pendingBranchesByPath: new Map(),
+      liveEmitTimer: null,
+    };
+    jobs.set(job.jobId, job);
+    activeJobIdByMount.set(mountKey, job.jobId);
+    emitStatus(job);
+    queueMicrotask(() => {
+      void runJob(job);
+    });
+    return job;
+  })();
+
+  pendingJobStartByMount.set(mountKey, startPromise);
+  try {
+    return await startPromise;
+  } finally {
+    if (pendingJobStartByMount.get(mountKey) === startPromise) {
+      pendingJobStartByMount.delete(mountKey);
+    }
+  }
 }
 
 async function maybeStartRefreshJob(
@@ -1049,15 +1213,36 @@ async function maybeStartRefreshJob(
   }
 }
 
+function scheduleRefreshJob(mount: DiskAnalysisMountIdentity): void {
+  const mountKey = getMountKey(mount);
+  if (getActiveJobForMount(mount) || pendingJobStartByMount.has(mountKey)) {
+    return;
+  }
+
+  queueMicrotask(() => {
+    void maybeStartRefreshJob(mount).catch((error) => {
+      if (error instanceof DiskAnalysisMountUnavailableError) {
+        return;
+      }
+      console.error("[deckos] Failed to start disk analysis refresh job:", error);
+    });
+  });
+}
+
 export async function getMountState(
   mount: DiskAnalysisMountIdentity
 ): Promise<DiskAnalysisMountState> {
   pruneJobs();
-  const cache = await readPersistedCache(mount);
-  const activeJob = await maybeStartRefreshJob(mount);
+  const cache = await readPersistedCacheMetadata(mount);
+  let activeJob = getActiveJobForMount(mount);
+  if (!cache) {
+    activeJob = activeJob ?? (await ensureJob(mount, { allowAutoStart: true }));
+  } else if (cache.state === "stale" && !activeJob) {
+    scheduleRefreshJob(mount);
+  }
   return DiskAnalysisMountStateSchema.parse({
     mount,
-    cache: cache?.cache ?? {
+    cache: cache ?? {
       state: "missing",
     },
     activeJob: activeJob ? getJobState(activeJob) : null,
@@ -1160,6 +1345,7 @@ export const __testing = {
   resetState() {
     jobs.clear();
     activeJobIdByMount.clear();
+    pendingJobStartByMount.clear();
     listenersByJobId.clear();
   },
   async clearState() {
