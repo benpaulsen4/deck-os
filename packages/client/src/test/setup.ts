@@ -26,6 +26,9 @@ afterEach(() => {
   cleanup();
   apiServer.resetHandlers();
   resetEventSourceMocks();
+  globalThis.localStorage?.clear();
+  globalThis.sessionStorage?.clear();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
   vi.useRealTimers();
 });

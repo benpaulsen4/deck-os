@@ -44,11 +44,13 @@ vi.mock("@tanstack/react-router", () => ({
     children,
     to,
     onClick,
+    activeProps: _activeProps,
     ...rest
   }: {
     children: React.ReactNode;
     to: string;
     onClick?: () => void;
+    activeProps?: unknown;
   }) => (
     <a href={to} onClick={onClick} {...rest}>
       {children}

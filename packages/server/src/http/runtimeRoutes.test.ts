@@ -44,6 +44,13 @@ function createApp() {
   return app;
 }
 
+function getResponseReader(response: Response) {
+  if (!response.body) {
+    throw new Error("Expected response body stream");
+  }
+  return response.body.getReader();
+}
+
 describe("runtimeRoutes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -165,8 +172,7 @@ describe("runtimeRoutes", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/event-stream");
-    expect(res.body).toBeTruthy();
-    const reader = res.body!.getReader();
+    const reader = getResponseReader(res);
     const chunk = await reader.read();
     await reader.cancel();
     const payload = new TextDecoder().decode(chunk.value);
@@ -188,7 +194,7 @@ describe("runtimeRoutes", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/event-stream");
     expect(metricsMock.startMetricsPolling).toHaveBeenCalledTimes(1);
-    const reader = res.body!.getReader();
+    const reader = getResponseReader(res);
     const first = await reader.read();
     await reader.cancel();
     const payload = new TextDecoder().decode(first.value);
@@ -207,7 +213,7 @@ describe("runtimeRoutes", () => {
     const res = await app.request("http://localhost/api/docker/events");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/event-stream");
-    const reader = res.body!.getReader();
+    const reader = getResponseReader(res);
     eventsStream.write('{"status":"start","id":"c1"}\n');
     const first = await reader.read();
     await reader.cancel();
@@ -322,7 +328,7 @@ describe("runtimeRoutes", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/event-stream");
-    const reader = res.body!.getReader();
+    const reader = getResponseReader(res);
     const first = await reader.read();
     await reader.cancel();
     const payload = new TextDecoder().decode(first.value);
@@ -400,7 +406,7 @@ describe("runtimeRoutes", () => {
     );
 
     expect(res.status).toBe(200);
-    const reader = res.body!.getReader();
+    const reader = getResponseReader(res);
     const first = await reader.read();
     const second = await reader.read();
     await reader.cancel();
@@ -441,7 +447,7 @@ describe("runtimeRoutes", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/event-stream");
 
-    const reader = res.body!.getReader();
+    const reader = getResponseReader(res);
     const line = Buffer.from("line-one\n", "utf8");
     const header = Buffer.alloc(8);
     header.writeUInt8(1, 0);

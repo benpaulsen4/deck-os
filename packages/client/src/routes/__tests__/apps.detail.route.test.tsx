@@ -102,6 +102,14 @@ vi.mock("@tanstack/react-query", () => ({
   }),
 }));
 
+function getRouteComponent() {
+  const component = Route.options.component;
+  if (!component) {
+    throw new Error("Route component is not defined");
+  }
+  return component;
+}
+
 describe("apps detail route", () => {
   beforeEach(() => {
     addToastSpy.mockReset();
@@ -114,7 +122,7 @@ describe("apps detail route", () => {
 
   it("shows not found state safely", () => {
     vi.spyOn(Route, "useParams").mockReturnValue({ appId: "missing-app" } as never);
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     expect(screen.getByText("App not found")).toBeInTheDocument();
   });
@@ -129,7 +137,7 @@ describe("apps detail route", () => {
         url: "javascript:alert(1)",
       },
     };
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     const { rerender } = render(<Component />);
     expect(screen.queryByText("OPEN")).not.toBeInTheDocument();
 
@@ -156,7 +164,7 @@ describe("apps detail route", () => {
         url: "https://example.com",
       },
     };
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     fireEvent.click(screen.getByRole("button", { name: "DELETE" }));
     expect(deleteSpy).not.toHaveBeenCalled();
@@ -213,7 +221,7 @@ describe("apps detail route", () => {
       ],
     };
 
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
 
     expect(screen.getAllByRole("button", { name: "REMOVE" })).toHaveLength(1);
@@ -225,7 +233,12 @@ describe("apps detail route", () => {
       )
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole("button", { name: "REMOVE" })[1]!);
+    const removeButtons = screen.getAllByRole("button", { name: "REMOVE" });
+    const confirmRemoveButton = removeButtons[1];
+    if (!confirmRemoveButton) {
+      throw new Error("Expected remove confirmation button");
+    }
+    fireEvent.click(confirmRemoveButton);
 
     await waitFor(() =>
       expect(removeContainerSpy).toHaveBeenCalledWith({

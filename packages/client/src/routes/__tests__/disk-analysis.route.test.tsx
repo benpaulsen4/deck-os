@@ -242,6 +242,14 @@ function makeDirectory(path: string, children: DiskTreeNode[]): DiskTreeNode {
   };
 }
 
+function getActiveJob() {
+  const activeJob = state.mountState?.activeJob;
+  if (!activeJob) {
+    throw new Error("Expected active disk analysis job");
+  }
+  return activeJob;
+}
+
 describe("disk analysis route", () => {
   beforeEach(() => {
     vi.stubGlobal(
@@ -404,10 +412,11 @@ describe("disk analysis route", () => {
     const eventSource = MockEventSource.latest();
     const initialEventSourceCount = MockEventSource.instances.length;
     eventSource.dispatchOpen();
+    const activeJob = getActiveJob();
     eventSource.dispatchMessage("progress", {
       event: "progress",
       job: {
-        ...state.mountState!.activeJob!,
+        ...activeJob,
         progress: {
           directoriesDiscovered: 5,
           directoriesCompleted: 2,
@@ -486,10 +495,11 @@ describe("disk analysis route", () => {
 
     const eventSource = MockEventSource.latest();
     eventSource.dispatchOpen();
+    const activeJob = getActiveJob();
     eventSource.dispatchMessage("status", {
       event: "status",
       job: {
-        ...state.mountState!.activeJob!,
+        ...activeJob,
         phase: "completed",
       },
     });
@@ -558,10 +568,11 @@ describe("disk analysis route", () => {
 
     const eventSource = MockEventSource.latest();
     eventSource.dispatchOpen();
+    const activeJob = getActiveJob();
     eventSource.dispatchMessage("snapshot", {
       event: "snapshot",
       job: {
-        ...state.mountState.activeJob!,
+        ...activeJob,
         phase: "completed",
       },
       snapshot: {

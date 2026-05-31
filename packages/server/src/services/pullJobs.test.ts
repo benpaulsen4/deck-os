@@ -1,4 +1,23 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import type { App } from "../lib/schema.js";
+import type { PullOverallProgress } from "./docker.js";
+
+function createMockApp(): App {
+  return {
+    id: "my-app",
+    metadata: {
+      id: "my-app",
+      name: "My App",
+      icon: "",
+      url: "",
+      description: "",
+      order: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    },
+    composeYaml: "services:\n  web:\n    image: nginx:latest\n",
+  };
+}
 
 async function loadPullJobsModule() {
   vi.resetModules();
@@ -13,8 +32,8 @@ async function loadPullJobsModule() {
   const docker = await import("./docker.js");
   return {
     pullJobs,
-    apps: apps as any,
-    docker: docker as any,
+    getAppMock: vi.mocked(apps.getApp),
+    pullImagesWithProgressMock: vi.mocked(docker.pullImagesWithProgress),
   };
 }
 
@@ -24,22 +43,19 @@ describe("pullJobs service", () => {
   });
 
   test("startPullJob rejects when app does not exist", async () => {
-    const { pullJobs, apps } = await loadPullJobsModule();
-    apps.getApp.mockResolvedValue(null);
+    const { pullJobs, getAppMock } = await loadPullJobsModule();
+    getAppMock.mockResolvedValue(null);
 
     await expect(pullJobs.startPullJob("missing-app")).rejects.toThrow("App not found");
   });
 
   test("startPullJob deduplicates active jobs per app and publishes completion", async () => {
-    const { pullJobs, apps, docker } = await loadPullJobsModule();
-    apps.getApp.mockResolvedValue({
-      id: "my-app",
-      composeYaml: "services:\n  web:\n    image: nginx:latest\n",
-    });
+    const { pullJobs, getAppMock, pullImagesWithProgressMock } = await loadPullJobsModule();
+    getAppMock.mockResolvedValue(createMockApp());
 
     let resolvePull: () => void = () => undefined;
-    docker.pullImagesWithProgress.mockImplementation(
-      (_images: string[], onProgress: (p: unknown) => void) =>
+    pullImagesWithProgressMock.mockImplementation(
+      (_images: string[], onProgress: (progress: PullOverallProgress) => void) =>
         new Promise<void>((resolve) => {
           resolvePull = resolve;
           onProgress({
@@ -58,7 +74,7 @@ describe("pullJobs service", () => {
     const second = await pullJobs.startPullJob("my-app");
 
     expect(second.jobId).toBe(first.jobId);
-    expect(docker.pullImagesWithProgress).toHaveBeenCalledTimes(1);
+    expect(pullImagesWithProgressMock).toHaveBeenCalledTimes(1);
 
     const updates: Array<{ status: string; percent: number }> = [];
     const unsubscribe = pullJobs.subscribeToPullJob(first.jobId, (snapshot) => {
@@ -76,15 +92,16 @@ describe("pullJobs service", () => {
   });
 
   test("cancelPullJob aborts running job and error state is observable", async () => {
-    const { pullJobs, apps, docker } = await loadPullJobsModule();
-    apps.getApp.mockResolvedValue({
-      id: "my-app",
-      composeYaml: "services:\n  web:\n    image: nginx:latest\n",
-    });
+    const { pullJobs, getAppMock, pullImagesWithProgressMock } = await loadPullJobsModule();
+    getAppMock.mockResolvedValue(createMockApp());
 
     let capturedSignal: AbortSignal | undefined;
-    docker.pullImagesWithProgress.mockImplementation(
-      (_images: string[], _onProgress: (p: unknown) => void, signal?: AbortSignal) =>
+    pullImagesWithProgressMock.mockImplementation(
+      (
+        _images: string[],
+        _onProgress: (progress: PullOverallProgress) => void,
+        signal?: AbortSignal
+      ) =>
         new Promise<void>((_resolve, reject) => {
           capturedSignal = signal;
           signal?.addEventListener("abort", () => reject(new Error("Pull aborted")));

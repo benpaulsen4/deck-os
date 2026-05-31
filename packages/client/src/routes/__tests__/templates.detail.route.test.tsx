@@ -99,6 +99,14 @@ vi.mock("../../components/ui/CodeEditor", () => ({
   ),
 }));
 
+function getRouteComponent() {
+  const component = Route.options.component;
+  if (!component) {
+    throw new Error("Route component is not defined");
+  }
+  return component;
+}
+
 describe("template detail route", () => {
   beforeEach(() => {
     navigateSpy.mockReset();
@@ -110,7 +118,7 @@ describe("template detail route", () => {
   });
 
   it("renders template detail shell", () => {
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     expect(screen.getByText("Template One")).toBeInTheDocument();
     expect(screen.getByText("COMPOSE")).toBeInTheDocument();
@@ -118,7 +126,7 @@ describe("template detail route", () => {
   });
 
   it("rolls back app creation on deploy-and-start failure", async () => {
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     fireEvent.click(screen.getByRole("button", { name: "DEPLOY & START" }));
     fireEvent.click(await screen.findByText("FAIL_PULL"));
@@ -127,7 +135,7 @@ describe("template detail route", () => {
   });
 
   it("navigates directly in deploy-only mode", async () => {
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     fireEvent.click(screen.getByRole("button", { name: "DEPLOY" }));
     await waitFor(() =>
@@ -140,7 +148,7 @@ describe("template detail route", () => {
   });
 
   it("sends composeOverride only when editing is enabled", async () => {
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     fireEvent.click(screen.getByRole("button", { name: "DEPLOY" }));
     await waitFor(() => expect(deploySpy).toHaveBeenCalledTimes(1));

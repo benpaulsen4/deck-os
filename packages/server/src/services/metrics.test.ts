@@ -16,10 +16,12 @@ async function loadMetricsModule(options?: {
   cpuTempThrows?: boolean;
 }) {
   vi.resetModules();
-  const readFileMock: any = vi.fn(async (_path: string, _encoding: string) => {
-    throw new Error("ENOENT");
-  });
-  const readdirMock: any = vi.fn(async (_path: string) => []);
+  const readFileMock = vi.fn<(path: string, encoding: string) => Promise<string>>(
+    async (_path: string, _encoding: string) => {
+      throw new Error("ENOENT");
+    }
+  );
+  const readdirMock = vi.fn<(path: string) => Promise<string[]>>(async (_path: string) => []);
 
   if (options?.useLinuxRAPL) {
     let energyIndex = 0;

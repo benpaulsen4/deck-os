@@ -59,6 +59,14 @@ class ResizeObserverMock {
   disconnect() {}
 }
 
+function getRouteComponent() {
+  const component = Route.options.component;
+  if (!component) {
+    throw new Error("Route component is not defined");
+  }
+  return component;
+}
+
 describe("templates storefront route", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -72,7 +80,7 @@ describe("templates storefront route", () => {
   });
 
   it("shows empty state and debounces query text", () => {
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     expect(screen.getByText("NO TEMPLATES FOUND")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("SEARCH"), { target: { value: " jelly " } });
@@ -86,7 +94,7 @@ describe("templates storefront route", () => {
       total: 100,
       categories: ["media"],
     };
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     fireEvent.change(screen.getByLabelText("SEARCH"), { target: { value: "reset me" } });
     vi.advanceTimersByTime(260);
@@ -110,7 +118,7 @@ describe("templates storefront route", () => {
       total: 1,
       categories: [],
     };
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     const { container } = render(<Component />);
     const link = container.querySelector("[data-template-id='tpl-99']");
     expect(link).toBeTruthy();

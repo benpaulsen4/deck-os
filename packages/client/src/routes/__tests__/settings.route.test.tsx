@@ -101,6 +101,14 @@ vi.mock("@tanstack/react-query", () => ({
   },
 }));
 
+function getRouteComponent() {
+  const component = Route.options.component;
+  if (!component) {
+    throw new Error("Route component is not defined");
+  }
+  return component;
+}
+
 describe("settings route", () => {
   beforeEach(() => {
     addToastSpy.mockReset();
@@ -116,7 +124,7 @@ describe("settings route", () => {
   });
 
   it("blocks invalid passcode before auth API call", () => {
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     fireEvent.click(screen.getAllByRole("button", { name: "ENABLE PASSCODE" })[0]);
     fireEvent.change(screen.getByLabelText("NEW PASSCODE"), { target: { value: "12" } });
@@ -127,7 +135,7 @@ describe("settings route", () => {
   });
 
   it("emits unauthorized lock event after successful security actions", async () => {
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     fireEvent.click(screen.getAllByRole("button", { name: "ENABLE PASSCODE" })[0]);
     fireEvent.change(screen.getByLabelText("NEW PASSCODE"), { target: { value: "1234" } });
@@ -137,7 +145,7 @@ describe("settings route", () => {
   });
 
   it("shows correct update check and apply status transitions", async () => {
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     fireEvent.click(screen.getByRole("button", { name: "CHECK NOW" }));
     await waitFor(() => expect(checkForUpdatesSpy).toHaveBeenCalledTimes(1));
@@ -147,7 +155,7 @@ describe("settings route", () => {
   });
 
   it("opens disk analysis for a selected mount", () => {
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
     expect(navigateSpy).toHaveBeenCalledWith({

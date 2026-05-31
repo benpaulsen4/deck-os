@@ -24,7 +24,7 @@ async function loadTemplatesModule() {
   const apps = await import("./apps.js");
   return {
     templates,
-    apps: apps as any,
+    createAppMock: vi.mocked(apps.createApp),
   };
 }
 
@@ -115,7 +115,7 @@ describe("templates service", () => {
     );
     process.env.DECKOS_TEMPLATES_DIR = root;
 
-    const { templates, apps } = await loadTemplatesModule();
+    const { templates, createAppMock } = await loadTemplatesModule();
     await expect(
       templates.deployTemplate({
         templateId: "deploy-template",
@@ -136,8 +136,12 @@ describe("templates service", () => {
       parameters: { MODE: "prod", PORT: "9090" },
     });
 
-    expect(apps.createApp).toHaveBeenCalledTimes(1);
-    const composeYaml = apps.createApp.mock.calls[0][4] as string;
+    expect(createAppMock).toHaveBeenCalledTimes(1);
+    const composeYaml = createAppMock.mock.calls[0]?.[4];
+    expect(typeof composeYaml).toBe("string");
+    if (typeof composeYaml !== "string") {
+      throw new Error("Expected compose YAML to be passed to createApp");
+    }
     expect(composeYaml).toContain("9090:80");
     expect(composeYaml).toContain("MODE=prod");
     expect(composeYaml).not.toContain("{{");

@@ -332,7 +332,11 @@ function layoutNodes(
     }
 
     if (secondGroup.length === 0) {
-      secondGroup.push(firstGroup.pop()!);
+      const movedItem = firstGroup.pop();
+      if (!movedItem) {
+        return;
+      }
+      secondGroup.push(movedItem);
     }
 
     const firstWeight = sumWeight(firstGroup);

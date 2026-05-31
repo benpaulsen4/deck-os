@@ -86,7 +86,7 @@ describe("selfUpdate service", () => {
     fsPromisesMock.stat.mockImplementation(async (p: string) => {
       const normalized = p.replace(/\\/g, "/");
       if (normalized.endsWith("/releases/0.3.0/packages/server/dist/index.js")) {
-        return {} as any;
+        return {};
       }
       throw new Error("ENOENT");
     });
@@ -181,7 +181,7 @@ describe("selfUpdate service", () => {
         throw new Error("ENOENT");
       }
       if (normalized.endsWith("/releases/0.4.0.tmp/packages/server/dist/index.js")) {
-        return {} as any;
+        return {};
       }
       throw new Error("ENOENT");
     });
@@ -189,7 +189,7 @@ describe("selfUpdate service", () => {
       { name: "0.2.0", isDirectory: () => true },
       { name: "0.3.0", isDirectory: () => true },
       { name: "0.4.0", isDirectory: () => true },
-    ] as any);
+    ]);
     const exitSpy = vi
       .spyOn(process, "exit")
       .mockImplementation(((() => undefined) as unknown) as never);
@@ -276,14 +276,14 @@ describe("selfUpdate service", () => {
         throw new Error("ENOENT");
       }
       if (normalized.endsWith("/releases/0.4.1.tmp/packages/server/dist/index.js")) {
-        return {} as any;
+        return {};
       }
       throw new Error("ENOENT");
     });
     fsPromisesMock.readdir.mockResolvedValue([
       { name: "0.4.0", isDirectory: () => true },
       { name: "0.4.1", isDirectory: () => true },
-    ] as any);
+    ]);
     const exitSpy = vi
       .spyOn(process, "exit")
       .mockImplementation(((() => undefined) as unknown) as never);

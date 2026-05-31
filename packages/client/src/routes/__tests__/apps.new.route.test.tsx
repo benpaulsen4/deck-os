@@ -75,6 +75,14 @@ vi.mock("../../components/ui/PullProgress", () => ({
     ) : null,
 }));
 
+function getRouteComponent() {
+  const component = Route.options.component;
+  if (!component) {
+    throw new Error("Route component is not defined");
+  }
+  return component;
+}
+
 describe("apps new route", () => {
   beforeEach(() => {
     deleteSpy.mockReset();
@@ -84,13 +92,13 @@ describe("apps new route", () => {
   });
 
   it("disables create when required fields missing", () => {
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     expect(screen.getByRole("button", { name: "CREATE & DEPLOY" })).toBeDisabled();
   });
 
   it("rolls back app on pull failure", async () => {
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     fireEvent.change(screen.getByLabelText("APP NAME"), { target: { value: "My App" } });
     fireEvent.click(screen.getByRole("button", { name: "CREATE & DEPLOY" }));
@@ -100,7 +108,7 @@ describe("apps new route", () => {
   });
 
   it("navigates to app detail after successful create pull and deploy", async () => {
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     fireEvent.change(screen.getByLabelText("APP NAME"), { target: { value: "My App" } });
     fireEvent.click(screen.getByRole("button", { name: "CREATE & DEPLOY" }));

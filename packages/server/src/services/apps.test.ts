@@ -147,6 +147,7 @@ describe("apps service", () => {
   test("listApps skips invalid app directories and continues", async () => {
     const dataDir = await createTempDir("deckos-apps-list-skip-");
     const apps = await loadAppsModule(dataDir);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
     const compose = "services:\n  web:\n    image: nginx:latest\n";
     const created = await apps.createApp("Healthy", "", "", "", compose);
     const appsDir = path.join(dataDir, "apps");

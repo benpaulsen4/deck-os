@@ -78,6 +78,14 @@ vi.mock("../../components/layout/AppRow", () => ({
   ),
 }));
 
+function getRouteComponent() {
+  const component = Route.options.component;
+  if (!component) {
+    throw new Error("Route component is not defined");
+  }
+  return component;
+}
+
 describe("apps list route", () => {
   beforeEach(() => {
     appsData.splice(0, appsData.length, { id: "app-1", name: "One" });
@@ -88,7 +96,7 @@ describe("apps list route", () => {
   });
 
   it("dispatches start action mutation", () => {
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     fireEvent.click(screen.getByText("START"));
     expect(startSpy).toHaveBeenCalledWith({ appId: "app-1" });
@@ -97,7 +105,7 @@ describe("apps list route", () => {
   });
 
   it("opens delete confirmation and deletes only after confirm", () => {
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     fireEvent.click(screen.getByText("DELETE_ACTION"));
     expect(deleteSpy).not.toHaveBeenCalled();
@@ -106,7 +114,7 @@ describe("apps list route", () => {
   });
 
   it("navigates users to template and custom creation links", () => {
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     expect(screen.getByText("+ TEMPLATED APP")).toBeInTheDocument();
     expect(screen.getByText("+ CUSTOM APP")).toBeInTheDocument();

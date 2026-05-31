@@ -16,6 +16,7 @@ describe("useDockerEvents", () => {
   beforeEach(() => {
     fetchAuthStatusMock.mockReset();
     emitUnauthorizedEventMock.mockReset();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.useRealTimers();
     MockEventSource.reset();
     useConnectionStore.setState({

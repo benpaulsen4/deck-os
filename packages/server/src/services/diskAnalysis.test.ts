@@ -184,8 +184,11 @@ describe("diskAnalysis service", () => {
       refreshState = nextState.activeJob ? diskAnalysis.getJob(nextState.activeJob.jobId) : null;
     }
     expect(refreshState).not.toBeNull();
+    if (!refreshState) {
+      throw new Error("Expected background refresh job");
+    }
 
-    const refreshedJob = await waitForTerminalJob(diskAnalysis, refreshState!.jobId);
+    const refreshedJob = await waitForTerminalJob(diskAnalysis, refreshState.jobId);
     expect(refreshedJob?.phase).toBe("completed");
     const refreshedSnapshot = await diskAnalysis.getCachedSnapshot(mount);
     expect(refreshedSnapshot?.cache.state).toBe("fresh");

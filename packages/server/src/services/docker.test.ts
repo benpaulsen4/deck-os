@@ -2,6 +2,23 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 
+type MockContainerSummary = {
+  Id: string;
+  Names: string[];
+  Image: string;
+  ImageID: string;
+  Command: string;
+  Created: number;
+  Status: string;
+  Labels: Record<string, string>;
+};
+
+type MockContainerHandle = {
+  inspect?: () => Promise<unknown>;
+  stats?: () => Promise<unknown>;
+  remove?: (options: { force: boolean }) => Promise<void>;
+};
+
 const execFileMock = vi.hoisted(() => vi.fn());
 const spawnMock = vi.hoisted(() => vi.fn());
 const getComposePathMock = vi.hoisted(() => vi.fn(async () => "/tmp/app/docker-compose.yml"));
@@ -13,9 +30,12 @@ const dockerClient = vi.hoisted(() => ({
   modem: {
     followProgress: vi.fn(),
   },
-  listContainers: vi.fn(async () => []),
-  getContainer: vi.fn(),
+  listContainers: vi.fn<() => Promise<MockContainerSummary[]>>(async () => []),
+  getContainer: vi.fn<(id: string) => MockContainerHandle>(),
 }));
+
+const listContainersMock = vi.mocked(dockerClient.listContainers);
+const getContainerMock = vi.mocked(dockerClient.getContainer);
 
 vi.mock("child_process", () => ({
   execFile: execFileMock,
@@ -119,7 +139,7 @@ describe("docker service", () => {
   });
 
   test("getStackContainers maps docker inspect data to API shape", async () => {
-    (dockerClient.listContainers as any).mockResolvedValue([
+    listContainersMock.mockResolvedValue([
       {
         Id: "cid-1",
         Names: ["/app-web-1"],
@@ -131,7 +151,7 @@ describe("docker service", () => {
         Labels: { "com.docker.compose.project": "app-project" },
       },
     ]);
-    (dockerClient.getContainer as any).mockReturnValue({
+    getContainerMock.mockReturnValue({
       inspect: vi.fn(async () => ({
         State: {
           Status: "running",
@@ -167,7 +187,7 @@ describe("docker service", () => {
   });
 
   test("getStackStatus aggregates running/stopped/restarting counts", async () => {
-    (dockerClient.listContainers as any).mockResolvedValue([
+    listContainersMock.mockResolvedValue([
       {
         Id: "cid-run",
         Names: ["/run"],
@@ -189,7 +209,7 @@ describe("docker service", () => {
         Labels: {},
       },
     ]);
-    (dockerClient.getContainer as any).mockImplementation((id: string) => ({
+    getContainerMock.mockImplementation((id: string) => ({
       inspect: vi.fn(async () =>
         id === "cid-run"
           ? {
@@ -225,7 +245,8 @@ describe("docker service", () => {
   });
 
   test("getContainerStats computes rounded percentages and handles failures", async () => {
-    (dockerClient.getContainer as any).mockReturnValue({
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    getContainerMock.mockReturnValue({
       stats: vi.fn(async () => ({
         cpu_stats: {
           cpu_usage: { total_usage: 2500 },
@@ -250,7 +271,7 @@ describe("docker service", () => {
       memoryBytes: 400,
     });
 
-    (dockerClient.getContainer as any).mockReturnValue({
+    getContainerMock.mockReturnValue({
       stats: vi.fn(async () => {
         throw new Error("boom");
       }),
@@ -261,7 +282,7 @@ describe("docker service", () => {
 
   test("removeContainer forces removal for a single container id", async () => {
     const removeMock = vi.fn(async () => undefined);
-    (dockerClient.getContainer as any).mockReturnValue({
+    getContainerMock.mockReturnValue({
       remove: removeMock,
     });
 

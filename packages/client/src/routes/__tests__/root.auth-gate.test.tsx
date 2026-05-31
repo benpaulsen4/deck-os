@@ -43,12 +43,20 @@ vi.mock("@tanstack/react-router", async () => {
   };
 });
 
+function getRouteComponent() {
+  const component = Route.options.component;
+  if (!component) {
+    throw new Error("Route component is not defined");
+  }
+  return component;
+}
+
 describe("root auth gate route", () => {
   it("shows auth gate while locked", () => {
     authState.authEnabled = true;
     authState.authUnlocked = false;
     authState.authChecking = false;
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     expect(screen.getByText("AUTH_GATE")).toBeInTheDocument();
   });
@@ -57,7 +65,7 @@ describe("root auth gate route", () => {
     authState.authEnabled = true;
     authState.authUnlocked = true;
     authState.authChecking = false;
-    const Component = Route.options.component!;
+    const Component = getRouteComponent();
     render(<Component />);
     expect(screen.getByText("TOP_BAR")).toBeInTheDocument();
     expect(screen.getByText("OUTLET")).toBeInTheDocument();

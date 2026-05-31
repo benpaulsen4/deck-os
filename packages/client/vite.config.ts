@@ -8,6 +8,8 @@ export default defineConfig({
     tanstackRouter({
       target: "react",
       autoCodeSplitting: true,
+      routeFileIgnorePattern:
+        "(^|/)(__tests__/.*|.*\\.(test|spec)\\.(ts|tsx)|.*\\.(components|treemap)\\.tsx)$",
     }),
     react(),
   ],
