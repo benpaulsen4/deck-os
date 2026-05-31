@@ -172,7 +172,7 @@ function getAdaptiveSmallFileThresholdBytes(
 }
 
 function resolveMountPath(mountPath: string): string {
-  if (/^[A-Za-z]:$/.test(mountPath)) {
+  if (process.platform === "win32" && /^[A-Za-z]:$/.test(mountPath)) {
     return `${mountPath}\\`;
   }
   if (!path.isAbsolute(mountPath)) {

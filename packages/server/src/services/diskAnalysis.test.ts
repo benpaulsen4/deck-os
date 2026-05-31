@@ -249,9 +249,14 @@ describe("diskAnalysis service", () => {
     const dataDir = await createTempDir("deckos-disk-analysis-data-");
     const diskAnalysis = await loadDiskAnalysisModule(dataDir);
 
+  if (process.platform === "win32") {
     const started = await diskAnalysis.startScan({ mount: "C:", fs: "ntfs" });
-
     expect(started.streamPath).toContain("mount=C%3A%5C");
+  } else {
+    await expect(
+      diskAnalysis.startScan({ mount: "C:", fs: "ntfs" })
+    ).rejects.toThrow(/absolute path/i);
+  }
 
     await diskAnalysis.__testing.clearState();
     await fs.remove(dataDir);
@@ -424,7 +429,7 @@ describe("diskAnalysis service", () => {
     const mountDir = await createTempDir("deckos-disk-analysis-mount-");
     await fs.writeFile(path.join(mountDir, "first.bin"), Buffer.alloc(1024 * 1024 + 128));
 
-    let diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
     const mount = { mount: mountDir, fs: "testfs" };
     const firstStart = await diskAnalysis.startScan(mount);
     await waitForTerminalJob(diskAnalysis, firstStart.jobId);
