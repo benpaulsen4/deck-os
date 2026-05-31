@@ -159,6 +159,11 @@ function DiskAnalysisPage() {
   const cachedSnapshot = snapshotQuery.data?.snapshot ?? null;
   const mountState = mountStateQuery.data ?? null;
   const activeJob = liveJob ?? mountState?.activeJob ?? null;
+  const diskAnalysisQueriesSettled =
+    !mountStateQuery.isLoading &&
+    !mountStateQuery.isFetching &&
+    !snapshotQuery.isLoading &&
+    !snapshotQuery.isFetching;
 
   const resetLiveState = () => {
     setLiveRoot(null);
@@ -229,6 +234,9 @@ function DiskAnalysisPage() {
     if (!mount || !mountState) {
       return;
     }
+    if (!diskAnalysisQueriesSettled) {
+      return;
+    }
     if (mountState.cache.state !== "missing") {
       return;
     }
@@ -250,6 +258,7 @@ function DiskAnalysisPage() {
     mountState?.activeJob?.jobId,
     mountKey,
     streamPath,
+    diskAnalysisQueriesSettled,
     hasRequestedLive,
     hasTerminalLiveResult,
   ]);
@@ -575,7 +584,7 @@ function DiskAnalysisPage() {
       : "Preparing";
   const processedBytes = activeJob?.progress.bytesProcessed ?? totals?.totalBytes ?? 0;
   const canStartManualScan =
-    !!mount && !mountStateQuery.isLoading && !snapshotQuery.isLoading && !mountState?.activeJob;
+    !!mount && diskAnalysisQueriesSettled && !mountState?.activeJob;
   const manualScanLabel = cachedSnapshot ? "Start New Scan" : "Start Scan";
   const showToolbarActions = canStartManualScan || issueList.length > 0;
 

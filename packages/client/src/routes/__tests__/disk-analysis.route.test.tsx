@@ -60,6 +60,10 @@ const {
   state: {
     mountState: null as DiskAnalysisMountState | null,
     snapshotEnvelope: null as DiskAnalysisSnapshotEnvelope | null,
+    mountStateLoading: false,
+    mountStateFetching: false,
+    snapshotLoading: false,
+    snapshotFetching: false,
     fileLists: {} as Record<string, QueryDirectoryListing>,
   },
 }));
@@ -173,15 +177,15 @@ vi.mock("@tanstack/react-query", async () => {
       if (key === "diskAnalysis.getMountState") {
         return {
           data: state.mountState,
-          isLoading: false,
-          isFetching: false,
+          isLoading: state.mountStateLoading,
+          isFetching: state.mountStateFetching,
         };
       }
       if (key === "diskAnalysis.getSnapshot") {
         return {
           data: state.snapshotEnvelope,
-          isLoading: false,
-          isFetching: false,
+          isLoading: state.snapshotLoading,
+          isFetching: state.snapshotFetching,
         };
       }
       if (key === "files.list") {
@@ -305,6 +309,10 @@ describe("disk analysis route", () => {
     emitUnauthorizedEventSpy.mockClear();
     fetchAuthStatusSpy.mockClear();
     fetchAuthStatusSpy.mockResolvedValue({ enabled: false, unlocked: true });
+    state.mountStateLoading = false;
+    state.mountStateFetching = false;
+    state.snapshotLoading = false;
+    state.snapshotFetching = false;
 
     state.mountState = {
       mount: { mount: "C:\\", fs: "ntfs" },
@@ -485,6 +493,25 @@ describe("disk analysis route", () => {
 
     expect(startScanSpy).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+  });
+
+  it("does not auto-start while the snapshot query is still loading", async () => {
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "missing",
+      },
+      activeJob: null,
+    };
+    state.snapshotEnvelope = null;
+    state.snapshotLoading = true;
+    state.snapshotFetching = true;
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    expect(await screen.findByText("Loading analysis state")).toBeInTheDocument();
+    expect(startScanSpy).not.toHaveBeenCalled();
+    expect(MockEventSource.instances).toHaveLength(0);
   });
 
   it("refreshes cached queries when a live scan ends with status before snapshot", async () => {

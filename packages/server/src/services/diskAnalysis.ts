@@ -1360,6 +1360,22 @@ export const __testing = {
     listenersByJobId.clear();
   },
   async clearState() {
+    for (const job of jobs.values()) {
+      if (isActivePhase(job.phase)) {
+        job.controller.abort();
+      }
+      clearLiveEmitTimer(job);
+    }
+
+    await Promise.resolve();
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if ([...jobs.values()].every((job) => !isActivePhase(job.phase))) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
     this.resetState();
     await fs.remove(DISK_ANALYSIS_DIR).catch(() => undefined);
   },
