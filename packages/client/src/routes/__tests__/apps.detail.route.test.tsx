@@ -116,12 +116,12 @@ describe("apps detail route", () => {
     navigateSpy.mockReset();
     deleteSpy.mockReset();
     removeContainerSpy.mockReset();
+    vi.spyOn(Route, "useParams").mockReturnValue({ appId: "missing-app" } as never);
     state.appData = undefined;
     state.stackData = { running: 0, containers: [] };
   });
 
   it("shows not found state safely", () => {
-    vi.spyOn(Route, "useParams").mockReturnValue({ appId: "missing-app" } as never);
     const Component = getRouteComponent();
     render(<Component />);
     expect(screen.getByText("App not found")).toBeInTheDocument();
