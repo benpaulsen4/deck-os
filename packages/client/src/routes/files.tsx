@@ -47,8 +47,14 @@ import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { CodeEditor } from "../components/ui/CodeEditor";
 import { useToastStore } from "../stores/toast";
 import { authFetch } from "../lib/auth";
+import {
+  FilesRouteSearchSchema,
+  getFilesRouteTargetPath,
+  getPathParent,
+} from "@deckos/contracts";
 
 export const Route = createFileRoute("/files")({
+  validateSearch: (search) => FilesRouteSearchSchema.parse(search),
   component: FilesPage,
 });
 
@@ -354,17 +360,22 @@ function renderEntryIcon(entry: FileListEntry, size: number) {
 }
 
 function FilesPage() {
+  const search = Route.useSearch();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { addToast } = useToastStore();
-  const [requestedPath, setRequestedPath] = useState("");
-  const [pathInput, setPathInput] = useState("");
+  const initialRequestedPath = getFilesRouteTargetPath(search);
+  const [requestedPath, setRequestedPath] = useState(initialRequestedPath);
+  const [pathInput, setPathInput] = useState(initialRequestedPath);
   const [showHidden, setShowHidden] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [sortBy, setSortBy] = useState<SortBy>("name");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   const [selectionAnchorPath, setSelectionAnchorPath] = useState<string | null>(null);
+  const [pendingRevealPath, setPendingRevealPath] = useState<string | null>(
+    search.reveal ?? null
+  );
   const [dragActive, setDragActive] = useState(false);
   const [actionMode, setActionMode] = useState<FileActionMode>(null);
   const [actionInputValue, setActionInputValue] = useState("");
@@ -379,9 +390,16 @@ function FilesPage() {
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const tableScrollRef = useRef<HTMLDivElement | null>(null);
   const gridScrollRef = useRef<HTMLDivElement | null>(null);
+  const entryElementRefs = useRef(new Map<string, HTMLElement>());
   const savedListScrollTopRef = useRef(0);
   const shouldRestoreScrollRef = useRef(false);
   const restoreIntervalRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const nextPath = getFilesRouteTargetPath(search);
+    setRequestedPath((current) => (current === nextPath ? current : nextPath));
+    setPendingRevealPath(search.reveal ?? null);
+  }, [search.path, search.reveal]);
 
   const listQuery = useQuery(
     trpc.files.list.queryOptions(
@@ -465,9 +483,43 @@ function FilesPage() {
   const entries = listQuery.data?.entries ?? [];
 
   useEffect(() => {
+    if (
+      pendingRevealPath &&
+      currentPath &&
+      normalizePathForCompare(getPathParent(pendingRevealPath)) ===
+        normalizePathForCompare(currentPath)
+    ) {
+      return;
+    }
     setSelectedPaths([]);
     setSelectionAnchorPath(null);
-  }, [currentPath]);
+  }, [currentPath, pendingRevealPath]);
+
+  useEffect(() => {
+    if (!pendingRevealPath || !currentPath) {
+      return;
+    }
+    if (normalizePathForCompare(getPathParent(pendingRevealPath)) !== normalizePathForCompare(currentPath)) {
+      return;
+    }
+    const matchedEntry = entries.find(
+      (entry) => normalizePathForCompare(entry.path) === normalizePathForCompare(pendingRevealPath)
+    );
+    if (!matchedEntry) {
+      setSelectedPaths([]);
+      setSelectionAnchorPath(null);
+      setPendingRevealPath(null);
+      return;
+    }
+    setSelectedPaths([matchedEntry.path]);
+    setSelectionAnchorPath(matchedEntry.path);
+    requestAnimationFrame(() => {
+      entryElementRefs.current.get(matchedEntry.path)?.scrollIntoView({
+        block: "nearest",
+      });
+    });
+    setPendingRevealPath(null);
+  }, [currentPath, entries, pendingRevealPath]);
 
   useEffect(() => {
     setForceEditable(false);
@@ -1284,6 +1336,13 @@ function FilesPage() {
                     sortedEntries.map((entry) => (
                       <tr
                         key={entry.path}
+                        ref={(element) => {
+                          if (element) {
+                            entryElementRefs.current.set(entry.path, element);
+                          } else {
+                            entryElementRefs.current.delete(entry.path);
+                          }
+                        }}
                         className={`files-row ${selectedPathSet.has(entry.path) ? "files-row--selected" : ""}`}
                         onClick={(event) => handleItemClick(entry, event)}
                         onMouseDown={(event) => {
@@ -1328,6 +1387,13 @@ function FilesPage() {
                 sortedEntries.map((entry) => (
                   <button
                     key={entry.path}
+                    ref={(element) => {
+                      if (element) {
+                        entryElementRefs.current.set(entry.path, element);
+                      } else {
+                        entryElementRefs.current.delete(entry.path);
+                      }
+                    }}
                     className={`files-grid-item ${selectedPathSet.has(entry.path) ? "files-grid-item--selected" : ""}`}
                     onClick={(event) => handleItemClick(entry, event)}
                     onMouseDown={(event) => {
@@ -1496,10 +1562,18 @@ function TreeNode({
 
   return (
     <div>
-      <button
+      <div
         className={`files-tree-node ${isActive ? "files-tree-node--active" : ""}`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={() => onNavigate(nodePath)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onNavigate(nodePath);
+          }
+        }}
+        role="button"
+        tabIndex={0}
       >
         <span className="files-tree-toggle">
           <button
@@ -1523,7 +1597,7 @@ function TreeNode({
         </span>
         {expanded ? <FolderOpen size={14} /> : <Folder size={14} />}
         <span>{getDisplayName(nodePath)}</span>
-      </button>
+      </div>
       {expanded && (
         <div>
           {nodeQuery.isLoading && !nodeQuery.data ? (

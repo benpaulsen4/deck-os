@@ -118,7 +118,7 @@ export function registerFilesRoutes(app: Hono) {
       const parser = Busboy({
         headers: toNodeHeaders(c.req.raw.headers),
       });
-      const uploaded: string[] = [];
+      const uploadedByIndex: Array<string | undefined> = [];
       let totalBytes = 0;
       let uploadError: unknown = null;
       let filesCount = 0;
@@ -161,6 +161,8 @@ export function registerFilesRoutes(app: Hono) {
           stream.resume();
           return;
         }
+        const uploadIndex = uploadedByIndex.length;
+        uploadedByIndex.push(undefined);
 
         const task = (async () => {
           const targetPath = await filesService.resolveTargetPath(
@@ -192,7 +194,7 @@ export function registerFilesRoutes(app: Hono) {
               limiter,
               createWriteStream(targetPath, { flags: "wx" })
             );
-            uploaded.push(safeName);
+            uploadedByIndex[uploadIndex] = safeName;
           } catch (error) {
             await unlink(targetPath).catch(() => undefined);
             throw error;
@@ -230,6 +232,7 @@ export function registerFilesRoutes(app: Hono) {
         return c.json({ error: "No files uploaded" }, 400);
       }
 
+      const uploaded = uploadedByIndex.filter((name): name is string => typeof name === "string");
       return c.json({ uploaded });
     } catch (error: unknown) {
       if (error instanceof UploadRequestError) {

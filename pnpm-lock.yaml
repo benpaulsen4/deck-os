@@ -97,6 +97,9 @@ importers:
       '@codemirror/view':
         specifier: ^6.39.13
         version: 6.39.13
+      '@deckos/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@dnd-kit/core':
         specifier: ^6.3.1
         version: 6.3.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -183,8 +186,24 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@22.19.10)(jsdom@29.0.1)(msw@2.12.14(@types/node@22.19.10)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.3)
 
+  packages/contracts:
+    dependencies:
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
+    devDependencies:
+      rimraf:
+        specifier: ^6.0.1
+        version: 6.1.2
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
   packages/server:
     dependencies:
+      '@deckos/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@hono/node-server':
         specifier: ^1.19.13
         version: 1.19.13(hono@4.12.18)

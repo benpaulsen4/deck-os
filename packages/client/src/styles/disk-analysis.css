@@ -1,0 +1,563 @@
+.disk-analysis-page {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+.disk-analysis-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 0;
+}
+
+.disk-analysis-toolbar__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.disk-analysis-toolbar__primary-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1;
+}
+
+.disk-analysis-toolbar__back-button {
+  flex-shrink: 0;
+}
+
+.disk-analysis-toolbar__mobile-toggle {
+  display: none;
+  gap: var(--space-1);
+}
+
+.disk-analysis-toolbar__label--compact {
+  display: none;
+}
+
+.disk-analysis-toolbar__issues-count {
+  font-family: var(--font-mono);
+}
+
+.disk-analysis-mode-switch {
+  display: flex;
+  width: 100%;
+  gap: var(--space-1);
+}
+
+.disk-analysis-progress {
+  display: grid;
+  gap: 8px;
+}
+
+.disk-analysis-progress__bar {
+  height: 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  overflow: hidden;
+}
+
+.disk-analysis-progress__fill {
+  height: 100%;
+  background: var(--accent-primary);
+}
+
+.disk-analysis-progress__meta {
+  display: grid;
+  gap: 4px;
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+
+.disk-analysis-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+  gap: var(--space-2);
+  min-height: 0;
+  height: 100%;
+  flex: 1;
+}
+
+.disk-analysis-treemap-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  padding: var(--space-2);
+}
+
+.disk-analysis-treemap {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  max-width: 100%;
+  min-height: 640px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  overflow: hidden;
+}
+
+.disk-analysis-treemap__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  outline: none;
+}
+
+.disk-analysis-treemap__hint {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.disk-analysis-sidebar {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  min-height: 0;
+  min-width: 0;
+  padding: var(--space-3);
+  overflow: auto;
+}
+
+.disk-analysis-meta {
+  display: grid;
+  gap: 8px;
+}
+
+.disk-analysis-meta__row {
+  display: grid;
+  gap: 3px;
+}
+
+.disk-analysis-meta__label {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.disk-analysis-meta__value {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  word-break: break-word;
+}
+
+.disk-analysis-meta__value--mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.disk-analysis-meta__value--bad {
+  color: var(--status-stopped);
+}
+
+.disk-analysis-sidebar-section {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-primary);
+}
+
+.disk-analysis-sidebar-empty {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.disk-analysis-details__content {
+  display: grid;
+  gap: 8px;
+}
+
+.disk-analysis-details__name {
+  font-size: var(--text-lg);
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.disk-analysis-details__type {
+  color: var(--accent-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--text-xs);
+}
+
+.disk-analysis-details__path {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.disk-analysis-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-primary);
+  font-size: var(--text-sm);
+}
+
+.disk-analysis-legend__list,
+.disk-analysis-issues__list {
+  display: grid;
+  gap: 8px;
+}
+
+.disk-analysis-legend__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.disk-analysis-legend__swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.disk-analysis-legend__label {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+.disk-analysis-legend__count {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.disk-analysis-issue {
+  display: grid;
+  gap: 4px;
+  padding: 0;
+}
+
+.disk-analysis-issue__code {
+  color: #ff8aa0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--text-xs);
+}
+
+.disk-analysis-issue__message {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.disk-analysis-issue__path {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  word-break: break-all;
+}
+
+.disk-analysis-empty {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 260px;
+  padding: var(--space-4);
+  text-align: center;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px dashed var(--border-primary);
+}
+
+.disk-analysis-empty--error {
+  border-color: rgba(255, 84, 112, 0.28);
+}
+
+.disk-analysis-empty__title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.disk-analysis-empty__body {
+  max-width: 54ch;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.disk-analysis-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3);
+}
+
+.disk-analysis-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(0, 0, 0, 0.58);
+  cursor: pointer;
+}
+
+.disk-analysis-modal__dialog {
+  position: relative;
+  z-index: 1;
+  width: min(880px, 100%);
+  max-height: min(80vh, 880px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+}
+
+.disk-analysis-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.disk-analysis-modal__title {
+  margin: 6px 0 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.disk-analysis-modal__body {
+  overflow: auto;
+  padding: var(--space-3);
+}
+
+.disk-analysis-modal__toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.disk-analysis-modal__search {
+  display: grid;
+  gap: 6px;
+  min-width: min(320px, 100%);
+  flex: 1;
+}
+
+.disk-analysis-modal__search input {
+  width: 100%;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  color: var(--text-primary);
+  padding: 10px 12px;
+  font-size: var(--text-sm);
+}
+
+.disk-analysis-modal__pagination {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.disk-analysis-modal__pagination-summary,
+.disk-analysis-modal__page-indicator {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.disk-analysis-modal__page-indicator {
+  margin-top: var(--space-2);
+}
+
+.disk-analysis-treemap__popover {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  z-index: 2;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  background: rgba(10, 10, 12, 0.94);
+  border: 1px solid var(--border-active);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32);
+}
+
+.disk-analysis-treemap__popover-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.disk-analysis-treemap__popover-title {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  word-break: break-word;
+}
+
+.disk-analysis-treemap__popover-stats {
+  display: grid;
+  gap: 8px;
+}
+
+.disk-analysis-treemap__popover-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 1100px) {
+  .disk-analysis-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .disk-analysis-toolbar {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .disk-analysis-toolbar__primary-row,
+  .disk-analysis-toolbar__actions,
+  .disk-analysis-toolbar__mobile-toggle {
+    width: 100%;
+  }
+
+  .disk-analysis-toolbar__primary-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-1);
+  }
+
+  .disk-analysis-toolbar__actions {
+    display: contents;
+  }
+
+  .disk-analysis-toolbar__issues-count {
+    display: none;
+  }
+
+  .disk-analysis-toolbar__primary-row .deckos-button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .disk-analysis-toolbar__mobile-toggle {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .disk-analysis-toolbar__mobile-toggle .deckos-button {
+    width: 100%;
+  }
+
+  .disk-analysis-sidebar {
+    display: none;
+    overflow: auto;
+  }
+
+  .disk-analysis-layout--mobile-sidebar-open .disk-analysis-sidebar {
+    display: grid;
+    min-height: 0;
+  }
+
+  .disk-analysis-layout--mobile-sidebar-open .disk-analysis-sidebar,
+  .disk-analysis-layout:not(.disk-analysis-layout--mobile-sidebar-open) .disk-analysis-treemap-panel {
+    height: 100%;
+    overflow: auto;
+  }
+
+  .disk-analysis-layout--mobile-sidebar-open .disk-analysis-treemap-panel {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .disk-analysis-toolbar {
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .disk-analysis-toolbar__label--full {
+    display: none;
+  }
+
+  .disk-analysis-toolbar__label--compact {
+    display: inline;
+  }
+
+  .disk-analysis-toolbar__primary-row .deckos-button,
+  .disk-analysis-toolbar__mobile-toggle .deckos-button,
+  .disk-analysis-toolbar__back-button {
+    min-height: 36px;
+    padding: 6px 6px;
+    font-size: var(--text-xs);
+    letter-spacing: 0.02em;
+    gap: 6px;
+  }
+
+  .disk-analysis-toolbar__mobile-toggle-button span {
+    min-width: 0;
+  }
+
+  .disk-analysis-treemap-panel,
+  .disk-analysis-sidebar {
+    padding: var(--space-2);
+  }
+
+  .disk-analysis-treemap {
+    flex: none;
+    min-height: 0;
+    height: min(72vh, 560px);
+  }
+
+  .disk-analysis-detail-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .disk-analysis-legend__row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .disk-analysis-legend__count {
+    grid-column: auto;
+    justify-self: end;
+  }
+}

@@ -8,6 +8,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const manifestPaths = [
   "package.json",
   "packages/client/package.json",
+  "packages/contracts/package.json",
   "packages/server/package.json",
 ];
 

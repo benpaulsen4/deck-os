@@ -10,6 +10,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(dirname, "./src"),
+      "@deckos/contracts": path.resolve(dirname, "../contracts/src/index.ts"),
     },
   },
   test: {

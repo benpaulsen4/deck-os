@@ -1,0 +1,470 @@
+import fs from "fs-extra";
+import crypto from "node:crypto";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { DiskAnalysisScanEvent, DiskAnalysisMountIdentity } from "@deckos/contracts";
+
+type DiskAnalysisModule = typeof import("./diskAnalysis.js");
+
+const DEFAULT_ENV = {
+  workers: process.env.DECKOS_DISK_ANALYSIS_MAX_WORKERS,
+  pending: process.env.DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES,
+  nodes: process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES,
+  smallThreshold: process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES,
+};
+
+async function createTempDir(prefix: string): Promise<string> {
+  return await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+}
+
+async function loadDiskAnalysisModule(dataDir: string): Promise<DiskAnalysisModule> {
+  vi.resetModules();
+  vi.doMock("../lib/config.js", () => ({
+    DATA_DIR: dataDir,
+  }));
+  return await import("./diskAnalysis.js");
+}
+
+async function waitForTerminalJob(
+  diskAnalysis: DiskAnalysisModule,
+  jobId: string
+): Promise<ReturnType<DiskAnalysisModule["getJob"]>> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const job = diskAnalysis.getJob(jobId);
+    if (
+      job &&
+      job.phase !== "queued" &&
+      job.phase !== "scanning"
+    ) {
+      return job;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for disk analysis job ${jobId}`);
+}
+
+function getMountCacheHash(mount: DiskAnalysisMountIdentity): string {
+  const resolvedMount = path.resolve(mount.mount);
+  const normalizedMount =
+    process.platform === "win32" ? resolvedMount.toLowerCase() : resolvedMount;
+  return crypto.createHash("sha1").update(normalizedMount).digest("hex");
+}
+
+describe("diskAnalysis service", () => {
+  beforeEach(() => {
+    process.env.DECKOS_DISK_ANALYSIS_MAX_WORKERS = "1";
+    process.env.DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES = "128";
+    process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = "1000";
+  });
+
+  afterEach(async () => {
+    process.env.DECKOS_DISK_ANALYSIS_MAX_WORKERS = DEFAULT_ENV.workers;
+    process.env.DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES = DEFAULT_ENV.pending;
+    process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = DEFAULT_ENV.nodes;
+    process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES = DEFAULT_ENV.smallThreshold;
+    vi.resetModules();
+    vi.clearAllMocks();
+  });
+
+  test("scan emits incremental branch events and persists a reusable cache", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.ensureDir(path.join(mountDir, "alpha"));
+    await fs.ensureDir(path.join(mountDir, "beta"));
+    await fs.writeFile(path.join(mountDir, "alpha", "report.txt"), "hello world", "utf8");
+    await fs.writeFile(path.join(mountDir, "beta", "movie.mkv"), Buffer.alloc(64));
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    const events: DiskAnalysisScanEvent[] = [];
+    const unsubscribe = diskAnalysis.subscribeToJob(start.jobId, (event) => {
+      events.push(event);
+    });
+
+    const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+    unsubscribe();
+
+    expect(finalJob?.phase).toBe("completed");
+    expect(events.some((event) => event.event === "progress")).toBe(true);
+    expect(
+      events.some(
+        (event) =>
+          event.event === "branch" &&
+          event.branch.path === mountDir &&
+          event.branch.children.some((child) => child.path.endsWith("alpha")) &&
+          event.branch.children.some((child) => child.path.endsWith("beta"))
+      )
+    ).toBe(true);
+    expect(
+      events.some((event) => event.event === "branch" && event.branch.path.endsWith("alpha"))
+    ).toBe(true);
+    expect(
+      events.some((event) => event.event === "branch" && event.branch.path.endsWith("beta"))
+    ).toBe(true);
+
+    const cached = await diskAnalysis.getCachedSnapshot(mount);
+    expect(cached?.cache.state).toBe("fresh");
+    expect(cached?.snapshot.totals.totalFiles).toBe(2);
+    expect(cached?.snapshot.totals.totalBytes).toBe(75);
+    expect(cached?.snapshot.root.recursiveSize).toBe(75);
+    expect(
+      cached?.snapshot.root.children.every(
+        (child) =>
+          child.type === "directory" &&
+          child.children.some(
+            (grandchild) =>
+              grandchild.type === "file" && grandchild.name.startsWith("Small Files (")
+          )
+      )
+    ).toBe(true);
+    expect(cached?.snapshot.extensionLegend.map((entry) => entry.extension)).toEqual([
+      "mkv",
+      "txt",
+    ]);
+    const alphaDir = cached?.snapshot.root.children.find((child) => child.path.endsWith("alpha"));
+    const betaDir = cached?.snapshot.root.children.find((child) => child.path.endsWith("beta"));
+    expect(alphaDir?.recursiveSize).toBe(11);
+    expect(betaDir?.recursiveSize).toBe(64);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("stale cached snapshot is served immediately and triggers a background regeneration", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.writeFile(path.join(mountDir, "notes.txt"), "cached", "utf8");
+
+    let diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    await waitForTerminalJob(diskAnalysis, start.jobId);
+
+    const cacheFile = path.join(
+      dataDir,
+      "disk-analysis",
+      `${getMountCacheHash(mount)}.json`
+    );
+    const persisted = (await fs.readJson(cacheFile)) as {
+      mount: DiskAnalysisMountIdentity;
+      snapshot: { generatedAt: string };
+    };
+    persisted.snapshot.generatedAt = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    await fs.writeJson(cacheFile, persisted, { spaces: 2 });
+
+    diskAnalysis.__testing.resetState();
+    diskAnalysis = await loadDiskAnalysisModule(dataDir);
+
+    const originalStat = fs.stat.bind(fs);
+    const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (target) => {
+      const targetPath = typeof target === "string" ? target : String(target);
+      if (path.resolve(targetPath) === path.resolve(mountDir)) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return await originalStat(target);
+    });
+
+    const snapshotBeforeRefresh = await diskAnalysis.getCachedSnapshot(mount);
+    expect(snapshotBeforeRefresh?.cache.state).toBe("stale");
+
+    const startedAt = Date.now();
+    const state = await diskAnalysis.getMountState(mount);
+    const elapsedMs = Date.now() - startedAt;
+    expect(state.cache.state).toBe("stale");
+    expect(elapsedMs).toBeLessThan(50);
+    expect(state.activeJob).toBeNull();
+
+    let refreshState = diskAnalysis.getJob(state.activeJob?.jobId ?? "");
+    for (let attempt = 0; attempt < 20 && refreshState === null; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const nextState = await diskAnalysis.getMountState(mount);
+      refreshState = nextState.activeJob ? diskAnalysis.getJob(nextState.activeJob.jobId) : null;
+    }
+    expect(refreshState).not.toBeNull();
+
+    const refreshedJob = await waitForTerminalJob(diskAnalysis, refreshState!.jobId);
+    expect(refreshedJob?.phase).toBe("completed");
+    const refreshedSnapshot = await diskAnalysis.getCachedSnapshot(mount);
+    expect(refreshedSnapshot?.cache.state).toBe("fresh");
+    statSpy.mockRestore();
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("legacy cached snapshots without persisted metadata remain readable", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.writeFile(path.join(mountDir, "notes.txt"), "cached", "utf8");
+
+    let diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    await waitForTerminalJob(diskAnalysis, start.jobId);
+
+    const cacheFile = path.join(
+      dataDir,
+      "disk-analysis",
+      `${getMountCacheHash(mount)}.json`
+    );
+    const persisted = (await fs.readJson(cacheFile)) as {
+      mount: DiskAnalysisMountIdentity;
+      snapshot: { generatedAt: string; totals: { totalFiles: number } };
+      cache?: unknown;
+    };
+    delete persisted.cache;
+    await fs.writeJson(cacheFile, persisted, { spaces: 2 });
+
+    diskAnalysis.__testing.resetState();
+    diskAnalysis = await loadDiskAnalysisModule(dataDir);
+
+    const mountState = await diskAnalysis.getMountState(mount);
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+
+    expect(mountState.cache.state).toBe("fresh");
+    expect(snapshot?.snapshot.totals.totalFiles).toBe(1);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("rejects relative mount paths", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+
+    await expect(
+      diskAnalysis.startScan({ mount: ".", fs: "testfs" })
+    ).rejects.toThrow(/absolute path/i);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+  });
+
+  test("accepts bare Windows drive roots", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+
+  if (process.platform === "win32") {
+    const started = await diskAnalysis.startScan({ mount: "C:", fs: "ntfs" });
+    expect(started.streamPath).toContain("mount=C%3A%5C");
+  } else {
+    await expect(
+      diskAnalysis.startScan({ mount: "C:", fs: "ntfs" })
+    ).rejects.toThrow(/absolute path/i);
+  }
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+  });
+
+  test("reuses the same active job for a mount even when callers provide different fs values", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.writeFile(path.join(mountDir, "notes.txt"), "cached", "utf8");
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const first = await diskAnalysis.startScan({ mount: mountDir, fs: "ntfs" });
+    const second = await diskAnalysis.startScan({ mount: mountDir, fs: "ext4" });
+
+    expect(second.jobId).toBe(first.jobId);
+    expect(second.streamPath).toBe(first.streamPath);
+
+    await waitForTerminalJob(diskAnalysis, first.jobId);
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("moves malformed persisted snapshots aside instead of serving them", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.writeFile(path.join(mountDir, "notes.txt"), "cached", "utf8");
+
+    let diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    await waitForTerminalJob(diskAnalysis, start.jobId);
+
+    const cacheFile = path.join(
+      dataDir,
+      "disk-analysis",
+      `${getMountCacheHash(mount)}.json`
+    );
+    const persisted = (await fs.readJson(cacheFile)) as {
+      mount: DiskAnalysisMountIdentity;
+      snapshot: Record<string, unknown>;
+      cache?: unknown;
+    };
+    persisted.snapshot = {
+      mount,
+      generatedAt: new Date().toISOString(),
+      root: {
+        path: mount.mount,
+      },
+    };
+    await fs.writeJson(cacheFile, persisted, { spaces: 2 });
+
+    diskAnalysis.__testing.resetState();
+    diskAnalysis = await loadDiskAnalysisModule(dataDir);
+
+    const mountState = await diskAnalysis.getMountState(mount);
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+    const diskAnalysisDir = path.join(dataDir, "disk-analysis");
+    const files = await fs.readdir(diskAnalysisDir);
+
+    expect(mountState.cache.state).toBe("missing");
+    expect(mountState.activeJob).not.toBeNull();
+    expect(snapshot).toBeNull();
+    expect(files.some((file) => file.includes(".corrupt-"))).toBe(true);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("scan enforces traversal limits and reports a partial result", async () => {
+    process.env.DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES = "1";
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await Promise.all([
+      fs.ensureDir(path.join(mountDir, "a")),
+      fs.ensureDir(path.join(mountDir, "b")),
+      fs.ensureDir(path.join(mountDir, "c")),
+    ]);
+    await fs.writeFile(path.join(mountDir, "a", "one.txt"), "1", "utf8");
+    await fs.writeFile(path.join(mountDir, "b", "two.txt"), "2", "utf8");
+    await fs.writeFile(path.join(mountDir, "c", "three.txt"), "3", "utf8");
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+
+    expect(finalJob?.phase).toBe("partial");
+    expect(snapshot?.snapshot.root.truncated).toBe(true);
+    expect(
+      snapshot?.snapshot.issues.some((issue) => issue.code === "partial-scan")
+    ).toBe(true);
+    expect(snapshot?.snapshot.totals.totalDirectories).toBeLessThan(4);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("bucketed small files do not consume the indexed node budget", async () => {
+    process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = "10";
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.ensureDir(path.join(mountDir, "tiny"));
+    for (let index = 0; index < 50; index += 1) {
+      await fs.writeFile(path.join(mountDir, "tiny", `file-${index}.txt`), "x", "utf8");
+    }
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+    const tinyDir = snapshot?.snapshot.root.children.find((child) => child.path.endsWith("tiny"));
+    const bucketNode =
+      tinyDir?.type === "directory"
+        ? tinyDir.children.find(
+            (child) =>
+              child.type === "file" &&
+              child.path.includes("__deckos_small_files__") &&
+              child.name.includes("x 50")
+          )
+        : undefined;
+
+    expect(finalJob?.phase).toBe("completed");
+    expect(snapshot?.snapshot.issues.some((issue) => issue.code === "partial-scan")).toBe(false);
+    expect(tinyDir?.type).toBe("directory");
+    expect(bucketNode).toBeTruthy();
+    expect(snapshot?.snapshot.totals.totalFiles).toBe(50);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("adaptive small-file threshold buckets dense directories before hitting the node cap", async () => {
+    process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = "20";
+    process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES = "1";
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.ensureDir(path.join(mountDir, "dense"));
+    for (let index = 0; index < 1000; index += 1) {
+      await fs.writeFile(path.join(mountDir, "dense", `f-${index}.bin`), "x", "utf8");
+    }
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+    const denseDir = snapshot?.snapshot.root.children.find((child) => child.path.endsWith("dense"));
+
+    expect(finalJob?.phase).toBe("completed");
+    expect(snapshot?.snapshot.issues.some((issue) => issue.code === "partial-scan")).toBe(false);
+    expect(snapshot?.snapshot.totals.totalFiles).toBe(1000);
+    expect(
+      denseDir?.type === "directory" &&
+        denseDir.children.some((child) => child.path.includes("__deckos_small_files__"))
+    ).toBe(true);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("cache file can be replaced by a later scan", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.writeFile(path.join(mountDir, "first.bin"), Buffer.alloc(1024 * 1024 + 128));
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const firstStart = await diskAnalysis.startScan(mount);
+    await waitForTerminalJob(diskAnalysis, firstStart.jobId);
+
+    await fs.remove(path.join(mountDir, "first.bin"));
+    await fs.writeFile(path.join(mountDir, "second.bin"), Buffer.alloc(2 * 1024 * 1024 + 64));
+
+    const secondStart = await diskAnalysis.startScan(mount);
+    await waitForTerminalJob(diskAnalysis, secondStart.jobId);
+    const cached = await diskAnalysis.getCachedSnapshot(mount);
+
+    expect(cached?.snapshot.root.children.some((child) => child.name === "first.bin")).toBe(false);
+    expect(cached?.snapshot.root.children.some((child) => child.name === "second.bin")).toBe(true);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("ignores cancel requests for terminal jobs", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.writeFile(path.join(mountDir, "done.txt"), "finished", "utf8");
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const started = await diskAnalysis.startScan(mount);
+    const finalJob = await waitForTerminalJob(diskAnalysis, started.jobId);
+
+    expect(finalJob?.phase).toBe("completed");
+    expect(diskAnalysis.cancelScan(mount, started.jobId)).toBe(false);
+    expect(diskAnalysis.getJob(started.jobId)?.phase).toBe("completed");
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+});

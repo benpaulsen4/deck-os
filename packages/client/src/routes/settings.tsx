@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useTRPC } from "../trpc";
 import { trpcClient } from "../trpc";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,6 +24,7 @@ export const Route = createFileRoute("/settings")({
 });
 
 function SettingsPage() {
+  const navigate = useNavigate();
   const [securityModal, setSecurityModal] = useState<
     null | "enable" | "session" | "passcode" | "disable"
   >(null);
@@ -505,8 +506,24 @@ function SettingsPage() {
                                     {formatBytes(diskFree)}
                                   </span>
                                 </span>
+                                <span className="settings-disk-action">
+                                  <Button
+                                    variant="secondary"
+                                    onClick={() =>
+                                      void navigate({
+                                        to: "/disk-analysis",
+                                        search: {
+                                          mount: disk.mount,
+                                          fs: disk.fs,
+                                        },
+                                      })
+                                    }
+                                  >
+                                    ANALYZE
+                                  </Button>
+                                </span>
                               </div>
-                              <div className="metric-card-bar-container">
+                              <div className="metric-card-bar-container settings-disk-progress">
                                 <div
                                   className="metric-card-bar-fill"
                                   style={{

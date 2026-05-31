@@ -9,6 +9,11 @@ import { LOG_HISTORY_SIZE } from "../lib/config.js";
 import * as metricsService from "../services/metrics.js";
 import * as dockerService from "../services/docker.js";
 import * as pullJobsService from "../services/pullJobs.js";
+import {
+  DiskAnalysisMountIdentitySchema,
+  DiskAnalysisScanEventSchema,
+} from "@deckos/contracts";
+import * as diskAnalysisService from "../services/diskAnalysis.js";
 
 export function registerRuntimeRoutes(app: Hono) {
   app.get("/api/health", (c) => {
@@ -136,6 +141,97 @@ export function registerRuntimeRoutes(app: Hono) {
 
       stream.onAbort(() => {
         eventStream.destroy();
+      });
+
+      await stream.sleep(1000000);
+    });
+  });
+
+  app.get("/api/disk-analysis/jobs/:jobId/events", async (c) => {
+    const accept = c.req.header("accept") ?? "";
+    if (!accept.toLowerCase().includes("text/event-stream")) {
+      return c.json({ error: "This endpoint only supports SSE subscriptions" }, 406);
+    }
+
+    const mountParse = DiskAnalysisMountIdentitySchema.safeParse({
+      mount: c.req.query("mount"),
+      fs: c.req.query("fs"),
+    });
+    if (!mountParse.success) {
+      return c.json({ error: "Invalid disk analysis mount identity" }, 400);
+    }
+
+    const { jobId } = c.req.param();
+    const bufferedEvents: unknown[] = [];
+    let writeBufferedEvent: ((event: unknown) => void) | null = null;
+    const unsubscribe = diskAnalysisService.subscribeToJob(jobId, (event) => {
+      if (writeBufferedEvent) {
+        writeBufferedEvent(event);
+        return;
+      }
+      bufferedEvents.push(event);
+    });
+
+    let initialEvent;
+    try {
+      initialEvent = diskAnalysisService.getJobStreamInitialEvent(jobId, mountParse.data);
+    } catch (error) {
+      unsubscribe();
+      if (error instanceof diskAnalysisService.DiskAnalysisJobNotFoundError) {
+        return c.json({ error: error.message }, 404);
+      }
+      return c.json(
+        { error: error instanceof Error ? error.message : "Failed to subscribe" },
+        500
+      );
+    }
+
+    return streamSSE(c, async (stream) => {
+      let streamClosed = false;
+      const writeEvent = (event: unknown) => {
+        const payload = DiskAnalysisScanEventSchema.parse(event);
+        stream.writeSSE({
+          data: JSON.stringify(payload),
+          event: payload.event,
+          id: Date.now().toString(),
+        });
+      };
+
+      writeBufferedEvent = (event) => {
+        if (streamClosed) {
+          return;
+        }
+        try {
+          writeEvent(event);
+        } catch (error) {
+          console.error("[deckos] Error sending disk analysis event:", error);
+          unsubscribe();
+        }
+      };
+
+      try {
+        writeEvent(initialEvent);
+        for (const event of bufferedEvents) {
+          writeEvent(event);
+        }
+      } catch (error) {
+        console.error("[deckos] Error sending initial disk analysis event:", error);
+        unsubscribe();
+        return;
+      }
+
+      const keepaliveInterval = setInterval(() => {
+        try {
+          writeEvent(diskAnalysisService.getJobKeepaliveEvent(jobId));
+        } catch (error) {
+          console.error("[deckos] Error sending disk analysis keepalive:", error);
+        }
+      }, 30000);
+
+      stream.onAbort(() => {
+        streamClosed = true;
+        clearInterval(keepaliveInterval);
+        unsubscribe();
       });
 
       await stream.sleep(1000000);

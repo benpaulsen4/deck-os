@@ -10,6 +10,17 @@ const { addToastSpy, authFetchSpy, emitUnauthorizedEventSpy, checkForUpdatesSpy 
   emitUnauthorizedEventSpy: vi.fn(),
   checkForUpdatesSpy: vi.fn(async () => ({ updateAvailable: false })),
 }));
+const navigateSpy = vi.fn();
+
+vi.mock("@tanstack/react-router", async () => {
+  const actual = await vi.importActual<typeof import("@tanstack/react-router")>(
+    "@tanstack/react-router"
+  );
+  return {
+    ...actual,
+    useNavigate: () => navigateSpy,
+  };
+});
 
 vi.mock("../../stores/toast", () => ({
   useToastStore: () => ({ addToast: addToastSpy }),
@@ -63,6 +74,25 @@ vi.mock("@tanstack/react-query", () => ({
         refetch: vi.fn(async () => ({})),
       };
     }
+    if (Array.isArray(maybe?.queryKey) && maybe.queryKey[0] === "system.getMetrics") {
+      return {
+        data: {
+          disk: {
+            fs: [
+              {
+                fs: "ntfs",
+                mount: "C:",
+                size: 1024,
+                used: 512,
+                usePercent: 50,
+              },
+            ],
+          },
+        },
+        isLoading: false,
+        isFetching: false,
+      };
+    }
     return {
       data: null,
       isLoading: false,
@@ -77,6 +107,7 @@ describe("settings route", () => {
     authFetchSpy.mockReset();
     emitUnauthorizedEventSpy.mockReset();
     checkForUpdatesSpy.mockReset();
+    navigateSpy.mockReset();
     checkForUpdatesSpy.mockResolvedValue({ updateAvailable: false });
     authFetchSpy.mockResolvedValue({
       ok: true,
@@ -113,5 +144,18 @@ describe("settings route", () => {
     await waitFor(() =>
       expect(addToastSpy).toHaveBeenCalledWith("No updates available", "info")
     );
+  });
+
+  it("opens disk analysis for a selected mount", () => {
+    const Component = Route.options.component!;
+    render(<Component />);
+    fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
+    expect(navigateSpy).toHaveBeenCalledWith({
+      to: "/disk-analysis",
+      search: {
+        mount: "C:",
+        fs: "ntfs",
+      },
+    });
   });
 });

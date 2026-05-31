@@ -4,6 +4,7 @@ import { appsRouter } from "../routers/apps.js";
 import { dockerRouter } from "../routers/docker.js";
 import { templatesRouter } from "../routers/templates.js";
 import { filesRouter } from "../routers/files.js";
+import { diskAnalysisRouter } from "../routers/diskAnalysis.js";
 
 export const appRouter = router({
   system: systemRouter,
@@ -11,6 +12,7 @@ export const appRouter = router({
   docker: dockerRouter,
   templates: templatesRouter,
   files: filesRouter,
+  diskAnalysis: diskAnalysisRouter,
 });
 
 export type AppRouter = typeof appRouter;

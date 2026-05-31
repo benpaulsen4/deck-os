@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as FilesRouteImport } from './routes/files'
+import { Route as DiskAnalysisRouteImport } from './routes/disk-analysis'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppsIndexRouteImport } from './routes/apps/index'
 import { Route as AppsNewRouteImport } from './routes/apps/new'
@@ -26,6 +27,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const FilesRoute = FilesRouteImport.update({
   id: '/files',
   path: '/files',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DiskAnalysisRoute = DiskAnalysisRouteImport.update({
+  id: '/disk-analysis',
+  path: '/disk-analysis',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -61,6 +67,7 @@ const AppsTemplatesTemplateIdRoute = AppsTemplatesTemplateIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/disk-analysis': typeof DiskAnalysisRoute
   '/files': typeof FilesRoute
   '/settings': typeof SettingsRoute
   '/apps/$appId': typeof AppsAppIdRoute
@@ -71,6 +78,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/disk-analysis': typeof DiskAnalysisRoute
   '/files': typeof FilesRoute
   '/settings': typeof SettingsRoute
   '/apps/$appId': typeof AppsAppIdRoute
@@ -82,6 +90,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/disk-analysis': typeof DiskAnalysisRoute
   '/files': typeof FilesRoute
   '/settings': typeof SettingsRoute
   '/apps/$appId': typeof AppsAppIdRoute
@@ -94,6 +103,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/disk-analysis'
     | '/files'
     | '/settings'
     | '/apps/$appId'
@@ -104,6 +114,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/disk-analysis'
     | '/files'
     | '/settings'
     | '/apps/$appId'
@@ -114,6 +125,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/disk-analysis'
     | '/files'
     | '/settings'
     | '/apps/$appId'
@@ -125,6 +137,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DiskAnalysisRoute: typeof DiskAnalysisRoute
   FilesRoute: typeof FilesRoute
   SettingsRoute: typeof SettingsRoute
   AppsAppIdRoute: typeof AppsAppIdRoute
@@ -148,6 +161,13 @@ declare module '@tanstack/react-router' {
       path: '/files'
       fullPath: '/files'
       preLoaderRoute: typeof FilesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/disk-analysis': {
+      id: '/disk-analysis'
+      path: '/disk-analysis'
+      fullPath: '/disk-analysis'
+      preLoaderRoute: typeof DiskAnalysisRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -197,6 +217,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DiskAnalysisRoute: DiskAnalysisRoute,
   FilesRoute: FilesRoute,
   SettingsRoute: SettingsRoute,
   AppsAppIdRoute: AppsAppIdRoute,
