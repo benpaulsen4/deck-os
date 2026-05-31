@@ -427,6 +427,59 @@ describe("diskAnalysis service", () => {
     await fs.remove(mountDir);
   });
 
+  test("scan stays on the selected mount device", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    const nestedMountDir = path.join(mountDir, "proc");
+    const localFilePath = path.join(mountDir, "keep.txt");
+    const nestedFilePath = path.join(nestedMountDir, "kcore");
+    await fs.ensureDir(nestedMountDir);
+    await fs.writeFile(localFilePath, "keep", "utf8");
+    await fs.writeFile(nestedFilePath, "skip", "utf8");
+
+    const originalStat = fs.stat.bind(fs);
+    const withDev = (stat: fs.Stats, dev: number, size: number = stat.size): fs.Stats =>
+      Object.assign(Object.create(Object.getPrototypeOf(stat)) as fs.Stats, stat, {
+        dev,
+        size,
+      });
+
+    const rootPath = path.resolve(mountDir);
+    const procPath = path.resolve(nestedMountDir);
+    const kcorePath = path.resolve(nestedFilePath);
+    const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (target) => {
+      const stat = await originalStat(target);
+      const targetPath = path.resolve(typeof target === "string" ? target : String(target));
+      if (targetPath === procPath) {
+        return withDev(stat, 2);
+      }
+      if (targetPath === kcorePath) {
+        return withDev(stat, 2, 128 * 1024 * 1024 * 1024 * 1024);
+      }
+      if (targetPath === rootPath || targetPath === path.resolve(localFilePath)) {
+        return withDev(stat, 1);
+      }
+      return stat;
+    });
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "ext4" };
+    const start = await diskAnalysis.startScan(mount);
+    const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+
+    expect(finalJob?.phase).toBe("completed");
+    expect(snapshot?.snapshot.root.children.some((child) => child.name === "proc")).toBe(false);
+    expect(snapshot?.snapshot.totals.totalFiles).toBe(1);
+    expect(snapshot?.snapshot.totals.totalBytes).toBe(4);
+    expect(snapshot?.snapshot.issues.some((issue) => issue.code === "partial-scan")).toBe(false);
+
+    statSpy.mockRestore();
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
   test("cache file can be replaced by a later scan", async () => {
     const dataDir = await createTempDir("deckos-disk-analysis-data-");
     const mountDir = await createTempDir("deckos-disk-analysis-mount-");

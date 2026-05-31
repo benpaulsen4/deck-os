@@ -285,6 +285,10 @@ function getIssueForFsError(targetPath: string, error: unknown): DiskAnalysisIss
   return createIssue("path-inaccessible", targetPath, `Path inaccessible: ${targetPath}`);
 }
 
+function getComparableDeviceId(stat: fs.Stats): number | null {
+  return Number.isSafeInteger(stat.dev) ? stat.dev : null;
+}
+
 function getCacheState(generatedAt: string): "fresh" | "stale" {
   return Date.now() - new Date(generatedAt).getTime() < CACHE_FRESH_MS
     ? "fresh"
@@ -770,6 +774,8 @@ function pruneJobs(now: number = Date.now()) {
 
 async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSnapshot> {
   const rootPath = await ensureMountAvailable(job.mount);
+  const rootStat = await fs.stat(rootPath);
+  const rootDeviceId = getComparableDeviceId(rootStat);
   const smallFileThresholdBytes = getSmallFileThresholdBytes();
   const rootNode = createDirectoryNode(rootPath, null);
   const nodesByPath = new Map<string, MutableDirectoryNode>([[rootPath, rootNode]]);
@@ -938,6 +944,12 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
                 task.node.issues.push(issue);
                 job.issues.push(issue);
                 task.node.truncated = true;
+                continue;
+              }
+
+              // Stay on the selected mount instead of traversing into nested mounts like
+              // procfs, sysfs, tmpfs, removable drives, or bind-mounted trees.
+              if (rootDeviceId !== null && getComparableDeviceId(stat) !== rootDeviceId) {
                 continue;
               }
 
