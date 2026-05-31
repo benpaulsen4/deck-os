@@ -229,8 +229,75 @@ describe("diskAnalysis service", () => {
     const snapshot = await diskAnalysis.getCachedSnapshot(mount);
 
     expect(mountState.cache.state).toBe("fresh");
-    expect(mountState.cache.nodeCount).toBeUndefined();
     expect(snapshot?.snapshot.totals.totalFiles).toBe(1);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("rejects relative mount paths", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+
+    await expect(
+      diskAnalysis.startScan({ mount: ".", fs: "testfs" })
+    ).rejects.toThrow(/absolute path/i);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+  });
+
+  test("accepts bare Windows drive roots", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+
+    const started = await diskAnalysis.startScan({ mount: "C:", fs: "ntfs" });
+
+    expect(started.streamPath).toContain("mount=C%3A%5C");
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+  });
+
+  test("moves malformed persisted snapshots aside instead of serving them", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.writeFile(path.join(mountDir, "notes.txt"), "cached", "utf8");
+
+    let diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    await waitForTerminalJob(diskAnalysis, start.jobId);
+
+    const cacheFile = path.join(
+      dataDir,
+      "disk-analysis",
+      `${getMountCacheHash(mount)}.json`
+    );
+    const persisted = (await fs.readJson(cacheFile)) as {
+      mount: DiskAnalysisMountIdentity;
+      snapshot: Record<string, unknown>;
+      cache?: unknown;
+    };
+    persisted.snapshot = {
+      mount,
+      generatedAt: new Date().toISOString(),
+      root: {
+        path: mount.mount,
+      },
+    };
+    await fs.writeJson(cacheFile, persisted, { spaces: 2 });
+
+    diskAnalysis.__testing.resetState();
+    diskAnalysis = await loadDiskAnalysisModule(dataDir);
+
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+    const diskAnalysisDir = path.join(dataDir, "disk-analysis");
+    const files = await fs.readdir(diskAnalysisDir);
+
+    expect(snapshot).toBeNull();
+    expect(files.some((file) => file.includes(".corrupt-"))).toBe(true);
 
     await diskAnalysis.__testing.clearState();
     await fs.remove(dataDir);

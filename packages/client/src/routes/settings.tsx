@@ -506,8 +506,24 @@ function SettingsPage() {
                                     {formatBytes(diskFree)}
                                   </span>
                                 </span>
+                                <span className="settings-disk-action">
+                                  <Button
+                                    variant="secondary"
+                                    onClick={() =>
+                                      void navigate({
+                                        to: "/disk-analysis",
+                                        search: {
+                                          mount: disk.mount,
+                                          fs: disk.fs,
+                                        },
+                                      })
+                                    }
+                                  >
+                                    ANALYZE
+                                  </Button>
+                                </span>
                               </div>
-                              <div className="metric-card-bar-container">
+                              <div className="metric-card-bar-container settings-disk-progress">
                                 <div
                                   className="metric-card-bar-fill"
                                   style={{
@@ -516,22 +532,6 @@ function SettingsPage() {
                                     transition: "width var(--transition-meter) linear",
                                   }}
                                 />
-                              </div>
-                              <div style={{ marginTop: "var(--space-2)" }}>
-                                <Button
-                                  variant="secondary"
-                                  onClick={() =>
-                                    void navigate({
-                                      to: "/disk-analysis",
-                                      search: {
-                                        mount: disk.mount,
-                                        fs: disk.fs,
-                                      },
-                                    })
-                                  }
-                                >
-                                  ANALYZE DISK
-                                </Button>
                               </div>
                             </div>
                           );

@@ -229,6 +229,63 @@ describe("runtimeRoutes", () => {
     });
   });
 
+  test("disk analysis events endpoint rejects invalid mount identities", async () => {
+    const app = createApp();
+    const res = await app.request(
+      "http://localhost/api/disk-analysis/jobs/job-1/events?mount=.&fs=ntfs",
+      {
+        headers: {
+          accept: "text/event-stream",
+        },
+      }
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "Invalid disk analysis mount identity",
+    });
+  });
+
+  test("disk analysis events endpoint maps missing jobs to 404", async () => {
+    diskAnalysisMock.getJobStreamInitialEvent.mockImplementation(() => {
+      throw new diskAnalysisMock.DiskAnalysisJobNotFoundError("missing-job");
+    });
+    const app = createApp();
+    const res = await app.request(
+      "http://localhost/api/disk-analysis/jobs/missing-job/events?mount=C%3A%5C&fs=ntfs",
+      {
+        headers: {
+          accept: "text/event-stream",
+        },
+      }
+    );
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({
+      error: "missing-job",
+    });
+  });
+
+  test("disk analysis events endpoint maps unexpected subscription errors to 500", async () => {
+    diskAnalysisMock.getJobStreamInitialEvent.mockImplementation(() => {
+      throw new Error("boom");
+    });
+    const app = createApp();
+    const res = await app.request(
+      "http://localhost/api/disk-analysis/jobs/job-1/events?mount=C%3A%5C&fs=ntfs",
+      {
+        headers: {
+          accept: "text/event-stream",
+        },
+      }
+    );
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({
+      error: "boom",
+    });
+  });
+
   test("disk analysis events endpoint streams initial SSE payloads", async () => {
     diskAnalysisMock.getJobStreamInitialEvent.mockReturnValue({
       event: "status",

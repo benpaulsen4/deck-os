@@ -51,9 +51,6 @@ type PersistedCacheFile = {
 type PersistedCacheMetadata = {
   generatedAt: string;
   staleAt: string;
-  nodeCount: number;
-  issueCount: number;
-  snapshotBytes: number;
 };
 
 type DiskAnalysisJobInternal = {
@@ -174,8 +171,21 @@ function getAdaptiveSmallFileThresholdBytes(
   return Math.min(baseThresholdBytes * multiplier, MAX_SMALL_FILE_THRESHOLD_BYTES);
 }
 
+function resolveMountPath(mountPath: string): string {
+  if (/^[A-Za-z]:$/.test(mountPath)) {
+    return `${mountPath}\\`;
+  }
+  if (!path.isAbsolute(mountPath)) {
+    throw new DiskAnalysisMountUnavailableError(
+      mountPath,
+      `Disk analysis mount must be an absolute path: ${mountPath}`
+    );
+  }
+  return path.resolve(mountPath);
+}
+
 function getMountKey(mount: DiskAnalysisMountIdentity): string {
-  const resolvedMount = path.resolve(mount.mount);
+  const resolvedMount = resolveMountPath(mount.mount);
   const normalizedMount =
     process.platform === "win32" ? resolvedMount.toLowerCase() : resolvedMount;
   return `${normalizedMount}::${mount.fs.trim().toLowerCase()}`;
@@ -279,52 +289,14 @@ function getCacheState(generatedAt: string): "fresh" | "stale" {
     : "stale";
 }
 
-function countNodes(node: DiskAnalysisTreemapNode): number {
-  let count = 0;
-  const stack: DiskAnalysisTreemapNode[] = [node];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (!current) {
-      continue;
-    }
-    count += 1;
-    for (const child of current.children) {
-      stack.push(child);
-    }
-  }
-  return count;
-}
-
-function countIssues(node: DiskAnalysisTreemapNode): number {
-  let count = 0;
-  const stack: DiskAnalysisTreemapNode[] = [node];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (!current) {
-      continue;
-    }
-    count += current.issues.length;
-    for (const child of current.children) {
-      stack.push(child);
-    }
-  }
-  return count;
-}
-
 function getStaleAt(generatedAt: string): string {
   return new Date(new Date(generatedAt).getTime() + CACHE_FRESH_MS).toISOString();
 }
 
-function buildPersistedCacheMetadata(
-  snapshot: DiskAnalysisSnapshot,
-  snapshotBytes: number
-): PersistedCacheMetadata {
+function buildPersistedCacheMetadata(snapshot: DiskAnalysisSnapshot): PersistedCacheMetadata {
   return {
     generatedAt: snapshot.generatedAt,
     staleAt: getStaleAt(snapshot.generatedAt),
-    nodeCount: countNodes(snapshot.root),
-    issueCount: snapshot.issues.length + countIssues(snapshot.root),
-    snapshotBytes,
   };
 }
 
@@ -337,16 +309,7 @@ function isPersistedCacheMetadata(value: unknown): value is PersistedCacheMetada
     typeof candidate.generatedAt === "string" &&
     !Number.isNaN(new Date(candidate.generatedAt).getTime()) &&
     typeof candidate.staleAt === "string" &&
-    !Number.isNaN(new Date(candidate.staleAt).getTime()) &&
-    typeof candidate.nodeCount === "number" &&
-    Number.isFinite(candidate.nodeCount) &&
-    candidate.nodeCount >= 0 &&
-    typeof candidate.issueCount === "number" &&
-    Number.isFinite(candidate.issueCount) &&
-    candidate.issueCount >= 0 &&
-    typeof candidate.snapshotBytes === "number" &&
-    Number.isFinite(candidate.snapshotBytes) &&
-    candidate.snapshotBytes >= 0
+    !Number.isNaN(new Date(candidate.staleAt).getTime())
   );
 }
 
@@ -358,9 +321,6 @@ function getCacheMetadata(
     state: getCacheState(generatedAt),
     generatedAt,
     staleAt: persisted?.staleAt ?? getStaleAt(generatedAt),
-    nodeCount: persisted?.nodeCount,
-    issueCount: persisted?.issueCount,
-    snapshotBytes: persisted?.snapshotBytes,
   };
 }
 
@@ -383,13 +343,12 @@ async function moveCorruptCache(cachePath: string): Promise<void> {
 
 async function readPersistedCacheFile(
   mount: DiskAnalysisMountIdentity
-): Promise<{ parsed: PersistedCacheFile; snapshotBytes: number; cachePath: string } | null> {
+): Promise<{ parsed: PersistedCacheFile; cachePath: string } | null> {
   const cachePath = getCachePath(mount);
   try {
     const serialized = await fs.readFile(cachePath, "utf8");
     return {
       parsed: JSON.parse(serialized) as PersistedCacheFile,
-      snapshotBytes: Buffer.byteLength(serialized),
       cachePath,
     };
   } catch (error) {
@@ -463,7 +422,7 @@ async function readPersistedCache(
     if (!persistedMount || !generatedAt) {
       throw new Error("Invalid persisted disk analysis cache");
     }
-    const snapshot = file.parsed.snapshot as DiskAnalysisSnapshot;
+    const snapshot = DiskAnalysisSnapshotSchema.parse(file.parsed.snapshot);
     const persistedCache = isPersistedCacheMetadata(file.parsed.cache)
       ? file.parsed.cache
       : undefined;
@@ -481,8 +440,7 @@ async function writePersistedCache(
   const cachePath = getCachePath(mount);
   const tempPath = `${cachePath}.${process.pid}.${Date.now()}.tmp`;
   await fs.ensureDir(DISK_ANALYSIS_DIR);
-  const serializedSnapshot = JSON.stringify(snapshot);
-  const cache = buildPersistedCacheMetadata(snapshot, Buffer.byteLength(serializedSnapshot));
+  const cache = buildPersistedCacheMetadata(snapshot);
   const serialized = JSON.stringify({
     mount,
     snapshot,
@@ -734,7 +692,7 @@ function hasPartialResult(job: DiskAnalysisJobInternal): boolean {
 }
 
 async function ensureMountAvailable(mount: DiskAnalysisMountIdentity): Promise<string> {
-  const resolvedMount = path.resolve(mount.mount);
+  const resolvedMount = resolveMountPath(mount.mount);
   let stat;
   try {
     stat = await fs.stat(resolvedMount);

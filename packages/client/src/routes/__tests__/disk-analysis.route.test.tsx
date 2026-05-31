@@ -43,6 +43,8 @@ const {
   startScanSpy,
   addToastSpy,
   invalidateQueriesSpy,
+  emitUnauthorizedEventSpy,
+  fetchAuthStatusSpy,
   state,
 } = vi.hoisted(() => ({
   startScanSpy: vi.fn(async () => ({
@@ -53,6 +55,8 @@ const {
   })),
   addToastSpy: vi.fn(),
   invalidateQueriesSpy: vi.fn(async () => {}),
+  emitUnauthorizedEventSpy: vi.fn(),
+  fetchAuthStatusSpy: vi.fn(async () => ({ enabled: false, unlocked: true })),
   state: {
     mountState: null as DiskAnalysisMountState | null,
     snapshotEnvelope: null as DiskAnalysisSnapshotEnvelope | null,
@@ -92,8 +96,8 @@ vi.mock("../../stores/toast", () => ({
 }));
 
 vi.mock("../../lib/auth", () => ({
-  emitUnauthorizedEvent: vi.fn(),
-  fetchAuthStatus: vi.fn(async () => ({ enabled: false, unlocked: true })),
+  emitUnauthorizedEvent: emitUnauthorizedEventSpy,
+  fetchAuthStatus: fetchAuthStatusSpy,
   authFetch: vi.fn(),
 }));
 
@@ -290,6 +294,9 @@ describe("disk analysis route", () => {
     startScanSpy.mockClear();
     addToastSpy.mockClear();
     invalidateQueriesSpy.mockClear();
+    emitUnauthorizedEventSpy.mockClear();
+    fetchAuthStatusSpy.mockClear();
+    fetchAuthStatusSpy.mockResolvedValue({ enabled: false, unlocked: true });
 
     state.mountState = {
       mount: { mount: "C:\\", fs: "ntfs" },
@@ -496,6 +503,22 @@ describe("disk analysis route", () => {
       queryKey: ["diskAnalysis.getSnapshot", "C:\\", "ntfs"],
     });
     expect(startScanSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces stream disconnects and emits an auth lock event when needed", async () => {
+    fetchAuthStatusSpy.mockResolvedValue({ enabled: true, unlocked: false });
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Live" }));
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+    const eventSource = MockEventSource.latest();
+    eventSource.dispatchOpen();
+    eventSource.dispatchError(new Error("disconnected"));
+
+    expect(await screen.findByText("Live scan stream disconnected.")).toBeInTheDocument();
+    await waitFor(() => expect(fetchAuthStatusSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(emitUnauthorizedEventSpy).toHaveBeenCalledTimes(1));
   });
 
   it("does not auto-start a second scan after a missing-cache live scan completes", async () => {

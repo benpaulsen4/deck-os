@@ -506,6 +506,9 @@ function FilesPage() {
       (entry) => normalizePathForCompare(entry.path) === normalizePathForCompare(pendingRevealPath)
     );
     if (!matchedEntry) {
+      setSelectedPaths([]);
+      setSelectionAnchorPath(null);
+      setPendingRevealPath(null);
       return;
     }
     setSelectedPaths([matchedEntry.path]);
@@ -1559,10 +1562,18 @@ function TreeNode({
 
   return (
     <div>
-      <button
+      <div
         className={`files-tree-node ${isActive ? "files-tree-node--active" : ""}`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
         onClick={() => onNavigate(nodePath)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onNavigate(nodePath);
+          }
+        }}
+        role="button"
+        tabIndex={0}
       >
         <span className="files-tree-toggle">
           <button
@@ -1586,7 +1597,7 @@ function TreeNode({
         </span>
         {expanded ? <FolderOpen size={14} /> : <Folder size={14} />}
         <span>{getDisplayName(nodePath)}</span>
-      </button>
+      </div>
       {expanded && (
         <div>
           {nodeQuery.isLoading && !nodeQuery.data ? (

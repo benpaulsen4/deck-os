@@ -450,37 +450,6 @@ export function integrateBranchIntoTree(
   return workingRoot;
 }
 
-export function flattenVisibleNodes(
-  root: DiskAnalysisTreemapNode | null
-): DiskAnalysisTreemapNode[] {
-  if (!root) {
-    return [];
-  }
-  const nodes: DiskAnalysisTreemapNode[] = [];
-  const stack: DiskAnalysisTreemapNode[] = [root];
-  const visited = new Set<string>();
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (!node) {
-      continue;
-    }
-    if (visited.has(node.path)) {
-      continue;
-    }
-    visited.add(node.path);
-    nodes.push(node);
-    if (node.type === "directory") {
-      for (let index = node.children.length - 1; index >= 0; index -= 1) {
-        const child = node.children[index];
-        if (child.path !== node.path) {
-          stack.push(child);
-        }
-      }
-    }
-  }
-  return nodes;
-}
-
 export function findNodeByPath(
   root: DiskAnalysisTreemapNode | null,
   targetPath: string | null
@@ -518,37 +487,6 @@ export function deriveLegendFromSnapshot(
   snapshot: DiskAnalysisSnapshot | null
 ): DiskAnalysisLegendItem[] {
   return snapshot?.extensionLegend ?? [];
-}
-
-export function deriveLegendFromTree(
-  root: DiskAnalysisTreemapNode | null
-): DiskAnalysisLegendItem[] {
-  if (!root) {
-    return [];
-  }
-  const counts = new Map<string, { count: number; totalBytes: number }>();
-  for (const node of flattenVisibleNodes(root)) {
-    if (node.type === "file" && node.extension) {
-      const current = counts.get(node.extension) ?? { count: 0, totalBytes: 0 };
-      current.count += 1;
-      current.totalBytes += node.recursiveSize;
-      counts.set(node.extension, current);
-    }
-  }
-  return [...counts.entries()]
-    .sort(
-      (left, right) =>
-        right[1].totalBytes - left[1].totalBytes ||
-        right[1].count - left[1].count ||
-        left[0].localeCompare(right[0])
-    )
-    .slice(0, 20)
-    .map(([extension, stats], index) => ({
-      extension,
-      count: stats.count,
-      totalBytes: stats.totalBytes,
-      colorToken: `disk-ext-${index + 1}`,
-    }));
 }
 
 export function getLegendColor(colorToken: string): string {
@@ -594,11 +532,4 @@ export function getNodeNavigationSearch(node: DiskAnalysisTreemapNode): {
     reveal: node.path,
     source: "disk-analysis",
   };
-}
-
-export function collectIssues(root: DiskAnalysisTreemapNode | null): DiskAnalysisIssue[] {
-  if (!root) {
-    return [];
-  }
-  return flattenVisibleNodes(root).flatMap((node) => node.issues);
 }

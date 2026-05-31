@@ -249,8 +249,15 @@ describe("files route", () => {
   });
 
   it("renders files page shell", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     renderWithAppRouter({ initialEntries: ["/files"] });
     expect(await screen.findByText("Files")).toBeInTheDocument();
+    expect(
+      consoleErrorSpy.mock.calls.some(([message]) =>
+        String(message).includes("<button> cannot contain a nested <button>")
+      )
+    ).toBe(false);
+    consoleErrorSpy.mockRestore();
   });
 
   it("enforces large-text read-only mode until explicit enable editing", async () => {
@@ -316,5 +323,16 @@ describe("files route", () => {
     await waitFor(() => expect(screen.getByDisplayValue("C:\\reports")).toBeInTheDocument());
     expect(await screen.findByText("summary.txt")).toBeInTheDocument();
     await waitFor(() => expect(scrollIntoViewSpy).toHaveBeenCalled());
+  });
+
+  it("clears pending reveal state when the target file is missing", async () => {
+    renderWithAppRouter({
+      initialEntries: ["/files?reveal=C%3A%5Creports%5Cmissing.txt&source=disk-analysis"],
+    });
+
+    await waitFor(() => expect(screen.getByDisplayValue("C:\\reports")).toBeInTheDocument());
+    expect(screen.getByText("summary.txt")).toBeInTheDocument();
+    expect(screen.getByText("Selected: none")).toBeInTheDocument();
+    expect(scrollIntoViewSpy).not.toHaveBeenCalled();
   });
 });

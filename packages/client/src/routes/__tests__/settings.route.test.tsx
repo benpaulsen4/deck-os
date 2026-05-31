@@ -81,7 +81,7 @@ vi.mock("@tanstack/react-query", () => ({
             fs: [
               {
                 fs: "ntfs",
-                mount: "C:\\",
+                mount: "C:",
                 size: 1024,
                 used: 512,
                 usePercent: 50,
@@ -149,11 +149,11 @@ describe("settings route", () => {
   it("opens disk analysis for a selected mount", () => {
     const Component = Route.options.component!;
     render(<Component />);
-    fireEvent.click(screen.getByRole("button", { name: "ANALYZE DISK" }));
+    fireEvent.click(screen.getByRole("button", { name: "ANALYZE" }));
     expect(navigateSpy).toHaveBeenCalledWith({
       to: "/disk-analysis",
       search: {
-        mount: "C:\\",
+        mount: "C:",
         fs: "ntfs",
       },
     });
