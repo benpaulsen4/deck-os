@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, PanelLeft, Play, X } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { useToastStore } from "../stores/toast";
 import { emitUnauthorizedEvent, fetchAuthStatus } from "../lib/auth";
@@ -145,6 +145,8 @@ function DiskAnalysisPage() {
   const [streamError, setStreamError] = useState<string | null>(null);
   const [hoveredPath, setHoveredPath] = useState<string | null>(null);
   const [isIssuesModalOpen, setIsIssuesModalOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(true);
+  const [isCompactLayout, setIsCompactLayout] = useState(false);
   const [hasRequestedLive, setHasRequestedLive] = useState(false);
   const requestedStreamKeyRef = useRef<string | null>(null);
   const liveRawRootRef = useRef<DiskAnalysisTreemapNode | null>(null);
@@ -157,10 +159,33 @@ function DiskAnalysisPage() {
     setStreamError(null);
     setHoveredPath(null);
     setIsIssuesModalOpen(false);
+    setMobileSidebarOpen(true);
     setHasRequestedLive(false);
     requestedStreamKeyRef.current = null;
     liveRawRootRef.current = null;
   }, [mountKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      setIsCompactLayout(false);
+      return;
+    }
+    const mediaQuery = window.matchMedia("(max-width: 1100px)");
+    const updateCompactLayout = () => {
+      setIsCompactLayout(mediaQuery.matches);
+    };
+    updateCompactLayout();
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", updateCompactLayout);
+      return () => {
+        mediaQuery.removeEventListener("change", updateCompactLayout);
+      };
+    }
+    mediaQuery.addListener(updateCompactLayout);
+    return () => {
+      mediaQuery.removeListener(updateCompactLayout);
+    };
+  }, []);
 
   const mountStateQuery = useQuery(
     trpc.diskAnalysis.getMountState.queryOptions(mount ?? { mount: "", fs: "" }, {
@@ -645,30 +670,91 @@ function DiskAnalysisPage() {
     <div className="page-container page-container--viewport">
       <div className="page-header">
         <div className="disk-analysis-toolbar">
-          <Button variant="secondary" onClick={() => void navigate({ to: "/settings" })}>
-            <ArrowLeft size={14} />
-            <span>Back To Settings</span>
-          </Button>
-          {showToolbarActions ? (
-            <div className="disk-analysis-toolbar__actions">
-              {canStartManualScan ? (
-                <Button onClick={startManualScan} disabled={startScanMutation.isPending}>
-                  {startScanMutation.isPending ? "STARTING..." : manualScanLabel}
-                </Button>
-              ) : null}
-              {issueList.length > 0 ? (
-                <Button variant="secondary" onClick={() => setIsIssuesModalOpen(true)}>
-                  <span>View Issues</span>
-                  <span>({formatCount(issueList.length)})</span>
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
+          <div className="disk-analysis-toolbar__primary-row">
+            <Button
+              variant="secondary"
+              className="disk-analysis-toolbar__back-button"
+              aria-label="Back To Settings"
+              onClick={() => void navigate({ to: "/settings" })}
+            >
+              <ArrowLeft size={14} />
+              <span className="disk-analysis-toolbar__label disk-analysis-toolbar__label--full">
+                Back To Settings
+              </span>
+              <span className="disk-analysis-toolbar__label disk-analysis-toolbar__label--compact">
+                Back
+              </span>
+            </Button>
+            {showToolbarActions ? (
+              <div className="disk-analysis-toolbar__actions">
+                {canStartManualScan ? (
+                  <Button
+                    aria-label={startScanMutation.isPending ? "Starting Scan" : manualScanLabel}
+                    onClick={startManualScan}
+                    disabled={startScanMutation.isPending}
+                  >
+                    <Play size={14} />
+                    <span className="disk-analysis-toolbar__label disk-analysis-toolbar__label--full">
+                      {startScanMutation.isPending ? "STARTING..." : manualScanLabel}
+                    </span>
+                    <span className="disk-analysis-toolbar__label disk-analysis-toolbar__label--compact">
+                      {startScanMutation.isPending ? "..." : "Scan"}
+                    </span>
+                  </Button>
+                ) : null}
+                {issueList.length > 0 ? (
+                  <Button
+                    variant="secondary"
+                    aria-label={`View Issues (${formatCount(issueList.length)})`}
+                    onClick={() => setIsIssuesModalOpen(true)}
+                  >
+                    <AlertTriangle size={14} />
+                    <span className="disk-analysis-toolbar__label disk-analysis-toolbar__label--full">
+                      View Issues
+                    </span>
+                    <span className="disk-analysis-toolbar__label disk-analysis-toolbar__label--compact">
+                      Issues
+                    </span>
+                    <span className="disk-analysis-toolbar__issues-count">
+                      ({formatCount(issueList.length)})
+                    </span>
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <div
+            className="disk-analysis-toolbar__mobile-toggle"
+            role="group"
+            aria-label="Disk analysis mobile view"
+          >
+            <Button
+              type="button"
+              className="disk-analysis-toolbar__mobile-toggle-button"
+              variant={mobileSidebarOpen ? "primary" : "secondary"}
+              aria-pressed={mobileSidebarOpen}
+              onClick={() => setMobileSidebarOpen(true)}
+            >
+              <PanelLeft size={14} />
+              <span>Details</span>
+            </Button>
+            <Button
+              type="button"
+              className="disk-analysis-toolbar__mobile-toggle-button"
+              variant={mobileSidebarOpen ? "secondary" : "primary"}
+              aria-pressed={!mobileSidebarOpen}
+              onClick={() => setMobileSidebarOpen(false)}
+            >
+              <span>Treemap</span>
+            </Button>
+          </div>
         </div>
       </div>
 
       <div className="page-body disk-analysis-page">
-        <div className="disk-analysis-layout">
+        <div
+          className={`disk-analysis-layout${mobileSidebarOpen ? " disk-analysis-layout--mobile-sidebar-open" : ""}`}
+        >
           <aside className="panel disk-analysis-sidebar">
             {showViewSwitcher ? (
               <div className="disk-analysis-mode-switch">
@@ -715,22 +801,24 @@ function DiskAnalysisPage() {
               </div>
             ) : null}
 
-            <section className="disk-analysis-sidebar-section">
-              <div className="label">Hover Details</div>
-              {hoveredNode ? (
-                <div className="disk-analysis-details__content">
-                  <div className="disk-analysis-details__name">{hoveredNode.name}</div>
-                  <div className="disk-analysis-details__type">
-                    {getNodeDisplayType(hoveredNode)}
+            {!isCompactLayout ? (
+              <section className="disk-analysis-sidebar-section">
+                <div className="label">Hover Details</div>
+                {hoveredNode ? (
+                  <div className="disk-analysis-details__content">
+                    <div className="disk-analysis-details__name">{hoveredNode.name}</div>
+                    <div className="disk-analysis-details__type">
+                      {getNodeDisplayType(hoveredNode)}
+                    </div>
+                    <div className="disk-analysis-details__path">{hoveredNode.path}</div>
+                    <DetailRow label="Recursive Size" value={formatBytes(hoveredNode.recursiveSize)} />
+                    <DetailRow label="Children" value={formatCount(hoveredNode.childCount)} />
                   </div>
-                  <div className="disk-analysis-details__path">{hoveredNode.path}</div>
-                  <DetailRow label="Recursive Size" value={formatBytes(hoveredNode.recursiveSize)} />
-                  <DetailRow label="Children" value={formatCount(hoveredNode.childCount)} />
-                </div>
-              ) : (
-                <div className="disk-analysis-sidebar-empty">Hover a block to inspect it.</div>
-              )}
-            </section>
+                ) : (
+                  <div className="disk-analysis-sidebar-empty">Hover a block to inspect it.</div>
+                )}
+              </section>
+            ) : null}
 
             <section className="disk-analysis-sidebar-section">
               <div className="label">Extension Legend</div>
@@ -764,8 +852,10 @@ function DiskAnalysisPage() {
               </div>
             ) : currentRoot ? (
               <TreemapCanvas
+                key={mobileSidebarOpen ? "treemap-hidden" : "treemap-visible"}
                 root={currentRoot}
                 legendByExtension={legendByExtension}
+                compactMode={isCompactLayout}
                 onHoverNode={setHoveredPath}
                 onOpenNode={openInFiles}
               />
@@ -1016,11 +1106,13 @@ function ScanIssuesModal({
 function TreemapCanvas({
   root,
   legendByExtension,
+  compactMode,
   onHoverNode,
   onOpenNode,
 }: {
   root: DiskAnalysisTreemapNode;
   legendByExtension: Map<string, DiskAnalysisLegendItem>;
+  compactMode: boolean;
   onHoverNode: (path: string | null) => void;
   onOpenNode: (node: DiskAnalysisTreemapNode) => void;
 }) {
@@ -1032,6 +1124,7 @@ function TreemapCanvas({
   const lastHoverUpdateAtRef = useRef(0);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [hoveredPath, setHoveredPath] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<DiskAnalysisTreemapNode | null>(null);
   const canvasWidth = containerSize.width > 0 ? containerSize.width : DEFAULT_TREEMAP_WIDTH;
   const canvasHeight = containerSize.height > 0 ? containerSize.height : DEFAULT_TREEMAP_HEIGHT;
   const drawables = useMemo(
@@ -1069,6 +1162,12 @@ function TreemapCanvas({
   useEffect(() => {
     drawTreemapCanvas(canvasRef.current, drawables, canvasWidth, canvasHeight, hoveredPath);
   }, [canvasHeight, canvasWidth, drawables, hoveredPath]);
+
+  useEffect(() => {
+    if (!compactMode) {
+      setSelectedNode(null);
+    }
+  }, [compactMode]);
 
   useEffect(() => {
     return () => {
@@ -1157,6 +1256,13 @@ function TreemapCanvas({
             onOpenNode(node);
           }
         }}
+        onClick={(event) => {
+          if (!compactMode) {
+            return;
+          }
+          const node = resolveNodeFromPointer(event);
+          setSelectedNode(node);
+        }}
         onFocus={(event) => {
           updateHoveredNode(resolveNodeFromPointer(event));
         }}
@@ -1170,7 +1276,41 @@ function TreemapCanvas({
           }
         }}
       />
-      <div className="disk-analysis-treemap__hint">Double-click a block to open it in Files.</div>
+      {!compactMode ? (
+        <div className="disk-analysis-treemap__hint">Double-click a block to open it in Files.</div>
+      ) : null}
+      {compactMode && selectedNode ? (
+        <div className="disk-analysis-treemap__popover" role="dialog" aria-label="Selected block details">
+          <div className="disk-analysis-treemap__popover-header">
+            <div className="disk-analysis-treemap__popover-title">{selectedNode.name}</div>
+            <Button
+              type="button"
+              variant="icon"
+              onClick={() => setSelectedNode(null)}
+              aria-label="Close selected block details"
+            >
+              <X size={14} />
+            </Button>
+          </div>
+          <div className="disk-analysis-details__type">{getNodeDisplayType(selectedNode)}</div>
+          <div className="disk-analysis-details__path">{selectedNode.path}</div>
+          <div className="disk-analysis-treemap__popover-stats">
+            <DetailRow label="Recursive Size" value={formatBytes(selectedNode.recursiveSize)} />
+            <DetailRow label="Children" value={formatCount(selectedNode.childCount)} />
+          </div>
+          <div className="disk-analysis-treemap__popover-actions">
+            <Button
+              type="button"
+              onClick={() => {
+                onOpenNode(selectedNode);
+              }}
+            >
+              <ArrowRight size={14} />
+              <span>Open In Files</span>
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

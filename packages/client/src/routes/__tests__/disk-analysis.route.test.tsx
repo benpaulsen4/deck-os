@@ -240,6 +240,19 @@ function makeDirectory(path: string, children: DiskTreeNode[]): DiskTreeNode {
 
 describe("disk analysis route", () => {
   beforeEach(() => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }))
+    );
     window.scrollTo = vi.fn();
     Element.prototype.scrollIntoView = vi.fn();
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
@@ -365,6 +378,7 @@ describe("disk analysis route", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -588,6 +602,129 @@ describe("disk analysis route", () => {
       expect(screen.getByDisplayValue("C:\\reports")).toBeInTheDocument()
     );
     expect(await screen.findByText("archive.log")).toBeInTheDocument();
+  });
+
+  it("toggles between treemap and details views for compact layouts", async () => {
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      activeJob: null,
+    };
+    state.snapshotEnvelope = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      snapshot: {
+        mount: { mount: "C:\\", fs: "ntfs" },
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        root: makeDirectory("C:\\", [
+          makeDirectory("C:\\reports", [makeFile("C:\\reports\\archive.log", 256, "log")]),
+        ]),
+        extensionLegend: [{ extension: "log", colorToken: "disk-ext-1", count: 1, totalBytes: 256 }],
+        totals: {
+          totalBytes: 256,
+          totalFiles: 1,
+          totalDirectories: 2,
+        },
+        issues: [],
+      },
+    };
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    const treemapToggle = await screen.findByRole("button", { name: "Treemap" });
+    const detailsToggle = screen.getByRole("button", { name: "Details" });
+    const layout = document.querySelector(".disk-analysis-layout");
+
+    expect(layout).not.toBeNull();
+    expect(detailsToggle).toHaveAttribute("aria-pressed", "true");
+    expect(treemapToggle).toHaveAttribute("aria-pressed", "false");
+    expect(layout).toHaveClass("disk-analysis-layout--mobile-sidebar-open");
+
+    fireEvent.click(treemapToggle);
+
+    expect(layout).not.toHaveClass("disk-analysis-layout--mobile-sidebar-open");
+    expect(detailsToggle).toHaveAttribute("aria-pressed", "false");
+    expect(treemapToggle).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(detailsToggle);
+
+    expect(layout).toHaveClass("disk-analysis-layout--mobile-sidebar-open");
+    expect(detailsToggle).toHaveAttribute("aria-pressed", "true");
+    expect(treemapToggle).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("shows compact treemap details in a popover on single click", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        matches: query === "(max-width: 1100px)",
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }))
+    );
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      activeJob: null,
+    };
+    state.snapshotEnvelope = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      snapshot: {
+        mount: { mount: "C:\\", fs: "ntfs" },
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        root: makeDirectory("C:\\", [
+          makeDirectory("C:\\reports", [makeFile("C:\\reports\\archive.log", 256, "log")]),
+        ]),
+        extensionLegend: [{ extension: "log", colorToken: "disk-ext-1", count: 1, totalBytes: 256 }],
+        totals: {
+          totalBytes: 256,
+          totalFiles: 1,
+          totalDirectories: 2,
+        },
+        issues: [{ code: "permission-denied", path: "C:\\restricted", message: "Denied", recoverable: true }],
+      },
+    };
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    expect(await screen.findByRole("button", { name: /Back/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Scan/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Issues/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Treemap" }));
+
+    const treemap = await screen.findByRole("img", { name: "Disk usage treemap" });
+    fireEvent.click(treemap, { clientX: 480, clientY: 340 });
+
+    expect(await screen.findByRole("dialog", { name: "Selected block details" })).toBeInTheDocument();
+    expect(screen.getByText("archive.log")).toBeInTheDocument();
+    expect(screen.getByText("C:\\reports\\archive.log")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open In Files" }));
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("C:\\reports")).toBeInTheDocument()
+    );
   });
 
   it("moves scan issues into a header modal", async () => {
