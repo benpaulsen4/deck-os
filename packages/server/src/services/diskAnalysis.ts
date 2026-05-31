@@ -15,7 +15,7 @@ import {
   type DiskAnalysisSnapshotEnvelope,
   type DiskAnalysisStartScanResult,
   type DiskAnalysisTreemapNode,
-} from "../lib/diskAnalysisContract.js";
+} from "@deckos/contracts";
 import { DATA_DIR } from "../lib/config.js";
 
 type JobPhase = DiskAnalysisJobState["phase"];
@@ -184,11 +184,13 @@ function resolveMountPath(mountPath: string): string {
   return path.resolve(mountPath);
 }
 
+function normalizeMountPathKey(mountPath: string): string {
+  const resolvedMount = resolveMountPath(mountPath);
+  return process.platform === "win32" ? resolvedMount.toLowerCase() : resolvedMount;
+}
+
 function getMountKey(mount: DiskAnalysisMountIdentity): string {
-  const resolvedMount = resolveMountPath(mount.mount);
-  const normalizedMount =
-    process.platform === "win32" ? resolvedMount.toLowerCase() : resolvedMount;
-  return `${normalizedMount}::${mount.fs.trim().toLowerCase()}`;
+  return normalizeMountPathKey(mount.mount);
 }
 
 function getMountName(targetPath: string): string {
@@ -376,6 +378,43 @@ function getPersistedGeneratedAt(parsed: PersistedCacheFile): string | null {
   return Number.isNaN(new Date(generatedAt).getTime()) ? null : generatedAt;
 }
 
+function hasShallowSnapshotMetadata(value: unknown): value is PersistedCacheFile["snapshot"] {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const snapshot = value as Partial<PersistedCacheFile["snapshot"]>;
+  if (typeof snapshot.generatedAt !== "string") {
+    return false;
+  }
+  if (Number.isNaN(new Date(snapshot.generatedAt).getTime())) {
+    return false;
+  }
+  if (!snapshot.root || typeof snapshot.root !== "object") {
+    return false;
+  }
+  const root = snapshot.root as Partial<DiskAnalysisSnapshot["root"]>;
+  if (
+    typeof root.path !== "string" ||
+    typeof root.name !== "string" ||
+    (root.type !== "directory" && root.type !== "file") ||
+    !Array.isArray(root.children)
+  ) {
+    return false;
+  }
+  if (!snapshot.totals || typeof snapshot.totals !== "object") {
+    return false;
+  }
+  const totals = snapshot.totals as Partial<DiskAnalysisSnapshot["totals"]>;
+  if (
+    typeof totals.totalBytes !== "number" ||
+    typeof totals.totalFiles !== "number" ||
+    typeof totals.totalDirectories !== "number"
+  ) {
+    return false;
+  }
+  return Array.isArray(snapshot.extensionLegend) && Array.isArray(snapshot.issues);
+}
+
 function getPersistedMount(parsed: PersistedCacheFile): DiskAnalysisMountIdentity | null {
   if (
     parsed &&
@@ -398,15 +437,14 @@ async function readPersistedCacheMetadata(
     return null;
   }
   const persistedMount = getPersistedMount(file.parsed);
-  const generatedAt = getPersistedGeneratedAt(file.parsed);
-  if (!persistedMount || !generatedAt) {
+  if (!persistedMount || !hasShallowSnapshotMetadata(file.parsed.snapshot)) {
     await moveCorruptCache(file.cachePath);
     return null;
   }
   const persistedCache = isPersistedCacheMetadata(file.parsed.cache)
     ? file.parsed.cache
     : undefined;
-  return getCacheMetadata(generatedAt, persistedCache);
+  return getCacheMetadata(file.parsed.snapshot.generatedAt, persistedCache);
 }
 
 async function readPersistedCache(
@@ -1234,6 +1272,9 @@ export function cancelScan(mount: DiskAnalysisMountIdentity, jobId: string): boo
     return false;
   }
   if (getMountKey(job.mount) !== getMountKey(mount)) {
+    return false;
+  }
+  if (!isActivePhase(job.phase)) {
     return false;
   }
   job.controller.abort();

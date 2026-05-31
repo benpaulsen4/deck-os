@@ -14,6 +14,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "@deckos/contracts": path.resolve(__dirname, "../contracts/src/index.ts"),
     },
   },
   server: {

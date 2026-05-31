@@ -1,10 +1,10 @@
-import {
-  getPathParent,
-  type DiskAnalysisIssue,
-  type DiskAnalysisMountIdentity,
-  type DiskAnalysisSnapshot,
-  type DiskAnalysisTreemapNode,
-} from "../../../server/src/lib/diskAnalysisContract.js";
+import { getPathParent } from "@deckos/contracts";
+import type {
+  DiskAnalysisIssue,
+  DiskAnalysisMountIdentity,
+  DiskAnalysisSnapshot,
+  DiskAnalysisTreemapNode,
+} from "@deckos/contracts";
 
 export type DiskAnalysisLegendItem = {
   extension: string;
@@ -481,6 +481,22 @@ export function findNodeByPath(
     }
   }
   return null;
+}
+
+export function resolveHoveredNode(
+  presentationRoot: DiskAnalysisTreemapNode | null,
+  rawRoot: DiskAnalysisTreemapNode | null,
+  hoveredPath: string | null,
+  fallbackRoot: DiskAnalysisTreemapNode | null = null
+): DiskAnalysisTreemapNode | null {
+  return (
+    findNodeByPath(presentationRoot, hoveredPath) ??
+    findNodeByPath(rawRoot, hoveredPath) ??
+    presentationRoot ??
+    fallbackRoot ??
+    rawRoot ??
+    null
+  );
 }
 
 export function deriveLegendFromSnapshot(

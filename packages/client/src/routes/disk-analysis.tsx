@@ -6,26 +6,26 @@ import { Button } from "../components/ui/Button";
 import { useToastStore } from "../stores/toast";
 import { emitUnauthorizedEvent, fetchAuthStatus } from "../lib/auth";
 import {
-  createPresentationTree,
-  createSyntheticLiveRoot,
-  deriveLegendFromSnapshot,
-  findNodeByPath,
-  formatBytes,
-  formatCount,
-  formatRelativeGeneratedAt,
-  getMountLabel,
-  getNodeNavigationSearch,
-  integrateBranchIntoTree,
-} from "../lib/diskAnalysisClient";
-import { useTRPC, trpcClient } from "../trpc";
-import {
   DiskAnalysisRouteSearchSchema,
   DiskAnalysisScanEventSchema,
   type DiskAnalysisJobState,
   type DiskAnalysisMountIdentity,
   type DiskAnalysisSnapshot,
   type DiskAnalysisTreemapNode,
-} from "../../../server/src/lib/diskAnalysisContract.js";
+} from "@deckos/contracts";
+import {
+  createPresentationTree,
+  createSyntheticLiveRoot,
+  deriveLegendFromSnapshot,
+  formatBytes,
+  formatCount,
+  formatRelativeGeneratedAt,
+  getMountLabel,
+  getNodeNavigationSearch,
+  integrateBranchIntoTree,
+  resolveHoveredNode,
+} from "../lib/diskAnalysisClient";
+import { useTRPC, trpcClient } from "../trpc";
 import { HoverDetails, LegendRow, ScanIssuesModal, SidebarStat } from "./disk-analysis.components";
 import { TreemapCanvas } from "./disk-analysis.treemap";
 
@@ -473,9 +473,6 @@ function DiskAnalysisPage() {
         return;
       }
       setStreamError("Live scan stream disconnected.");
-      requestedStreamKeyRef.current = null;
-      setStreamPath(null);
-      source.close();
       void fetchAuthStatus()
         .then((status) => {
           if (status.enabled && !status.unlocked) {
@@ -534,10 +531,12 @@ function DiskAnalysisPage() {
   );
   const hoveredNode = useMemo(
     () =>
-      findNodeByPath(activeView === "live" ? liveRawRootRef.current : currentRoot, hoveredPath) ??
-      currentRoot ??
-      cachedSnapshot?.root ??
-      null,
+      resolveHoveredNode(
+        currentRoot,
+        activeView === "live" ? liveRawRootRef.current : currentRoot,
+        hoveredPath,
+        cachedSnapshot?.root ?? null
+      ),
     [activeView, cachedSnapshot?.root, currentRoot, hoveredPath]
   );
   const issueList = useMemo(() => {

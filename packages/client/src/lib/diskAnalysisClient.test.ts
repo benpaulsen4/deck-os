@@ -3,8 +3,9 @@ import {
   createPresentationTree,
   createSyntheticLiveRoot,
   integrateBranchIntoTree,
+  resolveHoveredNode,
 } from "./diskAnalysisClient";
-import type { DiskAnalysisMountIdentity, DiskAnalysisTreemapNode } from "../../../server/src/lib/diskAnalysisContract.js";
+import type { DiskAnalysisMountIdentity, DiskAnalysisTreemapNode } from "@deckos/contracts";
 
 function makeDirectory(path: string, children: DiskAnalysisTreemapNode[] = []): DiskAnalysisTreemapNode {
   return {
@@ -131,5 +132,24 @@ describe("diskAnalysisClient", () => {
     expect(users?.recursiveSize).toBe(300);
     expect(benp?.recursiveSize).toBe(300);
     expect(benp?.children.some((child) => child.path === "C:\\Users\\benp\\a.txt")).toBe(true);
+  });
+
+  it("resolves hovered synthetic aggregate buckets from the presentation tree before raw data", () => {
+    const rawRoot = makeDirectory("C:\\", [
+      ...Array.from({ length: 50 }, (_, index) => makeFile(`C:\\tiny-${index}.txt`, 10)),
+    ]);
+    const presentationRoot = createPresentationTree(rawRoot, {
+      maxDepth: 3,
+      maxChildrenPerDirectory: 8,
+      minShareByDepth: [0, 0.02, 0.01],
+    });
+    const aggregateBucket = presentationRoot?.children.find((child) =>
+      child.path.endsWith("__deckos_other_entries__")
+    );
+
+    expect(aggregateBucket).toBeDefined();
+    expect(resolveHoveredNode(presentationRoot, rawRoot, aggregateBucket?.path ?? null)).toEqual(
+      aggregateBucket
+    );
   });
 });

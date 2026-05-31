@@ -10,7 +10,7 @@ import {
 import type {
   DiskAnalysisMountState,
   DiskAnalysisSnapshotEnvelope,
-} from "../../../../server/src/lib/diskAnalysisContract.js";
+} from "@deckos/contracts";
 
 type QueryDirectoryListing = {
   cwd: string;
@@ -505,7 +505,7 @@ describe("disk analysis route", () => {
     expect(startScanSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("surfaces stream disconnects and emits an auth lock event when needed", async () => {
+  it("surfaces transient stream disconnects without starting a new scan", async () => {
     fetchAuthStatusSpy.mockResolvedValue({ enabled: true, unlocked: false });
     renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
 
@@ -519,6 +519,8 @@ describe("disk analysis route", () => {
     expect(await screen.findByText("Live scan stream disconnected.")).toBeInTheDocument();
     await waitFor(() => expect(fetchAuthStatusSpy).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(emitUnauthorizedEventSpy).toHaveBeenCalledTimes(1));
+    expect(startScanSpy).toHaveBeenCalledTimes(1);
+    expect(MockEventSource.latest().url).toBe(eventSource.url);
   });
 
   it("does not auto-start a second scan after a missing-cache live scan completes", async () => {

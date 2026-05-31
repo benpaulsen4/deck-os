@@ -12,7 +12,7 @@ import * as pullJobsService from "../services/pullJobs.js";
 import {
   DiskAnalysisMountIdentitySchema,
   DiskAnalysisScanEventSchema,
-} from "../lib/diskAnalysisContract.js";
+} from "@deckos/contracts";
 import * as diskAnalysisService from "../services/diskAnalysis.js";
 
 export function registerRuntimeRoutes(app: Hono) {
@@ -162,11 +162,21 @@ export function registerRuntimeRoutes(app: Hono) {
     }
 
     const { jobId } = c.req.param();
+    const bufferedEvents: unknown[] = [];
+    let writeBufferedEvent: ((event: unknown) => void) | null = null;
+    const unsubscribe = diskAnalysisService.subscribeToJob(jobId, (event) => {
+      if (writeBufferedEvent) {
+        writeBufferedEvent(event);
+        return;
+      }
+      bufferedEvents.push(event);
+    });
 
     let initialEvent;
     try {
       initialEvent = diskAnalysisService.getJobStreamInitialEvent(jobId, mountParse.data);
     } catch (error) {
+      unsubscribe();
       if (error instanceof diskAnalysisService.DiskAnalysisJobNotFoundError) {
         return c.json({ error: error.message }, 404);
       }
@@ -177,6 +187,7 @@ export function registerRuntimeRoutes(app: Hono) {
     }
 
     return streamSSE(c, async (stream) => {
+      let streamClosed = false;
       const writeEvent = (event: unknown) => {
         const payload = DiskAnalysisScanEventSchema.parse(event);
         stream.writeSSE({
@@ -186,21 +197,28 @@ export function registerRuntimeRoutes(app: Hono) {
         });
       };
 
-      try {
-        writeEvent(initialEvent);
-      } catch (error) {
-        console.error("[deckos] Error sending initial disk analysis event:", error);
-        return;
-      }
-
-      const unsubscribe = diskAnalysisService.subscribeToJob(jobId, (event) => {
+      writeBufferedEvent = (event) => {
+        if (streamClosed) {
+          return;
+        }
         try {
           writeEvent(event);
         } catch (error) {
           console.error("[deckos] Error sending disk analysis event:", error);
           unsubscribe();
         }
-      });
+      };
+
+      try {
+        writeEvent(initialEvent);
+        for (const event of bufferedEvents) {
+          writeEvent(event);
+        }
+      } catch (error) {
+        console.error("[deckos] Error sending initial disk analysis event:", error);
+        unsubscribe();
+        return;
+      }
 
       const keepaliveInterval = setInterval(() => {
         try {
@@ -211,6 +229,7 @@ export function registerRuntimeRoutes(app: Hono) {
       }, 30000);
 
       stream.onAbort(() => {
+        streamClosed = true;
         clearInterval(keepaliveInterval);
         unsubscribe();
       });

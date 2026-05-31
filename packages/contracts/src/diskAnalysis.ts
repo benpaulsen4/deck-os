@@ -1,37 +1,9 @@
 import { z } from "zod";
-
-function isAbsolutePath(value: string): boolean {
-  if (value.startsWith("/")) {
-    return true;
-  }
-  if (/^[A-Za-z]:$/.test(value)) {
-    return true;
-  }
-  if (/^[A-Za-z]:[\\/]/.test(value)) {
-    return true;
-  }
-  return /^\\\\[^\\/?%*:|"<>]+\\[^\\/?%*:|"<>]+/.test(value);
-}
-
-const AbsolutePathSchema = z
-  .string()
-  .min(1)
-  .max(4096)
-  .refine(isAbsolutePath, "Absolute path required");
-const MountFsSchema = z.string().min(1).max(1024);
-const IsoTimestampSchema = z.string().datetime();
+import { AbsolutePathSchema, IsoTimestampSchema, MountFsSchema } from "./common.js";
 
 const DiskAnalysisRouteSearchSchema = z.object({
   mount: AbsolutePathSchema,
   fs: MountFsSchema.optional(),
-});
-
-const FilesRouteSourceSchema = z.enum(["disk-analysis"]);
-
-const FilesRouteSearchSchema = z.object({
-  path: AbsolutePathSchema.optional(),
-  reveal: AbsolutePathSchema.optional(),
-  source: FilesRouteSourceSchema.optional(),
 });
 
 const DiskAnalysisMountIdentitySchema = z.object({
@@ -104,19 +76,19 @@ const DiskAnalysisTreemapNodeSchema: z.ZodType<
   DiskAnalysisTreemapNodeInput
 > = z.lazy(
   (): z.ZodType<DiskAnalysisTreemapNode, z.ZodTypeDef, DiskAnalysisTreemapNodeInput> =>
-  z.object({
-    path: AbsolutePathSchema,
-    name: z.string().min(1).max(1024),
-    type: z.enum(["directory", "file"]),
-    size: z.number().nonnegative(),
-    recursiveSize: z.number().nonnegative(),
-    extension: z.string().min(1).max(64).nullable().optional(),
-    childCount: z.number().int().nonnegative(),
-    descendantsScanned: z.number().int().nonnegative(),
-    truncated: z.boolean().default(false),
-    issues: z.array(DiskAnalysisIssueSchema).default([]),
-    children: z.array(DiskAnalysisTreemapNodeSchema).default([]),
-  })
+    z.object({
+      path: AbsolutePathSchema,
+      name: z.string().min(1).max(1024),
+      type: z.enum(["directory", "file"]),
+      size: z.number().nonnegative(),
+      recursiveSize: z.number().nonnegative(),
+      extension: z.string().min(1).max(64).nullable().optional(),
+      childCount: z.number().int().nonnegative(),
+      descendantsScanned: z.number().int().nonnegative(),
+      truncated: z.boolean().default(false),
+      issues: z.array(DiskAnalysisIssueSchema).default([]),
+      children: z.array(DiskAnalysisTreemapNodeSchema).default([]),
+    })
 );
 
 const DiskAnalysisCacheStateSchema = z.enum(["missing", "fresh", "stale"]);
@@ -218,50 +190,7 @@ const DiskAnalysisScanEventSchema = z.discriminatedUnion("event", [
   }),
 ]);
 
-function trimTrailingPathSeparators(value: string): string {
-  if (value === "/") {
-    return value;
-  }
-  if (/^[A-Za-z]:[\\/]?$/.test(value)) {
-    return `${value.slice(0, 2)}\\`;
-  }
-  return value.replace(/[\\/]+$/, "");
-}
-
-function getPathParent(value: string): string {
-  const trimmed = trimTrailingPathSeparators(value);
-  if (trimmed === "/") {
-    return trimmed;
-  }
-  if (/^[A-Za-z]:\\$/.test(trimmed)) {
-    return trimmed;
-  }
-
-  const lastSeparatorIndex = Math.max(trimmed.lastIndexOf("\\"), trimmed.lastIndexOf("/"));
-  if (lastSeparatorIndex < 0) {
-    return "";
-  }
-  if (lastSeparatorIndex === 0) {
-    return "/";
-  }
-  if (lastSeparatorIndex === 2 && /^[A-Za-z]:/.test(trimmed)) {
-    return `${trimmed.slice(0, 2)}\\`;
-  }
-  return trimmed.slice(0, lastSeparatorIndex);
-}
-
-function getFilesRouteTargetPath(search: FilesRouteSearch): string {
-  if (search.path) {
-    return search.path;
-  }
-  if (search.reveal) {
-    return getPathParent(search.reveal);
-  }
-  return "";
-}
-
 type DiskAnalysisRouteSearch = z.infer<typeof DiskAnalysisRouteSearchSchema>;
-type FilesRouteSearch = z.infer<typeof FilesRouteSearchSchema>;
 type DiskAnalysisMountIdentity = z.infer<typeof DiskAnalysisMountIdentitySchema>;
 type DiskAnalysisIssue = z.infer<typeof DiskAnalysisIssueSchema>;
 type DiskAnalysisResourceLimits = z.infer<typeof DiskAnalysisResourceLimitsSchema>;
@@ -277,45 +206,40 @@ type DiskAnalysisCancelScanInput = z.infer<typeof DiskAnalysisCancelScanInputSch
 type DiskAnalysisScanEvent = z.infer<typeof DiskAnalysisScanEventSchema>;
 
 export {
-  DiskAnalysisRouteSearchSchema,
-  FilesRouteSourceSchema,
-  FilesRouteSearchSchema,
-  DiskAnalysisMountIdentitySchema,
-  DiskAnalysisScanPhaseSchema,
+  DiskAnalysisCacheMetadataSchema,
+  DiskAnalysisCacheStateSchema,
+  DiskAnalysisCancelScanInputSchema,
   DiskAnalysisIssueCodeSchema,
   DiskAnalysisIssueSchema,
-  DiskAnalysisResourceLimitsSchema,
-  DiskAnalysisTreemapNodeSchema,
-  DiskAnalysisCacheStateSchema,
-  DiskAnalysisCacheMetadataSchema,
-  DiskAnalysisProgressSchema,
   DiskAnalysisJobStateSchema,
-  DiskAnalysisSnapshotSchema,
-  DiskAnalysisSnapshotEnvelopeSchema,
+  DiskAnalysisMountIdentitySchema,
   DiskAnalysisMountStateSchema,
+  DiskAnalysisProgressSchema,
+  DiskAnalysisResourceLimitsSchema,
+  DiskAnalysisRouteSearchSchema,
+  DiskAnalysisScanEventSchema,
+  DiskAnalysisScanPhaseSchema,
+  DiskAnalysisSnapshotEnvelopeSchema,
+  DiskAnalysisSnapshotSchema,
   DiskAnalysisStartScanInputSchema,
   DiskAnalysisStartScanResultSchema,
-  DiskAnalysisCancelScanInputSchema,
-  DiskAnalysisScanEventSchema,
-  getFilesRouteTargetPath,
-  getPathParent,
+  DiskAnalysisTreemapNodeSchema,
 };
 
 export type {
-  DiskAnalysisRouteSearch,
-  FilesRouteSearch,
-  DiskAnalysisMountIdentity,
-  DiskAnalysisIssue,
-  DiskAnalysisTreemapNode,
-  DiskAnalysisResourceLimits,
   DiskAnalysisCacheMetadata,
-  DiskAnalysisProgress,
+  DiskAnalysisCancelScanInput,
+  DiskAnalysisIssue,
   DiskAnalysisJobState,
+  DiskAnalysisMountIdentity,
+  DiskAnalysisMountState,
+  DiskAnalysisProgress,
+  DiskAnalysisResourceLimits,
+  DiskAnalysisRouteSearch,
+  DiskAnalysisScanEvent,
   DiskAnalysisSnapshot,
   DiskAnalysisSnapshotEnvelope,
-  DiskAnalysisMountState,
   DiskAnalysisStartScanInput,
   DiskAnalysisStartScanResult,
-  DiskAnalysisCancelScanInput,
-  DiskAnalysisScanEvent,
+  DiskAnalysisTreemapNode,
 };

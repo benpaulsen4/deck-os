@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { DiskAnalysisScanEvent, DiskAnalysisMountIdentity } from "../lib/diskAnalysisContract.js";
+import type { DiskAnalysisScanEvent, DiskAnalysisMountIdentity } from "@deckos/contracts";
 
 type DiskAnalysisModule = typeof import("./diskAnalysis.js");
 
@@ -48,10 +48,7 @@ function getMountCacheHash(mount: DiskAnalysisMountIdentity): string {
   const resolvedMount = path.resolve(mount.mount);
   const normalizedMount =
     process.platform === "win32" ? resolvedMount.toLowerCase() : resolvedMount;
-  return crypto
-    .createHash("sha1")
-    .update(`${normalizedMount}::${mount.fs.trim().toLowerCase()}`)
-    .digest("hex");
+  return crypto.createHash("sha1").update(normalizedMount).digest("hex");
 }
 
 describe("diskAnalysis service", () => {
@@ -260,6 +257,24 @@ describe("diskAnalysis service", () => {
     await fs.remove(dataDir);
   });
 
+  test("reuses the same active job for a mount even when callers provide different fs values", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.writeFile(path.join(mountDir, "notes.txt"), "cached", "utf8");
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const first = await diskAnalysis.startScan({ mount: mountDir, fs: "ntfs" });
+    const second = await diskAnalysis.startScan({ mount: mountDir, fs: "ext4" });
+
+    expect(second.jobId).toBe(first.jobId);
+    expect(second.streamPath).toBe(first.streamPath);
+
+    await waitForTerminalJob(diskAnalysis, first.jobId);
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
   test("moves malformed persisted snapshots aside instead of serving them", async () => {
     const dataDir = await createTempDir("deckos-disk-analysis-data-");
     const mountDir = await createTempDir("deckos-disk-analysis-mount-");
@@ -292,10 +307,13 @@ describe("diskAnalysis service", () => {
     diskAnalysis.__testing.resetState();
     diskAnalysis = await loadDiskAnalysisModule(dataDir);
 
+    const mountState = await diskAnalysis.getMountState(mount);
     const snapshot = await diskAnalysis.getCachedSnapshot(mount);
     const diskAnalysisDir = path.join(dataDir, "disk-analysis");
     const files = await fs.readdir(diskAnalysisDir);
 
+    expect(mountState.cache.state).toBe("missing");
+    expect(mountState.activeJob).not.toBeNull();
     expect(snapshot).toBeNull();
     expect(files.some((file) => file.includes(".corrupt-"))).toBe(true);
 
@@ -420,6 +438,25 @@ describe("diskAnalysis service", () => {
 
     expect(cached?.snapshot.root.children.some((child) => child.name === "first.bin")).toBe(false);
     expect(cached?.snapshot.root.children.some((child) => child.name === "second.bin")).toBe(true);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("ignores cancel requests for terminal jobs", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.writeFile(path.join(mountDir, "done.txt"), "finished", "utf8");
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const started = await diskAnalysis.startScan(mount);
+    const finalJob = await waitForTerminalJob(diskAnalysis, started.jobId);
+
+    expect(finalJob?.phase).toBe("completed");
+    expect(diskAnalysis.cancelScan(mount, started.jobId)).toBe(false);
+    expect(diskAnalysis.getJob(started.jobId)?.phase).toBe("completed");
 
     await diskAnalysis.__testing.clearState();
     await fs.remove(dataDir);

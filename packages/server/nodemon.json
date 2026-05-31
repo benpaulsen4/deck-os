@@ -1,7 +1,7 @@
 {
-  "watch": ["src"],
+  "watch": ["src", "../contracts/src"],
   "ext": "ts,json",
   "ignore": ["dist"],
-  "exec": "tsx src/index.ts",
+  "exec": "pnpm --filter @deckos/contracts build && tsx src/index.ts",
   "restartable": "rs"
 }

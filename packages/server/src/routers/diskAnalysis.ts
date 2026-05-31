@@ -6,7 +6,7 @@ import {
   DiskAnalysisSnapshotEnvelopeSchema,
   DiskAnalysisStartScanInputSchema,
   DiskAnalysisStartScanResultSchema,
-} from "../lib/diskAnalysisContract.js";
+} from "@deckos/contracts";
 import { protectedProcedure, router } from "../trpc/trpc.js";
 import * as diskAnalysisService from "../services/diskAnalysis.js";
 

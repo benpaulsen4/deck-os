@@ -11,7 +11,7 @@ import {
 import type {
   DiskAnalysisIssue,
   DiskAnalysisTreemapNode,
-} from "../../../server/src/lib/diskAnalysisContract.js";
+} from "@deckos/contracts";
 
 type IssuesPageState = {
   query: string;

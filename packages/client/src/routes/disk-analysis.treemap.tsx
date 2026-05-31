@@ -8,7 +8,7 @@ import {
   getNodeDisplayType,
   type DiskAnalysisLegendItem,
 } from "../lib/diskAnalysisClient";
-import type { DiskAnalysisTreemapNode } from "../../../server/src/lib/diskAnalysisContract.js";
+import type { DiskAnalysisTreemapNode } from "@deckos/contracts";
 import { DetailRow } from "./disk-analysis.components";
 
 type TreemapRect = {

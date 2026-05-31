@@ -51,7 +51,7 @@ import {
   FilesRouteSearchSchema,
   getFilesRouteTargetPath,
   getPathParent,
-} from "../../../server/src/lib/diskAnalysisContract.js";
+} from "@deckos/contracts";
 
 export const Route = createFileRoute("/files")({
   validateSearch: (search) => FilesRouteSearchSchema.parse(search),
