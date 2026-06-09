@@ -21,7 +21,7 @@
     "busboy": "^1.6.0",
     "dockerode": "^5.0.0",
     "fs-extra": "^11.3.3",
-    "hono": "^4.12.18",
+    "hono": "^4.12.21",
     "systeminformation": "^5.31.6",
     "yaml": "^2.8.3",
     "zod": "^3.24.2"
@@ -36,6 +36,6 @@
     "rimraf": "^6.0.1",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.6"
   }
 }
