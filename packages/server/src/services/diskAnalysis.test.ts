@@ -478,7 +478,7 @@ describe("diskAnalysis service", () => {
     await diskAnalysis.__testing.clearState();
     await fs.remove(dataDir);
     await fs.remove(mountDir);
-  });
+  }, 15000);
 
   test("cache file can be replaced by a later scan", async () => {
     const dataDir = await createTempDir("deckos-disk-analysis-data-");

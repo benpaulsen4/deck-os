@@ -3,8 +3,14 @@ packages:
 overrides:
   '@protobufjs/utf8@<=1.1.0': '>=1.1.1'
   'wait-on@9.0.5>axios': 1.16.1
+  '@babel/core': 7.29.6
+  '@vitejs/plugin-react>@babel/core': 7.29.7
+  '@grpc/grpc-js': 1.14.4
+  'dockerode>@grpc/grpc-js': 1.14.4
   'brace-expansion@>=5.0.0 <5.0.6': '>=5.0.6'
+  esbuild: 0.28.1
   flatted: 3.4.2
   follow-redirects: 1.16.0
-  '@grpc/proto-loader@0.7.15>protobufjs': 7.6.2
-  '@grpc/proto-loader@0.8.0>protobufjs': 7.6.2
+  'dockerode>protobufjs': 7.6.3
+  '@grpc/proto-loader@0.7.15>protobufjs': 7.6.3
+  '@grpc/proto-loader@0.8.0>protobufjs': 7.6.3
