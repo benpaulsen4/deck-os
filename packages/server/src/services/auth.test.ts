@@ -1,22 +1,36 @@
-import { test, expect, afterAll } from "vitest";
+import { test, expect, afterAll, afterEach, vi } from "vitest";
 import fs from "fs-extra";
 import os from "node:os";
 import path from "node:path";
 import {
+  AuthConfigUnavailableError,
   AuthInvalidPasscodeError,
   AuthRateLimitedError,
   configureAuth,
   disableAuth,
   getAuthStatus,
+  getTrackedFailedAttemptIpsForTests,
+  isSessionValid,
   resetAuthStateForTests,
+  revokeSession,
   setAuthStoragePathForTests,
   unlock,
   updateSessionDuration,
 } from "./auth.js";
 
+const isWindows = process.platform === "win32";
+
 async function createTempDir(prefix: string): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
+
+function configPath(root: string) {
+  return path.join(root, "security", "passcode.json");
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 test("auth defaults to disabled and unlock is not required", async () => {
   const root = await createTempDir("deckos-auth-default-");
@@ -86,6 +100,150 @@ test("updateSessionDuration and disableAuth require the current passcode", async
   const status = await getAuthStatus(null);
   expect(status.enabled).toBe(false);
   expect(status.unlocked).toBe(true);
+  await fs.remove(root);
+});
+
+test("sessions expire once the configured duration has elapsed", async () => {
+  const root = await createTempDir("deckos-auth-expiry-");
+  setAuthStoragePathForTests(root);
+  const sessionDurationMs = 60 * 60 * 1000;
+  await configureAuth({ passcode: "2468", sessionDurationMs });
+
+  const session = await unlock({ passcode: "2468", ip: "10.0.0.11" });
+  expect(isSessionValid(session.token)).toBe(true);
+
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(session.expiresAt + 1));
+  expect(isSessionValid(session.token)).toBe(false);
+  expect((await getAuthStatus(session.token)).unlocked).toBe(false);
+  vi.useRealTimers();
+
+  await fs.remove(root);
+});
+
+test("revokeSession invalidates a live token immediately", async () => {
+  const root = await createTempDir("deckos-auth-revoke-");
+  setAuthStoragePathForTests(root);
+  await configureAuth({ passcode: "1357", sessionDurationMs: 2 * 60 * 60 * 1000 });
+
+  const session = await unlock({ passcode: "1357", ip: "10.0.0.12" });
+  expect(isSessionValid(session.token)).toBe(true);
+
+  revokeSession(session.token);
+  expect(isSessionValid(session.token)).toBe(false);
+  expect((await getAuthStatus(session.token)).unlocked).toBe(false);
+  expect(isSessionValid(null)).toBe(false);
+
+  await fs.remove(root);
+});
+
+test("a corrupt passcode file fails closed instead of disabling the lock", async () => {
+  const root = await createTempDir("deckos-auth-corrupt-");
+  setAuthStoragePathForTests(root);
+  await configureAuth({ passcode: "1234", sessionDurationMs: 2 * 60 * 60 * 1000 });
+
+  const raw = await fs.readFile(configPath(root), "utf8");
+  // Simulate the truncation an abrupt exit mid-write used to produce.
+  await fs.writeFile(configPath(root), raw.slice(0, Math.floor(raw.length / 2)), "utf8");
+  resetAuthStateForTests();
+
+  const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const status = await getAuthStatus(null);
+  expect(status).toEqual({
+    enabled: true,
+    unlocked: false,
+    sessionDurationMs: 24 * 60 * 60 * 1000,
+  });
+  await expect(unlock({ passcode: "1234", ip: "10.0.0.13" })).rejects.toBeInstanceOf(
+    AuthConfigUnavailableError
+  );
+
+  // The failure must not be cached: repairing the file recovers without a restart.
+  await fs.writeFile(configPath(root), raw, "utf8");
+  const recovered = await getAuthStatus(null);
+  expect(recovered.enabled).toBe(true);
+  const session = await unlock({ passcode: "1234", ip: "10.0.0.13" });
+  expect((await getAuthStatus(session.token)).unlocked).toBe(true);
+  errorSpy.mockRestore();
+
+  await fs.remove(root);
+});
+
+test("a passcode file holding valid JSON that is not an object fails closed", async () => {
+  const root = await createTempDir("deckos-auth-nonobject-");
+  setAuthStoragePathForTests(root);
+  await fs.ensureDir(path.join(root, "security"));
+  await fs.writeFile(configPath(root), "null", "utf8");
+  resetAuthStateForTests();
+
+  const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const status = await getAuthStatus(null);
+  expect(status.enabled).toBe(true);
+  expect(status.unlocked).toBe(false);
+  errorSpy.mockRestore();
+
+  await fs.remove(root);
+});
+
+test("passcode config is written atomically with restrictive permissions", async () => {
+  const root = await createTempDir("deckos-auth-perms-");
+  setAuthStoragePathForTests(root);
+  await configureAuth({ passcode: "9876", sessionDurationMs: 2 * 60 * 60 * 1000 });
+
+  const securityDir = path.join(root, "security");
+  const leftovers = (await fs.readdir(securityDir)).filter((name) =>
+    name.endsWith(".tmp")
+  );
+  expect(leftovers).toEqual([]);
+
+  if (!isWindows) {
+    expect((await fs.stat(configPath(root))).mode & 0o777).toBe(0o600);
+    expect((await fs.stat(securityDir)).mode & 0o777).toBe(0o700);
+  }
+
+  await fs.remove(root);
+});
+
+test("unlock enforces a global cooldown across distinct source addresses", async () => {
+  const root = await createTempDir("deckos-auth-global-");
+  setAuthStoragePathForTests(root);
+  await configureAuth({ passcode: "1122", sessionDurationMs: 2 * 60 * 60 * 1000 });
+
+  // 20 failures spread over 20 addresses: each address stays under the per-IP
+  // limit of 5, so only the global limiter can catch this.
+  for (let index = 0; index < 20; index += 1) {
+    await expect(
+      unlock({ passcode: "0000", ip: `10.9.0.${index}` })
+    ).rejects.toBeInstanceOf(AuthInvalidPasscodeError);
+  }
+
+  await expect(unlock({ passcode: "1122", ip: "10.9.1.1" })).rejects.toBeInstanceOf(
+    AuthRateLimitedError
+  );
+
+  await fs.remove(root);
+}, 30_000);
+
+test("failed-attempt records are pruned once window and cooldown have lapsed", async () => {
+  const root = await createTempDir("deckos-auth-prune-");
+  setAuthStoragePathForTests(root);
+  await configureAuth({ passcode: "3344", sessionDurationMs: 2 * 60 * 60 * 1000 });
+
+  for (let index = 0; index < 5; index += 1) {
+    await expect(unlock({ passcode: "0000", ip: "10.8.0.1" })).rejects.toBeInstanceOf(
+      AuthInvalidPasscodeError
+    );
+  }
+  expect(getTrackedFailedAttemptIpsForTests()).toContain("10.8.0.1");
+
+  // Past both the 10 minute attempt window and the 5 minute first cooldown.
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(Date.now() + 20 * 60 * 1000));
+  const session = await unlock({ passcode: "3344", ip: "10.8.0.2" });
+  expect(session.token).toBeTruthy();
+  expect(getTrackedFailedAttemptIpsForTests()).toEqual([]);
+  vi.useRealTimers();
+
   await fs.remove(root);
 });
 
