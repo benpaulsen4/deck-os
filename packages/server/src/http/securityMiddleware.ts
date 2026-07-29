@@ -1,4 +1,4 @@
-import type { MiddlewareHandler } from "hono";
+import type { Hono, MiddlewareHandler } from "hono";
 
 /**
  * Methods that cannot change server state on their own. `Origin` is not checked
@@ -26,6 +26,20 @@ function getRequestHost(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * A bare IP literal or loopback name cannot be the target of DNS rebinding:
+ * there is no name for the attacker to re-point.
+ */
+function isRebindingSafeHost(host: string): boolean {
+  const hostname = host.startsWith("[")
+    ? host.slice(1, host.indexOf("]"))
+    : (host.split(":")[0] ?? "");
+  if (hostname === "localhost") {
+    return true;
+  }
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname) || hostname.includes(":");
 }
 
 /**
@@ -64,9 +78,15 @@ function getConfiguredAllowedHosts(): Set<string> {
  * defence and needs no shared secret.
  *
  * Requests without an `Origin` header (curl, scripts, same-origin GETs) are
- * allowed through: browsers always attach `Origin` to cross-site form posts and
- * to `fetch`/XHR, so their absence is not an attack signal, and requiring it
- * would break every non-browser client.
+ * allowed through: current browsers always attach `Origin` to cross-site form
+ * posts and to `fetch`/XHR, so its absence is not an attack signal, and
+ * requiring it would break every non-browser client.
+ *
+ * Caveat on that assumption: WebKit historically omitted `Origin` on cross-site
+ * form submissions, and `Sec-Fetch-Site` (the fallback signal below) only
+ * shipped in Safari 16.4. A pre-16.4 Safari is therefore not covered by either
+ * check. Requiring `Origin` outright is the only way to close that, and it would
+ * break every scripted client, so the trade is made deliberately.
  */
 export function crossOriginGuard(): MiddlewareHandler {
   return async (c, next) => {
@@ -77,12 +97,32 @@ export function crossOriginGuard(): MiddlewareHandler {
 
     const origin = c.req.header("origin");
     const requestHost = getRequestHost(c.req.url);
+    const allowedHosts = getConfiguredAllowedHosts();
+
+    // DNS rebinding survives an Origin-vs-Host comparison, because under
+    // rebinding both are the attacker's own hostname. Checking `Host` against an
+    // allowlist is what closes it -- but a wrong allowlist bricks the panel, so
+    // this only engages when the operator has opted in by setting the variable,
+    // and it still accepts bare IP literals and localhost (an attacker cannot
+    // point a DNS name at an IP literal, so those are not rebindable).
+    if (allowedHosts.size > 0 && requestHost !== null) {
+      if (!allowedHosts.has(requestHost) && !isRebindingSafeHost(requestHost)) {
+        return c.json(
+          {
+            error:
+              `Request rejected: Host "${requestHost}" is not listed in ${ALLOWED_ORIGINS_ENV}. ` +
+              "Add it, or unset the variable to accept any Host.",
+          },
+          403
+        );
+      }
+    }
 
     if (origin) {
       const originHost = parseHostFromOrigin(origin);
       const allowed =
-        (originHost !== null && originHost === requestHost) ||
-        (originHost !== null && getConfiguredAllowedHosts().has(originHost));
+        originHost !== null &&
+        (originHost === requestHost || allowedHosts.has(originHost));
       if (!allowed) {
         return c.json(
           {
@@ -132,13 +172,45 @@ export function requireJsonBodyForTrpcWrites(): MiddlewareHandler {
  * directive that carries the clickjacking value (Start/Stop/Delete/Shutdown are
  * all single-click actions) and cannot affect how the bundle loads.
  */
+const RESPONSE_SECURITY_HEADERS: ReadonlyArray<readonly [string, string]> = [
+  ["X-Content-Type-Options", "nosniff"],
+  ["X-Frame-Options", "DENY"],
+  ["Referrer-Policy", "no-referrer"],
+  ["Content-Security-Policy", "frame-ancestors 'none'"],
+];
+
 export function securityHeaders(): MiddlewareHandler {
   return async (c, next) => {
-    await next();
-    // Mirrors how Hono's own `secureHeaders` writes headers after the handler.
-    c.res.headers.set("X-Content-Type-Options", "nosniff");
-    c.res.headers.set("X-Frame-Options", "DENY");
-    c.res.headers.set("Referrer-Policy", "no-referrer");
-    c.res.headers.set("Content-Security-Policy", "frame-ancestors 'none'");
+    // Staged *before* the handler runs so they land in Hono's prepared headers
+    // and are therefore merged into responses this middleware never gets to
+    // touch -- in particular the 500 that Hono's error handler builds when a
+    // downstream route throws. Setting them only after `next()` (as Hono's own
+    // `secureHeaders` does) leaves error responses bare.
+    for (const [name, value] of RESPONSE_SECURITY_HEADERS) {
+      c.header(name, value);
+    }
+    try {
+      await next();
+    } finally {
+      // And again afterwards, to cover a handler that returned a raw `Response`
+      // rather than building one through the context.
+      if (c.finalized) {
+        for (const [name, value] of RESPONSE_SECURITY_HEADERS) {
+          c.res.headers.set(name, value);
+        }
+      }
+    }
   };
+}
+
+/**
+ * Installs the guards in the one order that works. Hono runs handlers in
+ * registration order, so this must be called before any route it protects is
+ * registered. Exported so `index.ts` and the integration tests share a single
+ * definition of the wiring instead of restating it.
+ */
+export function registerSecurityMiddleware(app: Hono) {
+  app.use("*", securityHeaders());
+  app.use("*", crossOriginGuard());
+  app.use("/api/trpc/*", requireJsonBodyForTrpcWrites());
 }

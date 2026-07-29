@@ -4,11 +4,7 @@ import path from "node:path";
 import { Hono } from "hono";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { registerAuthRoutes } from "./authRoutes.js";
-import {
-  crossOriginGuard,
-  requireJsonBodyForTrpcWrites,
-  securityHeaders,
-} from "./securityMiddleware.js";
+import { registerSecurityMiddleware } from "./securityMiddleware.js";
 import {
   resetAuthStateForTests,
   setAuthStoragePathForTests,
@@ -29,12 +25,10 @@ function createApp() {
   return app;
 }
 
-/** Mirrors the middleware registration order used by `src/index.ts`. */
+/** Uses the same wiring helper `src/index.ts` calls, so the two cannot drift. */
 function createHardenedApp() {
   const app = new Hono();
-  app.use("*", securityHeaders());
-  app.use("*", crossOriginGuard());
-  app.use("/api/trpc/*", requireJsonBodyForTrpcWrites());
+  registerSecurityMiddleware(app);
   registerAuthRoutes(app);
   app.get("/api/protected", (c) => c.json({ ok: true }));
   app.post("/api/files/upload", (c) => c.json({ uploaded: [] }));

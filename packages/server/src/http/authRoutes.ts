@@ -1,4 +1,4 @@
-import type { Hono } from "hono";
+import type { Context as HonoContext, Hono } from "hono";
 import { trpcServer } from "@hono/trpc-server";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { appRouter } from "../trpc/router.js";
@@ -36,12 +36,12 @@ function isHttpsRequest(url: string, forwardedProto?: string): boolean {
  * `text/plain` body. Requiring a JSON content-type on the auth writes closes
  * that path independently of the origin check; the SPA already sends it.
  */
-function requireJsonRequest(c: Parameters<typeof getCookie>[0]): boolean {
+function requireJsonRequest(c: HonoContext): boolean {
   const contentType = (c.req.header("content-type") ?? "").split(";")[0]?.trim();
   return contentType?.toLowerCase() === "application/json";
 }
 
-function unsupportedMediaType(c: Parameters<typeof getCookie>[0]) {
+function unsupportedMediaType(c: HonoContext) {
   return c.json({ error: "Content-Type must be application/json" }, 415);
 }
 
@@ -172,13 +172,13 @@ export function registerAuthRoutes(app: Hono) {
   });
 
   app.post("/api/auth/change", async (c) => {
+    if (!requireJsonRequest(c)) {
+      return unsupportedMediaType(c);
+    }
     const sessionToken = getSessionToken(c);
     const status = await authService.getAuthStatus(sessionToken);
     if (!status.unlocked) {
       return c.json({ error: "Unauthorized" }, 401);
-    }
-    if (!requireJsonRequest(c)) {
-      return unsupportedMediaType(c);
     }
     const body = await c.req.json().catch(() => null);
     try {
@@ -212,13 +212,13 @@ export function registerAuthRoutes(app: Hono) {
   });
 
   app.post("/api/auth/session-duration", async (c) => {
+    if (!requireJsonRequest(c)) {
+      return unsupportedMediaType(c);
+    }
     const sessionToken = getSessionToken(c);
     const status = await authService.getAuthStatus(sessionToken);
     if (!status.unlocked) {
       return c.json({ error: "Unauthorized" }, 401);
-    }
-    if (!requireJsonRequest(c)) {
-      return unsupportedMediaType(c);
     }
     const body = await c.req.json().catch(() => null);
     try {
@@ -248,13 +248,13 @@ export function registerAuthRoutes(app: Hono) {
   });
 
   app.post("/api/auth/disable", async (c) => {
+    if (!requireJsonRequest(c)) {
+      return unsupportedMediaType(c);
+    }
     const sessionToken = getSessionToken(c);
     const status = await authService.getAuthStatus(sessionToken);
     if (!status.unlocked) {
       return c.json({ error: "Unauthorized" }, 401);
-    }
-    if (!requireJsonRequest(c)) {
-      return unsupportedMediaType(c);
     }
     const body = await c.req.json().catch(() => null);
     try {

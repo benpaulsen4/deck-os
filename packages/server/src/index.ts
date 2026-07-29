@@ -6,11 +6,7 @@ import { ensureAuthStoragePermissions } from "./services/auth.js";
 import { registerAuthRoutes } from "./http/authRoutes.js";
 import { registerFilesRoutes } from "./http/filesRoutes.js";
 import { registerRuntimeRoutes } from "./http/runtimeRoutes.js";
-import {
-  crossOriginGuard,
-  requireJsonBodyForTrpcWrites,
-  securityHeaders,
-} from "./http/securityMiddleware.js";
+import { registerSecurityMiddleware } from "./http/securityMiddleware.js";
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -38,8 +34,9 @@ function scheduleFatalExit(
   const payload = detail instanceof Error ? detail.stack || detail.message : detail;
   console.error(`[deckos] Fatal ${kind}; exiting for supervised restart`, payload);
   process.exitCode = 1;
-  // Stop accepting new connections and let in-flight requests drain before the
-  // hard exit, so a write in progress is less likely to be truncated.
+  // Stop accepting new connections. The 50ms timer below is far too short for
+  // in-flight requests to actually drain; the benefit is that no *new* request
+  // can start a write that the exit would then truncate.
   try {
     runningServer?.close();
   } catch (error) {
@@ -68,10 +65,8 @@ const clientDistPath = isProduction
   : join(__dirname, "../../../client/dist");
 
 // Registration order matters: Hono runs handlers in the order they are added,
-// so these must precede every route they protect.
-app.use("*", securityHeaders());
-app.use("*", crossOriginGuard());
-app.use("/api/trpc/*", requireJsonBodyForTrpcWrites());
+// so this must precede every route it protects.
+registerSecurityMiddleware(app);
 
 registerAuthRoutes(app);
 registerRuntimeRoutes(app);

@@ -9,7 +9,8 @@ import {
   configureAuth,
   disableAuth,
   getAuthStatus,
-  getTrackedFailedAttemptIpsForTests,
+  getCooldownMsForTests,
+  getFailedAttemptKeysForTests,
   isSessionValid,
   resetAuthStateForTests,
   revokeSession,
@@ -204,27 +205,78 @@ test("passcode config is written atomically with restrictive permissions", async
   await fs.remove(root);
 });
 
-test("unlock enforces a global cooldown across distinct source addresses", async () => {
-  const root = await createTempDir("deckos-auth-global-");
+test("concurrent unlock attempts cannot outrun the rate limiter", async () => {
+  const root = await createTempDir("deckos-auth-concurrent-");
   setAuthStoragePathForTests(root);
-  await configureAuth({ passcode: "1122", sessionDurationMs: 2 * 60 * 60 * 1000 });
+  await configureAuth({ passcode: "1234", sessionDurationMs: 2 * 60 * 60 * 1000 });
 
-  // 20 failures spread over 20 addresses: each address stays under the per-IP
-  // limit of 5, so only the global limiter can catch this.
-  for (let index = 0; index < 20; index += 1) {
-    await expect(
-      unlock({ passcode: "0000", ip: `10.9.0.${index}` })
-    ).rejects.toBeInstanceOf(AuthInvalidPasscodeError);
-  }
-
-  await expect(unlock({ passcode: "1122", ip: "10.9.1.1" })).rejects.toBeInstanceOf(
-    AuthRateLimitedError
+  // The passcode hash is awaited, so a client that opens 40 connections at once
+  // rather than in series must not get 40 guesses evaluated. Booking the attempt
+  // before the await is what makes the check-and-record pair atomic.
+  const results = await Promise.allSettled(
+    Array.from({ length: 40 }, () => unlock({ passcode: "0000", ip: "10.7.0.1" }))
   );
+
+  const evaluated = results.filter(
+    (result) =>
+      result.status === "rejected" && result.reason instanceof AuthInvalidPasscodeError
+  ).length;
+  const rateLimited = results.filter(
+    (result) =>
+      result.status === "rejected" && result.reason instanceof AuthRateLimitedError
+  ).length;
+
+  expect(evaluated).toBe(5);
+  expect(rateLimited).toBe(35);
+  expect(results.some((result) => result.status === "fulfilled")).toBe(false);
 
   await fs.remove(root);
 }, 30_000);
 
-test("failed-attempt records are pruned once window and cooldown have lapsed", async () => {
+test("a successful unlock does not leave its optimistic failure booked", async () => {
+  const root = await createTempDir("deckos-auth-rollback-");
+  setAuthStoragePathForTests(root);
+  await configureAuth({ passcode: "5150", sessionDurationMs: 2 * 60 * 60 * 1000 });
+
+  // Two full rounds of "four near-misses then success". If the attempt booked
+  // before hashing were not rolled back, the second round would trip the limiter.
+  for (let round = 0; round < 2; round += 1) {
+    for (let index = 0; index < 4; index += 1) {
+      await expect(unlock({ passcode: "0000", ip: "10.6.0.1" })).rejects.toBeInstanceOf(
+        AuthInvalidPasscodeError
+      );
+    }
+    const session = await unlock({ passcode: "5150", ip: "10.6.0.1" });
+    expect(session.token).toBeTruthy();
+    expect(getCooldownMsForTests("10.6.0.1")).toEqual({ ip: 0, network: 0 });
+  }
+
+  await fs.remove(root);
+}, 30_000);
+
+test("cooldown escalates across repeated bursts instead of staying flat", async () => {
+  const root = await createTempDir("deckos-auth-escalate-");
+  setAuthStoragePathForTests(root);
+  await configureAuth({ passcode: "3344", sessionDurationMs: 2 * 60 * 60 * 1000 });
+
+  vi.useFakeTimers({ toFake: ["Date"] });
+  // Evicting a record as soon as its cooldown lapses would discard the
+  // escalation level and flatten this to 5/5/5.
+  for (const expectedMinutes of [5, 10, 20]) {
+    for (let index = 0; index < 5; index += 1) {
+      await expect(unlock({ passcode: "0000", ip: "10.8.0.1" })).rejects.toBeInstanceOf(
+        AuthInvalidPasscodeError
+      );
+    }
+    expect(getCooldownMsForTests("10.8.0.1").ip).toBe(expectedMinutes * 60 * 1000);
+    vi.setSystemTime(new Date(Date.now() + expectedMinutes * 60 * 1000 + 1_000));
+  }
+  vi.useRealTimers();
+
+  await fs.remove(root);
+}, 30_000);
+
+test("failed-attempt records are evicted only after genuine inactivity", async () => {
   const root = await createTempDir("deckos-auth-prune-");
   setAuthStoragePathForTests(root);
   await configureAuth({ passcode: "3344", sessionDurationMs: 2 * 60 * 60 * 1000 });
@@ -234,18 +286,93 @@ test("failed-attempt records are pruned once window and cooldown have lapsed", a
       AuthInvalidPasscodeError
     );
   }
-  expect(getTrackedFailedAttemptIpsForTests()).toContain("10.8.0.1");
+  expect(getFailedAttemptKeysForTests().ips).toContain("10.8.0.1");
 
-  // Past both the 10 minute attempt window and the 5 minute first cooldown.
-  vi.useFakeTimers();
+  vi.useFakeTimers({ toFake: ["Date"] });
+  // Past the cooldown but still recent: the record must survive, or escalation
+  // is lost.
   vi.setSystemTime(new Date(Date.now() + 20 * 60 * 1000));
-  const session = await unlock({ passcode: "3344", ip: "10.8.0.2" });
+  await expect(unlock({ passcode: "0000", ip: "172.16.0.1" })).rejects.toBeInstanceOf(
+    AuthInvalidPasscodeError
+  );
+  expect(getFailedAttemptKeysForTests().ips).toContain("10.8.0.1");
+
+  // Past the window plus the longest cooldown with no further attempts: evicted,
+  // so the maps cannot grow without bound.
+  vi.setSystemTime(new Date(Date.now() + 45 * 60 * 1000));
+  const session = await unlock({ passcode: "3344", ip: "172.16.0.1" });
   expect(session.token).toBeTruthy();
-  expect(getTrackedFailedAttemptIpsForTests()).toEqual([]);
+  const keys = getFailedAttemptKeysForTests();
+  expect(keys.ips).not.toContain("10.8.0.1");
+  expect(keys.networks).not.toContain("10.8.0.0/24");
   vi.useRealTimers();
 
   await fs.remove(root);
-});
+}, 30_000);
+
+test("unlock enforces a shared cooldown across one client network", async () => {
+  const root = await createTempDir("deckos-auth-network-");
+  setAuthStoragePathForTests(root);
+  await configureAuth({ passcode: "1122", sessionDurationMs: 2 * 60 * 60 * 1000 });
+
+  // 20 failures spread over 20 addresses in one /24: each address stays under the
+  // per-IP limit of 5, so only the network limiter can catch this.
+  for (let index = 0; index < 20; index += 1) {
+    await expect(
+      unlock({ passcode: "0000", ip: `10.9.0.${index}` })
+    ).rejects.toBeInstanceOf(AuthInvalidPasscodeError);
+  }
+
+  await expect(unlock({ passcode: "1122", ip: "10.9.0.99" })).rejects.toBeInstanceOf(
+    AuthRateLimitedError
+  );
+
+  await fs.remove(root);
+}, 30_000);
+
+test("one network's cooldown does not lock out a different network", async () => {
+  const root = await createTempDir("deckos-auth-network-scope-");
+  setAuthStoragePathForTests(root);
+  await configureAuth({ passcode: "1122", sessionDurationMs: 2 * 60 * 60 * 1000 });
+
+  for (let index = 0; index < 20; index += 1) {
+    await expect(
+      unlock({ passcode: "0000", ip: `10.9.0.${index}` })
+    ).rejects.toBeInstanceOf(AuthInvalidPasscodeError);
+  }
+  expect(getCooldownMsForTests("10.9.0.1").network).toBeGreaterThan(0);
+
+  // The limiter is scoped to a /24 rather than being truly global precisely so
+  // one hostile subnet cannot lock out everybody else.
+  const session = await unlock({ passcode: "1122", ip: "192.168.4.10" });
+  expect(session.token).toBeTruthy();
+
+  await fs.remove(root);
+}, 30_000);
+
+test("addresses in one IPv6 /64 share a bucket", async () => {
+  const root = await createTempDir("deckos-auth-v6-");
+  setAuthStoragePathForTests(root);
+  await configureAuth({ passcode: "1122", sessionDurationMs: 2 * 60 * 60 * 1000 });
+
+  // A single host owns an entire /64, so cycling addresses inside it must not
+  // buy extra guesses.
+  for (let index = 0; index < 20; index += 1) {
+    await expect(
+      unlock({ passcode: "0000", ip: `2001:db8:1:2::${index + 1}` })
+    ).rejects.toBeInstanceOf(AuthInvalidPasscodeError);
+  }
+
+  await expect(
+    unlock({ passcode: "1122", ip: "2001:db8:1:2::ffff" })
+  ).rejects.toBeInstanceOf(AuthRateLimitedError);
+
+  // A different /64 is a different client.
+  const session = await unlock({ passcode: "1122", ip: "2001:db8:1:3::1" });
+  expect(session.token).toBeTruthy();
+
+  await fs.remove(root);
+}, 30_000);
 
 afterAll(() => {
   resetAuthStateForTests();

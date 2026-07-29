@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { afterEach, describe, expect, test } from "vitest";
 import {
   crossOriginGuard,
+  registerSecurityMiddleware,
   requireJsonBodyForTrpcWrites,
   securityHeaders,
 } from "./securityMiddleware.js";
@@ -111,6 +112,64 @@ describe("crossOriginGuard", () => {
     expect(res.status).toBe(200);
   });
 
+  describe("Host allowlist (only active when DECKOS_ALLOWED_ORIGINS is set)", () => {
+    test("no Host checking at all by default, so nothing can be bricked", async () => {
+      const res = await guardedApp().request(
+        "http://anything.attacker.example/api/files/upload",
+        {
+          method: "POST",
+          headers: { Origin: "http://anything.attacker.example" },
+        }
+      );
+
+      expect(res.status).toBe(200);
+    });
+
+    test("blocks a rebound hostname once the operator has opted in", async () => {
+      process.env.DECKOS_ALLOWED_ORIGINS = "https://panel.example.com";
+
+      // Under DNS rebinding Origin and Host agree -- both are the attacker's
+      // name -- so only the Host allowlist catches this.
+      const res = await guardedApp().request(
+        "http://rebind.attacker.example/api/files/upload",
+        {
+          method: "POST",
+          headers: { Origin: "http://rebind.attacker.example" },
+        }
+      );
+
+      expect(res.status).toBe(403);
+      const payload = (await res.json()) as { error?: string };
+      expect(payload.error).toContain("DECKOS_ALLOWED_ORIGINS");
+    });
+
+    test("still accepts the listed host", async () => {
+      process.env.DECKOS_ALLOWED_ORIGINS = "https://panel.example.com";
+
+      const res = await guardedApp().request(
+        "http://panel.example.com/api/files/upload",
+        {
+          method: "POST",
+          headers: { Origin: "https://panel.example.com" },
+        }
+      );
+
+      expect(res.status).toBe(200);
+    });
+
+    test("still accepts a bare IP or localhost, which cannot be rebound", async () => {
+      process.env.DECKOS_ALLOWED_ORIGINS = "https://panel.example.com";
+
+      for (const host of ["192.168.1.50:3000", "localhost:3000"]) {
+        const res = await guardedApp().request(`http://${host}/api/files/upload`, {
+          method: "POST",
+          headers: { Origin: `http://${host}` },
+        });
+        expect(res.status).toBe(200);
+      }
+    });
+  });
+
   test("allows requests with no Origin header so CLI clients keep working", async () => {
     const res = await guardedApp().request("http://deckos.lan:3000/api/files/upload", {
       method: "POST",
@@ -198,5 +257,60 @@ describe("securityHeaders", () => {
     expect(csp).toBe("frame-ancestors 'none'");
     expect(csp).not.toContain("script-src");
     expect(csp).not.toContain("style-src");
+  });
+
+  test("still sets them on the 500 produced by a throwing handler", async () => {
+    const app = new Hono();
+    app.use("*", securityHeaders());
+    app.get("/boom", () => {
+      throw new Error("kaboom");
+    });
+
+    const res = await app.request("http://deckos.lan/boom");
+
+    expect(res.status).toBe(500);
+    expect(res.headers.get("X-Frame-Options")).toBe("DENY");
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Content-Security-Policy")).toBe("frame-ancestors 'none'");
+  });
+
+  test("sets them on a 404 from the not-found handler", async () => {
+    const app = new Hono();
+    app.use("*", securityHeaders());
+
+    const res = await app.request("http://deckos.lan/nope");
+
+    expect(res.status).toBe(404);
+    expect(res.headers.get("X-Frame-Options")).toBe("DENY");
+  });
+});
+
+describe("registerSecurityMiddleware", () => {
+  test("installs headers, the origin guard and the tRPC body check together", async () => {
+    const app = new Hono();
+    registerSecurityMiddleware(app);
+    app.get("/api/health", (c) => c.json({ ok: true }));
+    app.post("/api/files/upload", (c) => c.json({ ok: true }));
+    app.post("/api/trpc/system.applyUpdate", (c) => c.json({ ok: true }));
+
+    const health = await app.request("http://deckos.lan/api/health");
+    expect(health.status).toBe(200);
+    expect(health.headers.get("X-Frame-Options")).toBe("DENY");
+
+    const crossSite = await app.request("http://deckos.lan/api/files/upload", {
+      method: "POST",
+      headers: { Origin: "https://evil.example" },
+    });
+    expect(crossSite.status).toBe(403);
+
+    const formToTrpc = await app.request("http://deckos.lan/api/trpc/system.applyUpdate", {
+      method: "POST",
+      headers: {
+        Origin: "http://deckos.lan",
+        "content-type": "multipart/form-data; boundary=x",
+      },
+      body: "--x--",
+    });
+    expect(formToTrpc.status).toBe(415);
   });
 });
