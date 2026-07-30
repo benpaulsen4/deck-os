@@ -2,28 +2,46 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import * as dockerService from "./services/docker.js";
+import { ensureAuthStoragePermissions } from "./services/auth.js";
 import { registerAuthRoutes } from "./http/authRoutes.js";
 import { registerFilesRoutes } from "./http/filesRoutes.js";
 import { registerRuntimeRoutes } from "./http/runtimeRoutes.js";
+import { registerSecurityMiddleware } from "./http/securityMiddleware.js";
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 dockerService.getDocker();
 
+// Tighten permissions on a pre-existing (pre-upgrade) passcode file at startup.
+void ensureAuthStoragePermissions();
+
 let fatalExitScheduled = false;
+let runningServer: { close: (callback?: (error?: Error) => void) => unknown } | null =
+  null;
 
 function scheduleFatalExit(
   kind: "uncaughtException" | "unhandledRejection",
   detail: unknown
 ) {
-  const payload = detail instanceof Error ? detail.stack || detail.message : detail;
-  console.error(`[deckos] Fatal ${kind}; exiting for supervised restart`, payload);
+  // Dedupe before logging: a cascade of rejections inside the 50ms window would
+  // otherwise dump a full stack trace each, which can include config contents
+  // captured mid-write.
   if (fatalExitScheduled) {
     return;
   }
   fatalExitScheduled = true;
+  const payload = detail instanceof Error ? detail.stack || detail.message : detail;
+  console.error(`[deckos] Fatal ${kind}; exiting for supervised restart`, payload);
   process.exitCode = 1;
+  // Stop accepting new connections. The 50ms timer below is far too short for
+  // in-flight requests to actually drain; the benefit is that no *new* request
+  // can start a write that the exit would then truncate.
+  try {
+    runningServer?.close();
+  } catch (error) {
+    console.error("[deckos] Failed to close server during fatal exit", error);
+  }
   setTimeout(() => {
     process.exit(1);
   }, 50).unref();
@@ -45,6 +63,10 @@ const isProduction = process.env.NODE_ENV === "production";
 const clientDistPath = isProduction
   ? join(__dirname, "../../client/dist")
   : join(__dirname, "../../../client/dist");
+
+// Registration order matters: Hono runs handlers in the order they are added,
+// so this must precede every route it protects.
+registerSecurityMiddleware(app);
 
 registerAuthRoutes(app);
 registerRuntimeRoutes(app);
@@ -92,6 +114,7 @@ try {
     fetch: app.fetch,
     port,
   });
+  runningServer = server;
 
   server.on("listening", () => {
     console.log(`[deckos] server running on http://localhost:${port}`);

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const authMock = vi.hoisted(() => {
   class AuthRateLimitedError extends Error {
@@ -28,12 +28,19 @@ const authMock = vi.hoisted(() => {
       this.name = "AuthValidationError";
     }
   }
+  class AuthConfigUnavailableError extends Error {
+    constructor() {
+      super("Passcode configuration could not be read.");
+      this.name = "AuthConfigUnavailableError";
+    }
+  }
 
   return {
     AuthRateLimitedError,
     AuthInvalidPasscodeError,
     AuthNotEnabledError,
     AuthValidationError,
+    AuthConfigUnavailableError,
     getAuthCookieName: vi.fn(() => "deckos_session"),
     getAuthStatus: vi.fn(),
     unlock: vi.fn(),
@@ -60,10 +67,21 @@ function createApp() {
   return app;
 }
 
+const ORIGINAL_TRUST_PROXY = process.env.DECKOS_TRUST_PROXY;
+
 describe("authRoutes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authMock.getAuthCookieName.mockReturnValue("deckos_session");
+    delete process.env.DECKOS_TRUST_PROXY;
+  });
+
+  afterEach(() => {
+    if (ORIGINAL_TRUST_PROXY === undefined) {
+      delete process.env.DECKOS_TRUST_PROXY;
+    } else {
+      process.env.DECKOS_TRUST_PROXY = ORIGINAL_TRUST_PROXY;
+    }
   });
 
   test("blocks protected api paths when session is locked", async () => {
@@ -150,6 +168,87 @@ describe("authRoutes", () => {
       error: "Too many failed attempts. Please try again later.",
       retryAfterMs: 12_000,
     });
+  });
+
+  test("unlock ignores x-forwarded-proto unless DECKOS_TRUST_PROXY is set", async () => {
+    authMock.unlock.mockResolvedValue({
+      token: "abc123",
+      sessionDurationMs: 3_600_000,
+      expiresAt: Date.now() + 3_600_000,
+    });
+    const app = createApp();
+
+    // Without the flag a spoofed header must not produce a `Secure` cookie the
+    // browser would then refuse to store over plain HTTP.
+    const res = await app.request("http://localhost/api/auth/unlock", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-proto": "https" },
+      body: JSON.stringify({ passcode: "1234" }),
+    });
+    expect(res.headers.get("set-cookie")).not.toContain("Secure");
+
+    process.env.DECKOS_TRUST_PROXY = "1";
+    const trusted = await app.request("http://localhost/api/auth/unlock", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-proto": "https" },
+      body: JSON.stringify({ passcode: "1234" }),
+    });
+    expect(trusted.headers.get("set-cookie")).toContain("Secure");
+  });
+
+  test("unlock always marks the cookie Secure over real https", async () => {
+    authMock.unlock.mockResolvedValue({
+      token: "abc123",
+      sessionDurationMs: 3_600_000,
+      expiresAt: Date.now() + 3_600_000,
+    });
+    const app = createApp();
+
+    const res = await app.request("https://deckos.lan/api/auth/unlock", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ passcode: "1234" }),
+    });
+
+    expect(res.headers.get("set-cookie")).toContain("Secure");
+  });
+
+  test.each([
+    "/api/auth/unlock",
+    "/api/auth/configure",
+    "/api/auth/change",
+    "/api/auth/session-duration",
+    "/api/auth/disable",
+  ])("%s rejects non-JSON bodies a cross-site form could send", async (path) => {
+    authMock.getAuthStatus.mockResolvedValue({
+      enabled: true,
+      unlocked: true,
+      sessionDurationMs: 3_600_000,
+    });
+    const app = createApp();
+
+    const res = await app.request(`http://localhost${path}`, {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: JSON.stringify({ passcode: "9999", sessionDurationMs: 3_600_000 }),
+    });
+
+    expect(res.status).toBe(415);
+    expect(authMock.configureAuth).not.toHaveBeenCalled();
+    expect(authMock.unlock).not.toHaveBeenCalled();
+  });
+
+  test("unlock reports an unreadable passcode config as 503", async () => {
+    authMock.unlock.mockRejectedValue(new authMock.AuthConfigUnavailableError());
+    const app = createApp();
+
+    const res = await app.request("http://localhost/api/auth/unlock", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ passcode: "1234" }),
+    });
+
+    expect(res.status).toBe(503);
   });
 
   test("change endpoint requires an unlocked session", async () => {
