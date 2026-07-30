@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../trpc/trpc.js";
 import si from "systeminformation";
 import { z } from "zod";
@@ -8,6 +9,72 @@ import { DATA_DIR } from "../lib/config.js";
 import { getCurrentVersion } from "../lib/version.js";
 import { checkForUpdatesNow, getUpdateStatus } from "../services/updates.js";
 import { applyUpdate } from "../services/selfUpdate.js";
+
+/**
+ * Strict `MAJOR.MINOR.PATCH`, optional `v` prefix, no prerelease or build
+ * metadata (`applyUpdate` refuses prereleases anyway).
+ */
+const STRICT_SEMVER_PATTERN = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+
+const UpdateVersionSchema = z
+  .string()
+  .trim()
+  .regex(STRICT_SEMVER_PATTERN, "Version must be a semver release such as 1.2.3");
+
+/**
+ * Local, deliberately duplicated semver comparison. `services/updates.ts` has an
+ * equivalent helper but it is being rewritten concurrently (audit batch C); the
+ * two should be consolidated into one shared helper once that lands.
+ */
+export function parseStrictSemver(
+  version: string
+): { major: number; minor: number; patch: number } | null {
+  const match = STRICT_SEMVER_PATTERN.exec(version.trim());
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+}
+
+/** Returns >0 when `a` is newer than `b`, 0 when equal, null when unparseable. */
+export function compareStrictSemver(a: string, b: string): number | null {
+  const pa = parseStrictSemver(a);
+  const pb = parseStrictSemver(b);
+  if (!pa || !pb) return null;
+  if (pa.major !== pb.major) return pa.major - pb.major;
+  if (pa.minor !== pb.minor) return pa.minor - pb.minor;
+  return pa.patch - pb.patch;
+}
+
+/**
+ * The `updateAvailable` freshness gate in `applyUpdate` only covers the
+ * implicit-latest path, so an explicit `version` could silently pin the host to
+ * an older release and restart into it. Require the target to be strictly newer
+ * unless the caller opts in to a downgrade.
+ */
+export function assertVersionIsUpgrade(
+  targetVersion: string,
+  currentVersion: string,
+  allowDowngrade: boolean
+): void {
+  if (allowDowngrade) return;
+
+  const comparison = compareStrictSemver(targetVersion, currentVersion);
+  if (comparison === null) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Cannot compare requested version "${targetVersion}" with the running version "${currentVersion}". Pass allowDowngrade to install it anyway.`,
+    });
+  }
+  if (comparison <= 0) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Refusing to install ${targetVersion}: it is not newer than the running version ${currentVersion}. Pass allowDowngrade to install it anyway.`,
+    });
+  }
+}
 
 type PowerCommand = {
   command: string;
@@ -171,7 +238,7 @@ export const systemRouter = router({
   }),
 
   getMetrics: protectedProcedure.query(async () => {
-    return await metricsService.getOneShotMetrics();
+    return await metricsService.getMetricsSnapshot();
   }),
 
   getUpdateStatus: protectedProcedure.query(async () => {
@@ -183,8 +250,20 @@ export const systemRouter = router({
   }),
 
   applyUpdate: protectedProcedure
-    .input(z.object({ version: z.string().optional() }))
+    .input(
+      z.object({
+        version: UpdateVersionSchema.optional(),
+        allowDowngrade: z.boolean().optional(),
+      })
+    )
     .mutation(async ({ input }) => {
+      if (input.version !== undefined) {
+        assertVersionIsUpgrade(
+          input.version,
+          getCurrentVersion(),
+          input.allowDowngrade === true
+        );
+      }
       return await applyUpdate(input.version);
     }),
 
