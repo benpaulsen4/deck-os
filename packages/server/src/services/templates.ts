@@ -1,16 +1,35 @@
 import * as appsService from "./apps.js";
 import fs from "fs-extra";
 import * as path from "node:path";
+import { z } from "zod";
+import { parseDocument, visit } from "yaml";
 
-export type TemplateParameter = {
-  key: string;
-  label: string;
-  type: "string" | "number" | "boolean" | "port" | "path" | "enum";
-  defaultValue?: string;
-  description?: string;
-  required?: boolean;
-  options?: string[];
-};
+const TemplateParameterSchema = z.object({
+  key: z.string().min(1),
+  label: z.string().min(1),
+  type: z.enum(["string", "number", "boolean", "port", "path", "enum"]),
+  defaultValue: z.string().optional(),
+  description: z.string().optional(),
+  required: z.boolean().optional(),
+  options: z.array(z.string()).optional(),
+});
+
+/**
+ * `template.json` ships with the product but is still parsed, not cast: a
+ * malformed `type` or an `options` that is a string rather than an array
+ * silently weakens parameter validation for every deploy of that template.
+ */
+const TemplateJsonSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  categories: z.array(z.string()).optional(),
+  icon: z.string().optional(),
+  webUrlTemplate: z.string().optional(),
+  parameters: z.array(TemplateParameterSchema).optional(),
+});
+
+export type TemplateParameter = z.infer<typeof TemplateParameterSchema>;
 
 export type TemplateSummary = {
   id: string;
@@ -49,15 +68,7 @@ type DeployTemplateInput = {
   composeOverride?: string;
 };
 
-type TemplateJson = {
-  id: string;
-  title: string;
-  description?: string;
-  categories?: string[];
-  icon?: string;
-  webUrlTemplate?: string;
-  parameters?: TemplateParameter[];
-};
+type TemplateJson = z.infer<typeof TemplateJsonSchema>;
 
 const builtInTemplates: TemplateDetail[] = [
   {
@@ -154,11 +165,27 @@ async function loadDiskLibrary(): Promise<TemplateDetail[]> {
 
     let json: TemplateJson;
     try {
-      json = (await fs.readJson(jsonPath)) as TemplateJson;
+      const parsed = TemplateJsonSchema.safeParse(await fs.readJson(jsonPath));
+      if (!parsed.success) {
+        console.warn(
+          `[deckos] Skipping template ${e.name}: invalid template.json (${parsed.error.issues[0]?.message ?? "schema error"})`
+        );
+        continue;
+      }
+      json = parsed.data;
     } catch {
       continue;
     }
-    if (!json || typeof json.id !== "string" || typeof json.title !== "string") continue;
+
+    // `getLibrary` resolves by first match while the asset map keeps the last
+    // writer, so a duplicate id would serve one template's metadata with
+    // another's assets. First definition wins, consistently.
+    if (dirById.has(json.id)) {
+      console.warn(
+        `[deckos] Skipping template ${e.name}: duplicate template id "${json.id}"`
+      );
+      continue;
+    }
 
     let composeTemplate: string;
     try {
@@ -266,12 +293,68 @@ export async function getTemplateAssetPath(
   return resolved;
 }
 
-function renderPlaceholders(template: string, values: Record<string, string>): string {
-  return template.replace(/\{\{([A-Z0-9_]+)\}\}/g, (_m, key: string) => {
-    const v = values[key];
-    return v ?? "";
+const PLACEHOLDER_PATTERN = /\{\{([A-Z0-9_]+)\}\}/g;
+
+/**
+ * Renders a compose template by setting parameter values as YAML *scalar nodes*
+ * rather than splicing them into YAML text. A raw string replace lets a value
+ * containing a newline open new mapping keys - `privileged: true`, extra bind
+ * mounts - turning "fill in a port and a data path" into full compose
+ * authorship. Going through the document API means the serializer decides how
+ * each value is quoted, so a value can only ever be a value.
+ *
+ * Placeholders are swapped for inert alphanumeric sentinels *before* parsing:
+ * a bare `KEY: {{SECRET}}` is a YAML flow mapping, not a string scalar, so
+ * parsing the raw template first would lose those placeholders entirely (45 of
+ * them across 14 shipped templates). The sentinel is a plain scalar in every
+ * context a placeholder appears in, so the document keeps its original shape
+ * and each substituted value inherits the surrounding scalar's quoting style.
+ */
+export function renderComposeTemplate(
+  template: string,
+  values: Record<string, string>
+): string {
+  let sentinelBase = "DECKOSPLACEHOLDER";
+  while (template.includes(sentinelBase)) sentinelBase += "X";
+
+  const keysBySentinelIndex: string[] = [];
+  const sentinelByKey = new Map<string, string>();
+  const withSentinels = template.replace(PLACEHOLDER_PATTERN, (_m, key: string) => {
+    let sentinel = sentinelByKey.get(key);
+    if (!sentinel) {
+      sentinel = `${sentinelBase}${keysBySentinelIndex.length}Z`;
+      sentinelByKey.set(key, sentinel);
+      keysBySentinelIndex.push(key);
+    }
+    return sentinel;
   });
+
+  if (keysBySentinelIndex.length === 0) return template;
+
+  const doc = parseDocument(withSentinels);
+  if (doc.errors.length > 0) {
+    throw new Error(`Template is not valid YAML: ${doc.errors[0].message}`);
+  }
+
+  const sentinelPattern = new RegExp(`${sentinelBase}(\\d+)Z`, "g");
+  visit(doc, {
+    Scalar(_key, node) {
+      if (typeof node.value !== "string") return;
+      if (!node.value.includes(sentinelBase)) return;
+      node.value = node.value.replace(
+        sentinelPattern,
+        (_m, index: string) => values[keysBySentinelIndex[Number(index)]] ?? ""
+      );
+    },
+  });
+
+  // lineWidth: 0 disables line folding, so re-serialising a template does not
+  // reflow scalars that were fine as they were.
+  return doc.toString({ lineWidth: 0 });
 }
+
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
 function normalizeTemplateParameterValue(
   parameter: TemplateParameter,
@@ -280,6 +363,12 @@ function normalizeTemplateParameterValue(
   const value = rawValue.trim();
   if (!value) {
     return value;
+  }
+  // Defence in depth alongside `renderComposeTemplate`: no parameter of any
+  // type has a legitimate reason to carry a newline or other control character,
+  // and those are what turn a value into extra compose structure.
+  if (CONTROL_CHARACTERS.test(value)) {
+    throw new Error(`Invalid characters in parameter: ${parameter.label}`);
   }
   switch (parameter.type) {
     case "string":
@@ -320,13 +409,19 @@ function normalizeTemplateParameterValue(
     }
     case "enum": {
       const options = parameter.options ?? [];
-      if (!options.includes(value)) {
+      if (!Array.isArray(options) || !options.includes(value)) {
         throw new Error(`Invalid option for parameter: ${parameter.label}`);
       }
       return value;
     }
-    default:
-      return value;
+    default: {
+      // Unreachable while the parameter schema validates `type`. Refuse rather
+      // than falling through to "return the value unvalidated".
+      const unknownType: never = parameter.type;
+      throw new Error(
+        `Unsupported parameter type "${String(unknownType)}" for parameter: ${parameter.label}`
+      );
+    }
   }
 }
 
@@ -357,7 +452,8 @@ export async function deployTemplate(input: DeployTemplateInput) {
   }
 
   const composeYaml =
-    input.composeOverride ?? renderPlaceholders(template.composeTemplate, resolvedParams);
+    input.composeOverride ??
+    renderComposeTemplate(template.composeTemplate, resolvedParams);
   if (/\{\{[A-Z0-9_]+\}\}/.test(composeYaml)) {
     throw new Error("Unresolved template placeholders remain in compose file");
   }
