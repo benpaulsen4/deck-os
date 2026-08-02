@@ -12,10 +12,13 @@ DeckOS supports in-app update checks and host-level rollback. The goal is to mak
 
 When DeckOS updates itself:
 
-1. it downloads the selected release tarball
-2. it unpacks it into a new release directory
-3. it switches `/opt/deckos/current` to the new release
-4. it exits so `systemd` can restart it cleanly
+1. it downloads the selected release tarball, plus the `SHA256SUMS` manifest and its `SHA256SUMS.sig` signature
+2. it verifies the `ed25519` signature over the manifest, then checks the tarball against its entry in that manifest
+3. it unpacks the verified tarball into a new release directory
+4. it switches `/opt/deckos/current` to the new release
+5. it exits so `systemd` can restart it cleanly
+
+Verification is not optional. If a release does not publish all three assets, or the signature does not validate, the update stops before anything is unpacked and the running release is left untouched.
 
 DeckOS keeps the previous release so you can roll back if needed.
 
@@ -35,23 +38,40 @@ sudo systemctl restart deckos
 
 ## Uninstall
 
-1. Run the hosted uninstall script on the DeckOS host. Use the same custom paths or service name you used at install time if you changed them.
+1. Run the hosted uninstall script on the DeckOS host. It reads your install root and data directory back out of `/etc/deckos/deckos.env`, so you no longer have to remember what you passed at install time.
 
 ```bash
-curl -fsSL https://script.benpaulsen.tech/uninstall-deckos | sudo bash
+curl -fsSL https://script.benpaulsen.tech/uninstall-deckos | sudo bash -s -- --yes
 ```
 
-2. If you installed with custom values, pass them through `bash -s --`:
+2. The script prints exactly what it is about to delete and asks for confirmation. When it is piped there is usually no terminal to prompt on, so pass `--yes` as above to confirm up front, or download the script and run it directly to get the prompt. Use `--dry-run` first if you want to see the plan without removing anything:
 
 ```bash
-curl -fsSL https://script.benpaulsen.tech/uninstall-deckos | sudo bash -s -- --install-root /opt/deckos --data-dir /var/lib/deckos --service-name deckos
+curl -fsSL https://script.benpaulsen.tech/uninstall-deckos | sudo bash -s -- --dry-run
 ```
 
-3. Expect the uninstall script to remove the DeckOS service, `/etc/deckos`, the install root, and the DeckOS data directory. It leaves Docker and Node.js installed.
+3. Override the detected values only if you need to. `--keep-data` preserves the data directory:
+
+```bash
+curl -fsSL https://script.benpaulsen.tech/uninstall-deckos | sudo bash -s -- \
+  --install-root /opt/deckos --data-dir /var/lib/deckos --service-name deckos --keep-data --yes
+```
+
+4. Expect the uninstall script to remove:
+
+- the DeckOS `systemd` unit (stopped, disabled, then deleted)
+- `/etc/sudoers.d/deckos-power`, the passwordless reboot and shutdown rule
+- `/usr/local/bin/deckos-node` and `/usr/local/bin/deckos-fix-cpu-power-perms`
+- `/etc/deckos`
+- the install root
+- the data directory, unless `--keep-data` was passed
+- the `deckos` user and group
+
+It leaves Docker and Node.js installed.
 
 ## Important Uninstall Note
 
-If you installed DeckOS with custom values such as `--install-root`, `--data-dir`, or `--service-name`, use the same values when running the uninstall command. Otherwise, you may remove the wrong service or leave part of the installation behind.
+The uninstall script defaults to the paths recorded in `/etc/deckos/deckos.env` and refuses paths that are not plausibly DeckOS directories, so a mistyped `--data-dir /var/lib` is rejected rather than acted on. Passing custom values is still only necessary when the env file is missing or you are removing an install whose paths have since changed.
 
 ## Before You Update Or Remove DeckOS
 

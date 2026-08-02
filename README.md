@@ -39,12 +39,14 @@ Optional flags:
 
 - `--owner <github-owner>`
 - `--repo <github-repo>`
-- `--token <github-token>`
+- `--token-file <path>`
+- `--token-stdin`
 - `--version 0.1.0`
 - `--port 80`
 - `--data-dir /var/lib/deckos`
 - `--install-root /opt/deckos`
 - `--service-name deckos`
+- `--api-base https://api.github.com`
 
 Pass optional flags through the hosted installer with `bash -s --`, for example:
 
@@ -54,9 +56,19 @@ curl -fsSL https://script.benpaulsen.tech/install-deckos | sudo bash -s -- --por
 
 Open DeckOS at `http://<host>/`.
 
+One DeckOS instance is supported per host. `--service-name` renames the systemd unit only; the configuration directory, the service account and the helper scripts are shared, so a second install overwrites the first.
+
+Re-running the installer is safe: values you do not pass again are read back out of the existing `/etc/deckos/deckos.env` rather than reset to defaults.
+
+### Release Verification
+
+Releases ship a `SHA256SUMS` manifest and a detached `ed25519` signature (`SHA256SUMS.sig`). The installer verifies the signature and then the archive digest before unpacking, and there is no flag to skip it. An unsigned or unverifiable release is refused.
+
 ### GitHub Token Note
 
-DeckOS uses anonymous-first release checks and downloads. Provide `--token` during install and keep `DECKOS_GITHUB_TOKEN` configured only if the release source you are using requires authentication.
+DeckOS uses anonymous-first release checks and downloads. Supply a token only if the release source you are using requires authentication.
+
+Prefer `--token-file <path>`, or `DECKOS_GITHUB_TOKEN` in the environment. A token passed as `--token <value>` is visible in `ps` to every local user for the duration of the install, and is recorded in your shell history.
 
 ## Documentation
 
@@ -83,8 +95,10 @@ Run it only on systems you trust, and avoid exposing it directly to the public i
 If you are working on DeckOS itself:
 
 - Node.js `24+`
-- pnpm `9+`
+- pnpm `9.15.4`, pinned by `packageManager`; `engines` currently requires the 9.x line
 - Docker if you want to exercise Docker-backed features locally
+
+Dependency overrides are declared in both `package.json` (`pnpm.overrides`, read by pnpm 9) and `pnpm-workspace.yaml` (`overrides`, read by pnpm 10+). Keep the two in sync: if they drift, an install on the other generation silently drops the pins and reintroduces the advisories they suppress.
 
 Common commands:
 
