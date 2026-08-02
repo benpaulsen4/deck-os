@@ -1,5 +1,29 @@
-# NOTE: dependency overrides live in the root package.json under `pnpm.overrides`.
-# The `overrides` key here is only honoured by pnpm >=10, and this repo pins
-# pnpm 9.15.4 via `packageManager`, so overrides placed here are silently ignored.
+# Dependency overrides are declared TWICE, on purpose.
+#
+# pnpm 9 (the version pinned by `packageManager`, and the one CI resolves)
+# reads them from the root package.json under `pnpm.overrides`. pnpm 10+ no
+# longer reads that field at all -- it warns and ignores it -- and reads the
+# top-level `overrides` key below instead.
+#
+# Declaring both means a contributor running either generation gets the same
+# resolutions. If they diverge, a plain `pnpm install` on pnpm 10+ quietly
+# rewrites pnpm-lock.yaml without the pins and reintroduces every advisory
+# they exist to suppress. `pnpm audit` in CI is the backstop.
+#
+# ANY CHANGE HERE MUST BE MIRRORED IN package.json `pnpm.overrides`.
 packages:
   - "packages/*"
+
+overrides:
+  "@protobufjs/utf8@<=1.1.0": ">=1.1.1"
+  "@babel/core": "^7.29.7"
+  "@grpc/grpc-js": "^1.14.4"
+  "dockerode>@grpc/grpc-js": "^1.14.4"
+  "brace-expansion@>=3.0.0 <5.0.8": "^5.0.8"
+  "test-exclude>glob": "^11.0.0"
+  "flatted": "^3.4.2"
+  "follow-redirects": "^1.16.0"
+  "postcss": ">=8.5.18"
+  "shell-quote": ">=1.9.0"
+  "dockerode>protobufjs": "^7.6.5"
+  "@grpc/proto-loader>protobufjs": "^7.6.5"

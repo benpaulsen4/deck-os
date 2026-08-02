@@ -7,21 +7,53 @@ on:
       - main
   workflow_dispatch:
 
-permissions:
-  contents: read
+# Least privilege by default; each job requests only what it needs.
+permissions: {}
 
 jobs:
-  quality-and-tests:
+  # The three shell scripts are the highest-privilege code in the repo
+  # (curl | sudo bash, as root, on other people's machines) and had no
+  # automated verification at all. Runs as its own job so it reports in
+  # seconds, without waiting for a pnpm install.
+  shell-scripts:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Syntax check
+        shell: bash
+        run: |
+          for script in install.sh uninstall.sh migrate-install-defaults.sh; do
+            echo "bash -n $script"
+            bash -n "$script"
+          done
+
+      # shellcheck is preinstalled on the GitHub-hosted Ubuntu images.
+      # --severity=warning to start with; tighten to the default (style) once
+      # the informational findings have been worked through.
+      - name: ShellCheck
+        shell: bash
+        run: |
+          shellcheck --version
+          shellcheck --severity=warning --shell=bash \
+            install.sh uninstall.sh migrate-install-defaults.sh
+
+  quality-and-tests:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
           cache: "pnpm"
@@ -31,6 +63,18 @@ jobs:
 
       - name: Lint
         run: pnpm lint
+
+      # Regression guard for the dependency overrides in package.json /
+      # pnpm-workspace.yaml: if an override stops matching, the advisory it was
+      # suppressing comes back and this fails.
+      - name: Audit dependencies
+        run: pnpm audit
+
+      # Scoped rather than repo-wide: `pnpm format:check` currently reports 77
+      # pre-existing files under packages/ and packages/server/templates/.
+      # Widen this to `pnpm format:check` once those have been reformatted.
+      - name: Format check
+        run: pnpm format:check:scoped
 
       - name: Typecheck
         run: pnpm typecheck
@@ -46,15 +90,17 @@ jobs:
 
   server-coverage:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
           cache: "pnpm"
@@ -66,22 +112,24 @@ jobs:
         run: pnpm --filter @deckos/server test:coverage
 
       - name: Upload server coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: server-coverage
           path: packages/server/coverage
 
   client-coverage:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
           cache: "pnpm"
@@ -93,7 +141,7 @@ jobs:
         run: pnpm --filter @deckos/client test:coverage
 
       - name: Upload client coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: client-coverage
           path: packages/client/coverage

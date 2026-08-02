@@ -18,6 +18,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"**/*.{ts,tsx,css,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,css,json,md}\"",
+    "format:check:scoped": "prettier --check \"*.{json,md,ts}\" \"docs/**/*.md\" \".github/workflows/*.yml\"",
     "release:cut": "node scripts/cut-release.mjs"
   },
   "devDependencies": {
@@ -33,24 +34,22 @@
   "pnpm": {
     "overrides": {
       "@protobufjs/utf8@<=1.1.0": ">=1.1.1",
-      "wait-on@9.0.5>axios": "1.16.1",
-      "@babel/core": "7.29.7",
-      "@grpc/grpc-js": "1.14.4",
-      "dockerode>@grpc/grpc-js": "1.14.4",
-      "brace-expansion@>=3.0.0 <5.0.8": "5.0.8",
+      "@babel/core": "^7.29.7",
+      "@grpc/grpc-js": "^1.14.4",
+      "dockerode>@grpc/grpc-js": "^1.14.4",
+      "brace-expansion@>=3.0.0 <5.0.8": "^5.0.8",
       "test-exclude>glob": "^11.0.0",
-      "flatted": "3.4.2",
-      "follow-redirects": "1.16.0",
+      "flatted": "^3.4.2",
+      "follow-redirects": "^1.16.0",
       "postcss": ">=8.5.18",
       "shell-quote": ">=1.9.0",
-      "dockerode>protobufjs": "7.6.5",
-      "@grpc/proto-loader@0.7.15>protobufjs": "7.6.5",
-      "@grpc/proto-loader@0.8.0>protobufjs": "7.6.5"
+      "dockerode>protobufjs": "^7.6.5",
+      "@grpc/proto-loader>protobufjs": "^7.6.5"
     }
   },
   "engines": {
     "node": ">=24.0.0",
-    "pnpm": ">=9.0.0"
+    "pnpm": ">=9.15.4 <10.0.0"
   },
   "packageManager": "pnpm@9.15.4"
 }
