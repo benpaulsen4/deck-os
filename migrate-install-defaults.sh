@@ -137,6 +137,9 @@ if [[ -f "$UNIT_PATH" ]]; then
   step "Backed up ${UNIT_PATH} to ${UNIT_PATH}${BACKUP_SUFFIX}"
 fi
 
+# IMPORTANT: this unit template is duplicated from install.sh. Any change here
+# must be mirrored there (and vice versa), or running this migration will
+# silently downgrade the systemd hardening of an existing install.
 cat > "$UNIT_PATH" <<EOF
 [Unit]
 Description=DeckOS
@@ -150,6 +153,13 @@ Group=deckos
 SupplementaryGroups=docker
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# NoNewPrivileges is deliberately NOT set: the UI's restart/shutdown actions
+# go through setuid sudo and would break. Membership of the docker group is
+# root-equivalent anyway, so these directives are containment, not a sandbox.
+PrivateTmp=yes
+ProtectSystem=yes
+ProtectHome=read-only
+ReadWritePaths=-${INSTALL_ROOT} -${DATA_DIR}
 EnvironmentFile=/etc/deckos/deckos.env
 WorkingDirectory=${INSTALL_ROOT}/current
 ExecStartPre=+/usr/local/bin/deckos-fix-cpu-power-perms
