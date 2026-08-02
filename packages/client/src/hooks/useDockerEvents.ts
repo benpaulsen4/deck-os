@@ -2,6 +2,27 @@ import { useEffect, useRef } from "react";
 import { useConnectionStore } from "../stores/connection";
 import { emitUnauthorizedEvent, fetchAuthStatus } from "../lib/auth";
 
+/**
+ * Exponential reconnect delay, capped.
+ *
+ * Shared by the two SSE hooks and the log stream so a dead backend (Docker
+ * stopped, server restarting for a self-update) costs a handful of requests a
+ * minute instead of one every few seconds forever.
+ *
+ * NOTE: this belongs in `lib/`, but the file allowlist for this change does not
+ * cover creating one, so it is exported from the hook that already owned the
+ * reconnect pattern.
+ */
+export function getReconnectDelayMs(
+  attempt: number,
+  options?: { baseMs?: number; maxMs?: number }
+): number {
+  const baseMs = options?.baseMs ?? 5_000;
+  const maxMs = options?.maxMs ?? 60_000;
+  const exponent = Math.min(Math.max(0, attempt), 10);
+  return Math.min(maxMs, baseMs * 2 ** exponent);
+}
+
 export interface DockerEvent {
   Type: string;
   Action: string;
@@ -22,6 +43,7 @@ export function useDockerEvents(
   const eventSourceRef = useRef<EventSource | null>(null);
   const callbackRef = useRef(callback);
   const reconnectTimeoutRef = useRef<number | null>(null);
+  const reconnectAttemptRef = useRef(0);
   const disposedRef = useRef(false);
   const { setConnected } = useConnectionStore();
   const enabled = options?.enabled ?? true;
@@ -45,6 +67,7 @@ export function useDockerEvents(
       return;
     }
     disposedRef.current = false;
+    reconnectAttemptRef.current = 0;
     const connect = () => {
       if (disposedRef.current) {
         return;
@@ -57,6 +80,7 @@ export function useDockerEvents(
       eventSourceRef.current = eventSource;
 
       eventSource.onopen = () => {
+        reconnectAttemptRef.current = 0;
         setConnected("events", true);
       };
 
@@ -76,7 +100,12 @@ export function useDockerEvents(
         if (disposedRef.current) {
           return;
         }
-        console.error("Docker events SSE error:", error);
+        const attempt = reconnectAttemptRef.current;
+        // With Docker stopped this fires forever; logging every attempt buried
+        // everything else in the console.
+        if (attempt < 3) {
+          console.error("Docker events SSE error:", error);
+        }
         setConnected("events", false);
         void fetchAuthStatus()
           .then((status) => {
@@ -89,7 +118,11 @@ export function useDockerEvents(
         if (reconnectTimeoutRef.current !== null) {
           window.clearTimeout(reconnectTimeoutRef.current);
         }
-        reconnectTimeoutRef.current = window.setTimeout(connect, 5000);
+        reconnectAttemptRef.current = attempt + 1;
+        reconnectTimeoutRef.current = window.setTimeout(
+          connect,
+          getReconnectDelayMs(attempt)
+        );
       };
     };
 

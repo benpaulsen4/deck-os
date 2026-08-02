@@ -80,6 +80,72 @@ describe("useDockerEvents", () => {
     expect(MockEventSource.instances.length).toBe(2);
   });
 
+  // CLI-13: a flat 5s retry meant 720 attempts an hour, per tab, with Docker down.
+  it("widens the reconnect delay while the stream keeps failing and resets on open", async () => {
+    vi.useFakeTimers();
+    fetchAuthStatusMock.mockResolvedValue({ enabled: false, unlocked: true });
+
+    renderHook(() => useDockerEvents(vi.fn()));
+
+    act(() => {
+      MockEventSource.latest().dispatchError(new Error("docker down"));
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(MockEventSource.instances.length).toBe(2);
+
+    act(() => {
+      MockEventSource.latest().dispatchError(new Error("docker down"));
+    });
+
+    // The second retry waits 10s, not another 5s.
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(MockEventSource.instances.length).toBe(2);
+
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(MockEventSource.instances.length).toBe(3);
+
+    act(() => {
+      MockEventSource.latest().dispatchOpen();
+    });
+    act(() => {
+      MockEventSource.latest().dispatchError(new Error("docker down"));
+    });
+
+    // A successful open resets the delay to the base.
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(MockEventSource.instances.length).toBe(4);
+  });
+
+  it("keeps reconnecting under a delay ceiling and stops logging every failure", async () => {
+    vi.useFakeTimers();
+    fetchAuthStatusMock.mockResolvedValue({ enabled: false, unlocked: true });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    renderHook(() => useDockerEvents(vi.fn()));
+
+    for (let i = 0; i < 8; i++) {
+      act(() => {
+        MockEventSource.latest().dispatchError(new Error("docker down"));
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+    }
+
+    // Every attempt still reconnects within the 60s ceiling...
+    expect(MockEventSource.instances.length).toBe(9);
+    // ...but the console is not filled at the same rate.
+    expect(consoleError.mock.calls.length).toBeLessThanOrEqual(3);
+  });
+
   it("does not connect when disabled", () => {
     const callback = vi.fn();
     renderHook(() => useDockerEvents(callback, { enabled: false }));

@@ -2,10 +2,49 @@ import { useState, useEffect, useRef } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { useConnectionStore } from "../../stores/connection";
 import { authFetch } from "../../lib/auth";
+import { getReconnectDelayMs } from "../../hooks/useDockerEvents";
 
 interface LogEntry {
   timestamp?: string;
   line: string;
+  /**
+   * Monotonic id assigned when the line is enqueued. Index keys broke once the
+   * buffer hit its cap: `slice(-5000)` shifts every index, so React rewrote the
+   * text of every row on each 50ms flush (and dropped any text selection in the
+   * pane) instead of appending one row.
+   */
+  seq: number;
+}
+
+/** A log line before the buffer assigns it its sequence number. */
+type PendingLogEntry = Omit<LogEntry, "seq">;
+
+const RECONNECT_BASE_MS = 3_000;
+const RECONNECT_MAX_MS = 60_000;
+
+/** Carries the HTTP status so the retry policy can tell "gone" from "flaky". */
+class LogStreamHttpError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`HTTP ${status} from /api/logs`);
+    this.name = "LogStreamHttpError";
+    this.status = status;
+  }
+}
+
+/**
+ * A 4xx that is not 401 means this stream will never work: the container is gone,
+ * or the id is bad. Retrying it every few seconds just re-attaches `docker logs`
+ * on the server forever. 401 is excluded because `authFetch` has already raised
+ * the unauthorized event and a re-unlock should resume the stream.
+ */
+function isPermanentLogStreamFailure(error: unknown): boolean {
+  return (
+    error instanceof LogStreamHttpError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.status !== 401
+  );
 }
 
 interface ContainerTab {
@@ -44,7 +83,13 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
   const sinceByContainerRef = useRef<Record<string, number>>({});
   const recentLinesRef = useRef<Record<string, Map<string, number>>>({});
   const logsEndRefs = useRef<Record<string, HTMLDivElement>>({});
-  const { setConnected } = useConnectionStore();
+  const reconnectAttemptsRef = useRef<Record<string, number>>({});
+  const permanentlyFailedRef = useRef<Record<string, boolean>>({});
+  const seqRef = useRef(0);
+  // Selector, not the whole store: subscribing to everything meant every
+  // `setConnected` from the health poll, the metrics stream and the docker-events
+  // hook re-rendered up to 5000 log rows.
+  const setConnected = useConnectionStore((state) => state.setConnected);
   const maxEntriesPerContainer = 5000;
   const containerIdsKey = containers.map((c) => c.id).join("|");
 
@@ -63,11 +108,12 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
     const decoder = new TextDecoder();
     let disposed = false;
 
-    const enqueueLogs = (containerId: string, logs: LogEntry[]) => {
+    const enqueueLogs = (containerId: string, logs: PendingLogEntry[]) => {
       if (logs.length === 0) return;
+      const sequenced = logs.map((log) => ({ ...log, seq: seqRef.current++ }));
       pendingLogsRef.current[containerId] = [
         ...(pendingLogsRef.current[containerId] || []),
-        ...logs,
+        ...sequenced,
       ];
 
       if (flushTimeoutsRef.current[containerId]) return;
@@ -87,17 +133,28 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
 
     const scheduleReconnect = (containerId: string) => {
       if (disposed) return;
+      if (permanentlyFailedRef.current[containerId]) return;
       if (reconnectTimeoutsRef.current[containerId]) return;
+      const attempt = reconnectAttemptsRef.current[containerId] ?? 0;
+      reconnectAttemptsRef.current[containerId] = attempt + 1;
+      // Both a failing response and a stream that just ends (exited container)
+      // used to land on a flat 3s retry, so four exited containers on an open
+      // detail page meant ~80 `docker logs` attaches a minute, indefinitely.
+      const delay = getReconnectDelayMs(attempt, {
+        baseMs: RECONNECT_BASE_MS,
+        maxMs: RECONNECT_MAX_MS,
+      });
       reconnectTimeoutsRef.current[containerId] = window.setTimeout(() => {
         delete reconnectTimeoutsRef.current[containerId];
         if (disposed) return;
         if (!activeIds.has(containerId)) return;
         void startStream(containerId, false);
-      }, 3000);
+      }, delay);
     };
 
     const startStream = async (containerId: string, initial: boolean) => {
       if (streamControllersRef.current[containerId]) return;
+      if (permanentlyFailedRef.current[containerId]) return;
 
       setIsConnectingByContainer((prev) => ({ ...prev, [containerId]: true }));
       setErrorByContainer((prev) => ({ ...prev, [containerId]: null }));
@@ -122,9 +179,10 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
         });
 
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status} from /api/logs`);
+          throw new LogStreamHttpError(res.status);
         }
 
+        reconnectAttemptsRef.current[containerId] = 0;
         sinceByContainerRef.current[containerId] = Math.floor(Date.now() / 1000) - 2;
         setIsConnectedByContainer((prev) => ({ ...prev, [containerId]: true }));
         setIsConnectingByContainer((prev) => ({
@@ -184,13 +242,13 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
                   if (dropped >= toDrop) break;
                 }
               }
-              const logEntry: LogEntry = {
+              const logEntry: PendingLogEntry = {
                 timestamp: new Date().toISOString(),
                 line,
               };
               enqueueLogs(containerId, [logEntry]);
             } catch {
-              const logEntry: LogEntry = {
+              const logEntry: PendingLogEntry = {
                 timestamp: new Date().toISOString(),
                 line: rawData,
               };
@@ -205,6 +263,11 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
       } catch (err) {
         if (controller.signal.aborted) return;
 
+        const permanent = isPermanentLogStreamFailure(err);
+        if (permanent) {
+          permanentlyFailedRef.current[containerId] = true;
+        }
+
         setIsConnectedByContainer((prev) => ({
           ...prev,
           [containerId]: false,
@@ -215,7 +278,11 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
         }));
         setErrorByContainer((prev) => ({
           ...prev,
-          [containerId]: err instanceof Error ? err.message : "Connection failed",
+          [containerId]: permanent
+            ? `${err instanceof Error ? err.message : "Connection failed"} - not retrying`
+            : err instanceof Error
+              ? err.message
+              : "Connection failed",
         }));
       } finally {
         if (streamControllersRef.current[containerId] === controller) {
@@ -223,7 +290,9 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
         }
       }
 
-      if (activeIds.has(containerId)) scheduleReconnect(containerId);
+      if (activeIds.has(containerId) && !permanentlyFailedRef.current[containerId]) {
+        scheduleReconnect(containerId);
+      }
     };
 
     Object.keys(streamControllersRef.current).forEach((id) => {
@@ -262,6 +331,18 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
     Object.keys(recentLinesRef.current).forEach((id) => {
       if (!activeIds.has(id)) {
         delete recentLinesRef.current[id];
+      }
+    });
+
+    Object.keys(reconnectAttemptsRef.current).forEach((id) => {
+      if (!activeIds.has(id)) {
+        delete reconnectAttemptsRef.current[id];
+      }
+    });
+
+    Object.keys(permanentlyFailedRef.current).forEach((id) => {
+      if (!activeIds.has(id)) {
+        delete permanentlyFailedRef.current[id];
       }
     });
 
@@ -513,8 +594,8 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
             {activeContainerId ? "Waiting for logs..." : "Select a container"}
           </div>
         ) : (
-          currentLogs.map((log, i) => (
-            <div key={i} style={lineStyle}>
+          currentLogs.map((log) => (
+            <div key={log.seq} data-log-seq={log.seq} style={lineStyle}>
               {log.timestamp && (
                 <span style={timestampStyle}>
                   {new Date(log.timestamp).toLocaleTimeString("en-US", {
