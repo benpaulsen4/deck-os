@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
 import { basename, join } from "path";
-import { createReadStream, createWriteStream } from "fs";
-import { readFile, stat, unlink } from "node:fs/promises";
+import { createReadStream } from "fs";
+import { open, readFile, stat, unlink } from "node:fs/promises";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import Busboy from "busboy";
@@ -16,6 +16,29 @@ function toWebStream(fileStream: NodeJS.ReadableStream): ReadableStream {
 const MAX_UPLOAD_FILES = 32;
 const MAX_UPLOAD_FILE_BYTES = 128 * 1024 * 1024;
 const MAX_UPLOAD_TOTAL_BYTES = 512 * 1024 * 1024;
+const MAX_UPLOAD_FIELDS = 8;
+const MAX_UPLOAD_FIELD_BYTES = 64 * 1024;
+const MAX_UPLOAD_FIELD_NAME_BYTES = 200;
+const UPLOAD_FILE_FIELD = "files";
+
+/**
+ * Builds a Content-Disposition value that survives non-Latin-1 names. `Headers.set`
+ * throws on code points above 255, so the name is emitted twice: a sanitized ASCII
+ * `filename` for old clients and an RFC 5987 `filename*` with the real name (FILE-7).
+ */
+function toAttachmentDisposition(fileName: string): string {
+  const asciiFallback = fileName
+    .replace(/[^\x20-\x7E]/g, "_")
+    .replace(/["\\]/g, "_")
+    .trim();
+  const safeFallback = asciiFallback.length > 0 ? asciiFallback : "download";
+  // encodeURIComponent leaves !'()* alone but RFC 5987 attr-char excludes '()*.
+  const encodedName = encodeURIComponent(fileName).replace(
+    /['()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`
+  );
+  return `attachment; filename="${safeFallback}"; filename*=UTF-8''${encodedName}`;
+}
 
 function isSafeUploadName(fileName: string): boolean {
   const safeName = basename(fileName);
@@ -117,8 +140,23 @@ export function registerFilesRoutes(app: Hono) {
       );
       const parser = Busboy({
         headers: toNodeHeaders(c.req.raw.headers),
+        // Busboy defaults every limit to Infinity, so without these a part under an
+        // unexpected field name was drained with no cap at all (FILE-9).
+        limits: {
+          files: MAX_UPLOAD_FILES,
+          fileSize: MAX_UPLOAD_FILE_BYTES,
+          parts: MAX_UPLOAD_FILES + MAX_UPLOAD_FIELDS,
+          fields: MAX_UPLOAD_FIELDS,
+          fieldSize: MAX_UPLOAD_FIELD_BYTES,
+          fieldNameSize: MAX_UPLOAD_FIELD_NAME_BYTES,
+        },
       });
       const uploadedByIndex: Array<string | undefined> = [];
+      const activeFileStreams = new Set<Readable>();
+      // The reject handler below is a `once`, so once the parse promise has settled the
+      // request stream would have no error listener left; a later teardown would then
+      // rethrow instead of unwinding quietly.
+      requestStream.on("error", () => undefined);
       let totalBytes = 0;
       let uploadError: unknown = null;
       let filesCount = 0;
@@ -130,16 +168,31 @@ export function registerFilesRoutes(app: Hono) {
           return;
         }
         uploadError = error;
-        requestStream.destroy(
+        const cause =
           error instanceof Error
             ? error
-            : new Error(typeof error === "string" ? error : "Upload failed")
-        );
+            : new Error(typeof error === "string" ? error : "Upload failed");
+        // Tear down the in-flight part streams as well as the request: with only the
+        // request destroyed, busboy never ends those parts and the pipelines awaited
+        // below would hang forever.
+        for (const activeStream of activeFileStreams) {
+          activeStream.destroy(cause);
+        }
+        parser.destroy(cause);
+        requestStream.destroy(cause);
       };
 
       parser.on("file", (fieldName, stream, info) => {
-        if (fieldName !== "files") {
-          stream.resume();
+        activeFileStreams.add(stream);
+        // Destroying a stream nobody listens to makes EventEmitter rethrow the error
+        // synchronously, inside busboy's own write loop. The reason is already recorded
+        // in uploadError, so a part stream's error only needs to be absorbed here.
+        stream.on("error", () => undefined);
+        if (fieldName !== UPLOAD_FILE_FIELD) {
+          // Abort rather than drain an unbounded body under an unknown field name.
+          setUploadError(
+            new UploadRequestError(400, `Unexpected upload field: ${fieldName}`)
+          );
           return;
         }
 
@@ -149,7 +202,6 @@ export function registerFilesRoutes(app: Hono) {
           setUploadError(
             new UploadRequestError(400, `Too many files. Maximum is ${MAX_UPLOAD_FILES}.`)
           );
-          stream.resume();
           return;
         }
 
@@ -158,9 +210,11 @@ export function registerFilesRoutes(app: Hono) {
           setUploadError(
             new UploadRequestError(400, `Invalid file name: ${info.filename}`)
           );
-          stream.resume();
           return;
         }
+        stream.on("limit", () => {
+          setUploadError(new UploadRequestError(413, `File too large: ${safeName}`));
+        });
         const uploadIndex = uploadedByIndex.length;
         uploadedByIndex.push(undefined);
 
@@ -188,18 +242,21 @@ export function registerFilesRoutes(app: Hono) {
             },
           });
 
+          // "wx" refuses to clobber, so an EEXIST here means the collided file belongs
+          // to someone else and must not be unlinked in the failure path (FILE-2).
+          const handle = await open(targetPath, "wx");
           try {
-            await pipeline(
-              stream,
-              limiter,
-              createWriteStream(targetPath, { flags: "wx" })
-            );
+            await pipeline(stream, limiter, handle.createWriteStream());
             uploadedByIndex[uploadIndex] = safeName;
           } catch (error) {
             await unlink(targetPath).catch(() => undefined);
             throw error;
+          } finally {
+            await handle.close().catch(() => undefined);
           }
-        })();
+        })().finally(() => {
+          activeFileStreams.delete(stream);
+        });
 
         fileTasks.push(task);
         task.catch((error) => {
@@ -207,32 +264,66 @@ export function registerFilesRoutes(app: Hono) {
         });
       });
 
+      parser.on("filesLimit", () => {
+        setUploadError(
+          new UploadRequestError(400, `Too many files. Maximum is ${MAX_UPLOAD_FILES}.`)
+        );
+      });
+      parser.on("fieldsLimit", () => {
+        setUploadError(new UploadRequestError(400, "Too many form fields"));
+      });
+      parser.on("partsLimit", () => {
+        setUploadError(new UploadRequestError(400, "Too many multipart parts"));
+      });
       parser.on("error", (error) => {
-        setUploadError(error);
+        // Busboy only errors on input it cannot parse (a malformed part header, a
+        // truncated body), which is a client problem rather than a server fault.
+        setUploadError(
+          error instanceof UploadRequestError
+            ? error
+            : new UploadRequestError(400, "Malformed multipart request")
+        );
       });
 
-      await new Promise<void>((resolve, reject) => {
-        parser.once("finish", () => {
-          resolve();
+      let parseError: unknown = null;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          parser.once("finish", () => {
+            resolve();
+          });
+          requestStream.once("error", (error) => {
+            reject(error);
+          });
+          parser.once("error", (error) => {
+            reject(error);
+          });
+          requestStream.pipe(parser);
         });
-        requestStream.once("error", (error) => {
-          reject(error);
-        });
-        parser.once("error", (error) => {
-          reject(error);
-        });
-        requestStream.pipe(parser);
-      });
+      } catch (error) {
+        parseError = error;
+      }
 
-      await Promise.all(fileTasks);
-      if (uploadError) {
-        throw uploadError;
+      // Always settle every write before responding: the previous `Promise.all` was
+      // skipped entirely when the parse promise rejected, so the response raced tasks
+      // that were still writing to disk (FILE-10).
+      await Promise.allSettled(fileTasks);
+
+      const uploaded = uploadedByIndex.filter(
+        (name): name is string => typeof name === "string"
+      );
+      const failure = uploadError ?? parseError;
+      if (failure) {
+        // Report exactly which files landed; failed writes are unlinked above.
+        if (failure instanceof UploadRequestError) {
+          return c.json({ error: failure.message, uploaded }, failure.status);
+        }
+        const mappedFailure = mapFilesError(failure, "Upload failed");
+        return c.json({ error: mappedFailure.message, uploaded }, mappedFailure.status);
       }
       if (!hasFile) {
         return c.json({ error: "No files uploaded" }, 400);
       }
 
-      const uploaded = uploadedByIndex.filter((name): name is string => typeof name === "string");
       return c.json({ uploaded });
     } catch (error: unknown) {
       if (error instanceof UploadRequestError) {
@@ -251,7 +342,7 @@ export function registerFilesRoutes(app: Hono) {
     try {
       const filePath = await filesService.resolveExistingFilePath(targetParam);
       const fileStat = await stat(filePath);
-      c.header("Content-Disposition", `attachment; filename="${basename(filePath)}"`);
+      c.header("Content-Disposition", toAttachmentDisposition(basename(filePath)));
       c.header("Content-Type", "application/octet-stream");
       c.header("Content-Length", String(fileStat.size));
       c.header("X-Content-Type-Options", "nosniff");
