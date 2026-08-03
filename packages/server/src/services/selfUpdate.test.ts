@@ -70,6 +70,12 @@ type TarEntry = {
   linkname?: string;
   /** Overrides the size written into the header (for the oversize test). */
   declaredSize?: number;
+  /**
+   * Defaults to 0o755 for directories and 0o644 for files, which is what a real
+   * `tar -czf` of the release staging tree records. Overridden by the test that
+   * exercises a release shipping hostile directory modes.
+   */
+  mode?: number;
 };
 
 function octalField(value: number, length: number): string {
@@ -81,10 +87,11 @@ function buildTarHeader(opts: {
   size: number;
   type: string;
   linkname?: string;
+  mode: number;
 }): Buffer {
   const block = Buffer.alloc(512);
   block.write(opts.name, 0, 100, "utf8");
-  block.write(octalField(0o644, 8), 100, 8, "utf8");
+  block.write(octalField(opts.mode, 8), 100, 8, "utf8");
   block.write(octalField(0, 8), 108, 8, "utf8");
   block.write(octalField(0, 8), 116, 8, "utf8");
   block.write(octalField(opts.size, 12), 124, 12, "utf8");
@@ -119,7 +126,12 @@ function buildTar(entries: TarEntry[]): Buffer {
       // GNU long-name extension, exactly as GNU tar emits it.
       const nameBytes = Buffer.concat([Buffer.from(entry.name, "utf8"), Buffer.alloc(1)]);
       parts.push(
-        buildTarHeader({ name: "././@LongLink", size: nameBytes.length, type: "L" })
+        buildTarHeader({
+          name: "././@LongLink",
+          size: nameBytes.length,
+          type: "L",
+          mode: 0o644,
+        })
       );
       parts.push(padTo512(nameBytes));
     }
@@ -130,6 +142,7 @@ function buildTar(entries: TarEntry[]): Buffer {
         size: entry.declaredSize ?? content.length,
         type,
         linkname: entry.linkname,
+        mode: entry.mode ?? (type === "5" ? 0o755 : 0o644),
       })
     );
     if ((type === "0" || type === "7") && entry.declaredSize === undefined) {
@@ -625,6 +638,27 @@ describe("selfUpdate service", () => {
       raw[150] = 0x39; // scribble on the stored checksum
       await expect(inspectBuffer(gzipSync(raw))).rejects.toThrow(/bad header checksum/);
     });
+
+    test("rejects a pathological archive root name without backtracking", async () => {
+      // The root name comes from the release channel. The previous pattern used a
+      // repeated group whose introducer and body classes both contained "-", so
+      // this input took exponential time; it must now be linear.
+      // The trailing "!" is what forces the failing match: without it the old
+      // pattern matched immediately and never had to explore the partitions.
+      const hostileRoot = `deckos-0.0.0+${"--".repeat(14)}!`;
+      const tarball = gzipSync(
+        buildTar([
+          { name: `${hostileRoot}/`, type: "5" },
+          { name: `${hostileRoot}/packages/server/dist/index.js`, content: "x" },
+        ])
+      );
+
+      const started = Date.now();
+      await expect(inspectBuffer(tarball)).rejects.toThrow(
+        /unexpected top-level directory/
+      );
+      expect(Date.now() - started).toBeLessThan(2000);
+    });
   });
 
   /* ---------------------------------------------------------------- *
@@ -925,9 +959,9 @@ describe("selfUpdate service", () => {
 
       await runUpdate().catch(() => undefined);
 
-      const redirected = calls.filter((c) =>
-        c.url.startsWith("https://objects.example.test")
-      );
+      // Compare the parsed host, not a URL prefix: "https://objects.example.test"
+      // as a substring also matches https://objects.example.test.attacker.example.
+      const redirected = calls.filter((c) => new URL(c.url).host === "objects.example.test");
       expect(redirected.length).toBeGreaterThan(0);
       for (const call of redirected) {
         const headers = (call.init?.headers ?? {}) as Record<string, string>;
@@ -1037,6 +1071,60 @@ describe("selfUpdate service", () => {
           existsSync(join(releasesDir, "0.4.0", "packages", "client", "dist", "index.html"))
         ).toBe(true);
         expect(existsSync(join(releasesDir, "0.4.0.tmp"))).toBe(false);
+      }
+    );
+
+    test.skipIf(!systemTar)(
+      "installs a release whose directories are not owner-writable",
+      async () => {
+        // A tar member carries its own mode and `--no-same-permissions` only
+        // applies the umask, so a release can ship a directory that cannot be
+        // traversed or unlinked inside. That breaks the marker check, the replace
+        // step and every later prune. Modes are normalised after extraction.
+        await seedRelease("0.3.0");
+        await symlink(join(releasesDir, "0.3.0"), currentLink, "dir");
+
+        const version = RELEASE_VERSION;
+        const root = `deckos-${version}`;
+        const tarball = gzipSync(
+          buildTar([
+            { name: `${root}/`, type: "5", mode: 0o555 },
+            { name: `${root}/VERSION`, content: `${version}\n` },
+            { name: `${root}/packages/`, type: "5", mode: 0o555 },
+            {
+              name: `${root}/packages/server/dist/index.js`,
+              content: "console.log('deckos');\n",
+            },
+          ])
+        );
+        const tarName = `deckos-${version}-linux-x64.tar.gz`;
+        const sums = buildSums([{ name: tarName, body: tarball }]);
+        stubGithub({
+          release: {
+            tag_name: `v${version}`,
+            draft: false,
+            prerelease: false,
+            assets: [
+              { id: 10, name: tarName },
+              { id: 11, name: "SHA256SUMS" },
+              { id: 12, name: "SHA256SUMS.sig" },
+            ],
+          },
+          assets: [
+            { id: 10, name: tarName, body: tarball },
+            { id: 11, name: "SHA256SUMS", body: sums },
+            { id: 12, name: "SHA256SUMS.sig", body: signBytes(sums) },
+          ],
+        });
+
+        const result = await runUpdate();
+
+        expect(result).toEqual({ targetVersion: version, restarting: true });
+        expect(
+          existsSync(join(releasesDir, version, "packages", "server", "dist", "index.js"))
+        ).toBe(true);
+        // The staging directory was removed rather than left behind by an EACCES.
+        expect(existsSync(join(releasesDir, `${version}.tmp`))).toBe(false);
       }
     );
 

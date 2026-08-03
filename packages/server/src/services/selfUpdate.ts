@@ -1,7 +1,18 @@
 import { createReadStream, createWriteStream } from "node:fs";
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto";
 import type { KeyObject } from "node:crypto";
-import { mkdir, readdir, readlink, rename, rm, stat, symlink } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readdir,
+  readlink,
+  rename,
+  rm,
+  stat,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -86,8 +97,19 @@ const ALLOWED_TOP_LEVEL_ENTRIES = new Set([
   "docs",
 ]);
 
+/**
+ * Archive root directory name.
+ *
+ * The prerelease and build suffixes are two separate optional groups rather than
+ * one repeated `(?:[-+]...)*`. In the repeated form `-` belonged to both the
+ * introducer class and the body class, so a name such as `deckos-0.0.0+------`
+ * could be partitioned exponentially many ways and would hang the event loop.
+ * This name arrives from the release channel that UPD-1 exists to distrust, so
+ * the pattern must be linear: every quantifier runs over a single class, and `+`
+ * is excluded from the body classes so the split point is unambiguous.
+ */
 const ARCHIVE_ROOT_RE =
-  /^deckos-(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)*$/;
+  /^deckos-(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 const SERVER_ENTRY_PATH = "packages/server/dist/index.js";
 
@@ -157,6 +179,71 @@ function safeLabel(value: string, limit = 120): string {
     .replace(/\s+/g, " ")
     .trim();
   return collapsed.length <= limit ? collapsed : `${collapsed.slice(0, limit)}…`;
+}
+
+/** Owner read/write/execute. */
+const OWNER_RWX = 0o700;
+
+/**
+ * Ensures every directory in a tree is traversable and writable by its owner.
+ *
+ * A tar member carries its own mode, and `--no-same-permissions` does not rescue
+ * us: for a non-root user it means "apply the umask to the archive's mode", and
+ * `0555 & ~022` is still `0555`. A release that ships a directory without owner
+ * write cannot have entries unlinked inside it afterwards, and one without owner
+ * execute cannot even be traversed — which breaks the post-extract marker check,
+ * the replace step, later pruning, and rollback. `fs.rm({ force: true })` does not
+ * chmod around it.
+ *
+ * Modes are therefore normalised after extraction rather than trusted. Directories
+ * are chmod-ed top down so each one is traversable before it is read. Files are
+ * left alone: their modes do not block replacing the tree.
+ */
+async function ensureTreeTraversable(root: string): Promise<void> {
+  let stats;
+  try {
+    stats = await lstat(root);
+  } catch {
+    return;
+  }
+  if (!stats.isDirectory()) return;
+
+  if ((stats.mode & OWNER_RWX) !== OWNER_RWX) {
+    try {
+      await chmod(root, stats.mode | OWNER_RWX);
+    } catch {
+      // Best effort: carry on and let the caller surface the real failure.
+    }
+  }
+
+  let entries: Dirent[];
+  try {
+    entries = await readdir(root, { withFileTypes: true, encoding: "utf8" });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    // `isDirectory` reflects lstat, so symlinked directories are not followed.
+    if (entry.isDirectory()) {
+      await ensureTreeTraversable(join(root, entry.name));
+    }
+  }
+}
+
+/**
+ * Removes a directory tree, restoring owner access and retrying if the first
+ * attempt is refused because of a directory mode inside it.
+ */
+async function removeTree(target: string): Promise<void> {
+  try {
+    await rm(target, { recursive: true, force: true });
+    return;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "EACCES" && code !== "EPERM" && code !== "ENOTEMPTY") throw err;
+    await ensureTreeTraversable(target);
+    await rm(target, { recursive: true, force: true });
+  }
 }
 
 async function pathExists(p: string): Promise<boolean> {
@@ -897,7 +984,7 @@ async function pruneReleases(
   const removable = [...candidates.slice(keepCount).map((c) => c.name), ...staleTmpDirs];
 
   for (const name of removable) {
-    await rm(join(releasesDir, name), { recursive: true, force: true });
+    await removeTree(join(releasesDir, name));
   }
 }
 
@@ -997,7 +1084,7 @@ export async function applyUpdate(
       updateTmpRoot,
       `deckos-update-${targetVersion}-${process.pid}-${Date.now()}`
     );
-    await rm(updateWorkDir, { recursive: true, force: true });
+    await removeTree(updateWorkDir);
     await mkdir(updateWorkDir, { recursive: true });
 
     // 1. Manifest and detached signature.
@@ -1035,7 +1122,7 @@ export async function applyUpdate(
     await inspectReleaseArchive(tarPath);
 
     extractTmp = join(releasesDir, `${targetVersion}.tmp`);
-    await rm(extractTmp, { recursive: true, force: true });
+    await removeTree(extractTmp);
     await mkdir(extractTmp, { recursive: true });
 
     await execFile(
@@ -1052,12 +1139,16 @@ export async function applyUpdate(
       { timeout: EXTRACT_TIMEOUT_MS, maxBuffer: EXTRACT_MAX_OUTPUT_BYTES }
     );
 
+    // The archive chooses its own directory modes, so normalise before anything
+    // tries to traverse, replace or clean up the extracted tree.
+    await ensureTreeTraversable(extractTmp);
+
     const extractedMarker = join(extractTmp, "packages", "server", "dist", "index.js");
     if (!(await pathExists(extractedMarker))) {
       throw new Error("Release archive missing expected server build output");
     }
 
-    await rm(targetDir, { recursive: true, force: true });
+    await removeTree(targetDir);
     await rename(extractTmp, targetDir);
     extractTmp = "";
 
@@ -1106,10 +1197,10 @@ export async function applyUpdate(
   } finally {
     releaseUpdateLock();
     if (extractTmp) {
-      await rm(extractTmp, { recursive: true, force: true });
+      await removeTree(extractTmp);
     }
     if (updateWorkDir) {
-      await rm(updateWorkDir, { recursive: true, force: true });
+      await removeTree(updateWorkDir);
     }
   }
 }
