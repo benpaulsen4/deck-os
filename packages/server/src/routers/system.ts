@@ -19,7 +19,17 @@ const STRICT_SEMVER_PATTERN = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const UpdateVersionSchema = z
   .string()
   .trim()
-  .regex(STRICT_SEMVER_PATTERN, "Version must be a semver release such as 1.2.3");
+  .regex(STRICT_SEMVER_PATTERN, "Version must be a semver release such as 1.2.3")
+  // Canonicalise at the boundary so exactly one spelling reaches comparisons,
+  // error messages and `applyUpdate`.
+  .transform((version) => version.replace(/^v/i, ""));
+
+/**
+ * `getCurrentVersion()` falls back to this when it cannot determine the running
+ * version, so it must not be treated as a real release to compare against — it
+ * would wave every explicit version through the downgrade guard.
+ */
+const UNKNOWN_VERSION = "0.0.0";
 
 /**
  * Local, deliberately duplicated semver comparison. `services/updates.ts` has an
@@ -61,7 +71,10 @@ export function assertVersionIsUpgrade(
 ): void {
   if (allowDowngrade) return;
 
-  const comparison = compareStrictSemver(targetVersion, currentVersion);
+  const comparison =
+    currentVersion.trim().replace(/^v/i, "") === UNKNOWN_VERSION
+      ? null
+      : compareStrictSemver(targetVersion, currentVersion);
   if (comparison === null) {
     throw new TRPCError({
       code: "BAD_REQUEST",

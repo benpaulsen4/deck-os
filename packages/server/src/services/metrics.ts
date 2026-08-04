@@ -50,36 +50,6 @@ type MetricsSection = "cpu" | "memory" | "processes" | "disk" | "network";
 const failingSections = new Set<MetricsSection>();
 let pollFailureLogged = false;
 
-const EMPTY_SECTIONS: {
-  cpu: CPUMetrics;
-  memory: MemoryMetrics;
-  processes: ProcessMetrics;
-  disk: DiskMetrics;
-  network: NetworkMetrics;
-} = {
-  cpu: {
-    usage: 0,
-    load: [],
-    cores: 0,
-    speed: 0,
-    temperatureC: null,
-    powerWatts: null,
-  },
-  memory: {
-    total: 0,
-    used: 0,
-    free: 0,
-    usage: 0,
-    swapTotal: 0,
-    swapUsed: 0,
-    swapFree: 0,
-    swapUsage: 0,
-  },
-  processes: { all: 0, running: 0, blocked: 0, sleeping: 0 },
-  disk: { fs: [] },
-  network: { interfaces: {} },
-};
-
 let cpuPowerPath: string | null | undefined = undefined;
 let cpuPowerMode: "rapl_energy" | "hwmon_power" | null | undefined = undefined;
 let raplMaxEnergyRangeUj: number | null = null;
@@ -403,8 +373,8 @@ async function collectNetworkMetrics(): Promise<NetworkMetrics> {
 
 /**
  * Resolves one section of a settled collection: the fresh value when the
- * collector succeeded, otherwise the previous value for that section (or null
- * when there is nothing to fall back on). A single flaky collector must not
+ * collector succeeded, otherwise the previous value for that section, or null
+ * when that collector has never produced one. A single flaky collector must not
  * blank the whole snapshot, and a permanently broken one must not log on every
  * tick, so failures are logged on the transition into and out of failure.
  */
@@ -441,24 +411,50 @@ async function collectMetricsUncoordinated(): Promise<SystemMetrics> {
   ]);
   const [cpuResult, memoryResult, processesResult, diskResult, networkResult] = results;
 
-  const cpu = resolveSection("cpu", cpuResult, previous?.cpu);
-  const memory = resolveSection("memory", memoryResult, previous?.memory);
-  const processes = resolveSection("processes", processesResult, previous?.processes);
-  const disk = resolveSection("disk", diskResult, previous?.disk);
-  const network = resolveSection("network", networkResult, previous?.network);
+  const sections = {
+    cpu: resolveSection("cpu", cpuResult, previous?.cpu),
+    memory: resolveSection("memory", memoryResult, previous?.memory),
+    processes: resolveSection("processes", processesResult, previous?.processes),
+    disk: resolveSection("disk", diskResult, previous?.disk),
+    network: resolveSection("network", networkResult, previous?.network),
+  };
 
+  // Degrading to a stale section is honest; fabricating one is not. A section
+  // that has never succeeded would have to be invented from zeroes, which reads
+  // downstream as a genuinely idle machine, so treat it as a failed collection
+  // and leave the cache untouched instead. This subsumes the all-collectors-
+  // failed case.
+  // Every collector failed at once: the machine, not one subsystem, is the
+  // problem. Publishing an entirely stale snapshot under a fresh timestamp would
+  // present a frozen host as a live one, so leave the cache alone.
   if (results.every((result) => result.status === "rejected")) {
     throw new Error(
-      `All metrics collectors failed (${[...failingSections].sort().join(", ")})`
+      `All metrics collectors failed (${(Object.keys(sections) as MetricsSection[]).join(", ")})`
+    );
+  }
+
+  const { cpu, memory, processes, disk, network } = sections;
+  if (
+    cpu === null ||
+    memory === null ||
+    processes === null ||
+    disk === null ||
+    network === null
+  ) {
+    const unavailable = (Object.keys(sections) as MetricsSection[]).filter(
+      (section) => sections[section] === null
+    );
+    throw new Error(
+      `Metrics collection incomplete; no data has ever been collected for: ${unavailable.join(", ")}`
     );
   }
 
   const metrics: SystemMetrics = {
-    cpu: cpu ?? EMPTY_SECTIONS.cpu,
-    memory: memory ?? EMPTY_SECTIONS.memory,
-    processes: processes ?? EMPTY_SECTIONS.processes,
-    disk: disk ?? EMPTY_SECTIONS.disk,
-    network: network ?? EMPTY_SECTIONS.network,
+    cpu,
+    memory,
+    processes,
+    disk,
+    network,
     timestamp: new Date().toISOString(),
   };
 
@@ -512,12 +508,33 @@ async function runPollCycle(): Promise<void> {
   }
 }
 
-export function startMetricsPolling(): void {
+/**
+ * Polling exists only to feed subscribers, so its lifetime is refcounted on the
+ * subscriber set: started on the 0->1 transition and stopped on 1->0. Starting
+ * it with nobody listening would leak a 2-second collector for the lifetime of
+ * the process, which is exactly what an SSE handler that fails between its
+ * `startMetricsPolling()` and its `subscribeToMetrics()` call used to do.
+ */
+function syncPollingWithSubscribers(): void {
+  if (metricsSubscribers.size === 0) {
+    stopMetricsPolling();
+    return;
+  }
   if (pollInterval) return;
+
   void runPollCycle();
   pollInterval = setInterval(() => {
     void runPollCycle();
   }, POLL_INTERVAL_MS);
+}
+
+/**
+ * Retained for `http/runtimeRoutes.ts`, which calls this before subscribing.
+ * Polling is refcounted on the subscriber set now, so this is a no-op until a
+ * subscriber exists and the call can be removed by that file's owner.
+ */
+export function startMetricsPolling(): void {
+  syncPollingWithSubscribers();
 }
 
 export function stopMetricsPolling(): void {
@@ -525,11 +542,14 @@ export function stopMetricsPolling(): void {
     clearInterval(pollInterval);
     pollInterval = null;
   }
-  // Once collection stops the gap to the next sample is unbounded, and the RAPL
-  // counter wraps at `max_energy_range_uj`. A delta measured across that gap
-  // would be silently wrong, so drop the baseline and re-prime on resume.
+  // Once collection stops the gap to the next sample is unbounded, so every
+  // carried-over sample is dropped and re-taken on resume. It matters most for
+  // the RAPL counter, which wraps at `max_energy_range_uj` and would otherwise
+  // yield a silently wrong delta measured across the gap.
   lastCpuEnergyUj = null;
   lastCpuEnergyAtMs = null;
+  lastProcessMetrics = null;
+  lastProcessSampleAtMs = null;
 }
 
 export function getCachedMetrics(): SystemMetrics | null {
@@ -544,13 +564,18 @@ export function subscribeToMetrics(
   callback: (metrics: SystemMetrics) => void
 ): () => void {
   metricsSubscribers.add(callback);
+  // Refcounted start: the first subscriber turns the poller on, so no caller has
+  // to remember to, and one that fails before subscribing cannot leave it running.
+  syncPollingWithSubscribers();
+
+  let unsubscribed = false;
   return () => {
+    if (unsubscribed) return;
+    unsubscribed = true;
     metricsSubscribers.delete(callback);
     // Nothing is listening any more; stop paying for collection until the next
-    // dashboard connects. `startMetricsPolling` is called on every subscribe.
-    if (metricsSubscribers.size === 0) {
-      stopMetricsPolling();
-    }
+    // dashboard connects.
+    syncPollingWithSubscribers();
   };
 }
 

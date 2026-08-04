@@ -180,6 +180,34 @@ describe("system.applyUpdate version handling", () => {
     expect(applyUpdateMock).not.toHaveBeenCalled();
   });
 
+  test("treats the unknown-version fallback as not comparable rather than oldest", async () => {
+    // getCurrentVersion() returns "0.0.0" when it cannot determine a version;
+    // comparing against it would wave every explicit version through.
+    getCurrentVersionMock.mockReturnValue("0.0.0");
+
+    await expect(caller.applyUpdate({ version: "1.0.0" })).rejects.toThrow(
+      /Cannot compare requested version/
+    );
+    expect(applyUpdateMock).not.toHaveBeenCalled();
+
+    await expect(
+      caller.applyUpdate({ version: "1.0.0", allowDowngrade: true })
+    ).resolves.toBeDefined();
+    expect(applyUpdateMock).toHaveBeenCalledWith("1.0.0");
+  });
+
+  test("normalizes a v-prefixed version to a single canonical form", async () => {
+    await expect(caller.applyUpdate({ version: "v0.5.0" })).resolves.toBeDefined();
+    expect(applyUpdateMock).toHaveBeenCalledWith("0.5.0");
+  });
+
+  test("still refuses a v-prefixed downgrade", async () => {
+    await expect(caller.applyUpdate({ version: "v0.1.0" })).rejects.toThrow(
+      /not newer than the running version 0\.4\.3/
+    );
+    expect(applyUpdateMock).not.toHaveBeenCalled();
+  });
+
   test("allows an explicit newer version", async () => {
     await expect(caller.applyUpdate({ version: "0.5.0" })).resolves.toEqual({
       targetVersion: "9.9.9",
