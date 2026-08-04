@@ -65,9 +65,18 @@ export function parseSemver(v: string): SemverParts | null {
   };
 }
 
-/** True when `v` is a version string this codebase is willing to act on. */
+/**
+ * True when `v` is *exactly* a semver version.
+ *
+ * Deliberately stricter than `parseSemver`, which normalizes a leading `v` and
+ * surrounding whitespace first, so this rejects `"v1.2.3"`, `"V1.2.3"` and
+ * `" 1.2.3 "`. It guards values that become filesystem paths and directory
+ * names, where accepting a `v` prefix would allow a `releases/v1.2.3` directory
+ * to sit alongside `releases/1.2.3` and be treated as a distinct release. Call
+ * `normalizeVersion` first if the input may legitimately carry a tag prefix.
+ */
 export function isValidReleaseVersion(v: string): boolean {
-  return parseSemver(v) !== null;
+  return typeof v === "string" && SEMVER_RE.test(v);
 }
 
 function comparePrerelease(a: string[], b: string[]): number {

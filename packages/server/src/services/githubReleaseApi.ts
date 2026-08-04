@@ -45,7 +45,10 @@ function resolveApiBase(): string {
   if (parsed.username || parsed.password) {
     throw new Error("DECKOS_GITHUB_API_BASE must not embed credentials");
   }
-  return raw.replace(/\/+$/, "");
+  // Return the normalized form rather than the raw string: `https://host/../..`
+  // is a valid URL whose raw text would otherwise be concatenated straight into
+  // request paths. Query and fragment are dropped; neither belongs in an API base.
+  return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, "");
 }
 
 export function getGithubConfig() {
@@ -89,6 +92,8 @@ export async function requestGithubRelease(
     return { response: anonymousResponse, tokenConfigured: token.length > 0 };
   }
 
+  // Release the rejected response's socket before opening the retry.
+  await discardBody(anonymousResponse);
   const tokenResponse = await fetch(url, {
     ...options,
     headers: {
@@ -235,8 +240,10 @@ async function readBodyPreview(response: Response, limit: number): Promise<strin
  */
 function summarizeRemoteText(value: string): string {
   const collapsed = value
+    // Control characters, plus the bidi marks, overrides and isolates that
+    // would let attacker-controlled text visually reorder the panel message.
     // eslint-disable-next-line no-control-regex
-    .replace(/[\x00-\x1f]+/g, " ")
+    .replace(/[\x00-\x1f\x7f\u200e\u200f\u202a-\u202e\u2066-\u2069]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (collapsed.length <= MAX_ERROR_BODY_CHARS) return collapsed;

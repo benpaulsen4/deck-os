@@ -84,10 +84,14 @@ const MAX_ARCHIVE_METADATA_BYTES = 64 * 1024;
 const TAR_BLOCK = 512;
 
 /**
- * Top-level entries a release tarball may contain, once the `deckos-<version>/`
- * wrapper is stripped. Keep in sync with `scripts/package-release.mjs`: adding a
- * new top-level path to the tarball without adding it here makes the updater
- * refuse the release.
+ * Top-level entries a release tarball is allowed to contain, once the
+ * `deckos-<version>/` wrapper is stripped.
+ *
+ * This is an upper bound, not a mirror: `scripts/package-release.mjs` currently
+ * emits only `packages/` and `VERSION`, and the rest are listed so plausible
+ * additions do not require a coordinated change. The coupling runs one way —
+ * adding a new top-level path to the tarball without adding it here makes the
+ * updater refuse the release.
  */
 const ALLOWED_TOP_LEVEL_ENTRIES = new Set([
   "packages",
@@ -174,8 +178,10 @@ function getUpdateTmpRoot(): string {
 /** Renders untrusted text safely for an error message shown in the panel. */
 function safeLabel(value: string, limit = 120): string {
   const collapsed = value
+    // Control characters, plus the bidi marks, overrides and isolates that
+    // would let attacker-controlled text visually reorder the panel message.
     // eslint-disable-next-line no-control-regex
-    .replace(/[\x00-\x1f\x7f]+/g, "?")
+    .replace(/[\x00-\x1f\x7f\u200e\u200f\u202a-\u202e\u2066-\u2069]+/g, "?")
     .replace(/\s+/g, " ")
     .trim();
   return collapsed.length <= limit ? collapsed : `${collapsed.slice(0, limit)}…`;
@@ -729,8 +735,18 @@ export async function inspectTarStream(
         }
         const payload = await reader.read(padded);
         if (!payload) throw new Error("Release archive is truncated");
-        if (typeFlag !== "g") {
-          const records = parsePaxRecords(payload.subarray(0, size));
+        const records = parsePaxRecords(payload.subarray(0, size));
+        if (typeFlag === "g") {
+          // A global header applies to every following member in libarchive but
+          // not in GNU tar. Rather than pick a side, refuse an archive that uses
+          // one to rename members: the point of this parser is to not depend on
+          // which tar ends up doing the extraction.
+          if (records.has("path") || records.has("linkpath")) {
+            throw new Error(
+              "Release archive uses a global pax header to set member paths, which different tar implementations honour differently"
+            );
+          }
+        } else {
           paxPath = records.get("path") ?? null;
           paxLink = records.get("linkpath") ?? null;
         }
@@ -746,6 +762,8 @@ export async function inspectTarStream(
       paxPath = null;
       paxLink = null;
 
+      // Only real members are counted. The metadata headers handled above are
+      // bounded instead by the reader's total expanded-size ceiling.
       memberCount += 1;
       if (memberCount > MAX_ARCHIVE_ENTRIES) {
         throw new Error(
@@ -922,13 +940,28 @@ function getRunningReleaseVersion(releasesDir: string): string | null {
  */
 async function pointCurrentAt(currentLink: string, targetDir: string): Promise<void> {
   const tmpLink = `${currentLink}.new-${process.pid}-${Date.now()}`;
-  await rm(tmpLink, { recursive: true, force: true });
+  await rm(tmpLink, { force: true });
   await symlink(targetDir, tmpLink, "dir");
   try {
     await rename(tmpLink, currentLink);
-  } catch {
-    await rm(currentLink, { recursive: true, force: true });
-    await rename(tmpLink, currentLink);
+  } catch (renameErr) {
+    try {
+      // Only ever unlink a symlink here. If `current` is somehow a real
+      // directory, removing it recursively would destroy an installed release.
+      const existing = await lstat(currentLink).catch(() => null);
+      if (existing && !existing.isSymbolicLink()) {
+        throw new Error(
+          `Refusing to replace ${currentLink}: expected a symlink but found a real ${existing.isDirectory() ? "directory" : "file"}`,
+          { cause: renameErr }
+        );
+      }
+      await rm(currentLink, { force: true });
+      await rename(tmpLink, currentLink);
+    } catch (fallbackErr) {
+      // Never leave a stray `current.new-*` behind.
+      await rm(tmpLink, { force: true }).catch(() => undefined);
+      throw fallbackErr instanceof Error ? fallbackErr : renameErr;
+    }
   }
 }
 
@@ -955,11 +988,18 @@ async function pruneReleases(
   const candidates: { name: string; mtimeMs: number }[] = [];
   const staleTmpDirs: string[] = [];
   const now = Date.now();
+  let protectedOnDisk = 0;
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const name = entry.name;
-    if (protectedVersions.has(name)) continue;
+    if (protectedVersions.has(name)) {
+      // Only protected versions that actually exist consume retention slots.
+      // `runningVersion` can be derived from a path outside `releasesDir`, and
+      // counting it anyway silently shrank the retention window.
+      protectedOnDisk += 1;
+      continue;
+    }
 
     let mtimeMs: number;
     try {
@@ -980,7 +1020,7 @@ async function pruneReleases(
   }
 
   candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  const keepCount = Math.max(0, keep - protectedVersions.size);
+  const keepCount = Math.max(0, keep - protectedOnDisk);
   const removable = [...candidates.slice(keepCount).map((c) => c.name), ...staleTmpDirs];
 
   for (const name of removable) {
@@ -1012,6 +1052,7 @@ export async function applyUpdate(
   acquireUpdateLock();
   let updateWorkDir = "";
   let extractTmp = "";
+  let restartScheduled = false;
   try {
     const status = await getUpdateStatus();
     if (!status.enabled) throw new Error(status.error || "Updates are disabled");
@@ -1059,6 +1100,7 @@ export async function applyUpdate(
       }
       await pointCurrentAt(currentLink, targetDir);
       clearUpdateStatusCache();
+      restartScheduled = true;
       scheduleRestart();
       return { targetVersion, restarting: true };
     }
@@ -1105,6 +1147,15 @@ export async function applyUpdate(
     const tarPath = join(updateWorkDir, `deckos-${targetVersion}.tar.gz`);
     await downloadAssetToFile(asset.id, tarPath, MAX_TARBALL_BYTES);
 
+    // The manifest binds digests to filenames, not to a tag. Requiring the
+    // version in the asset name means the version we are installing appears in
+    // the line that is actually signed, rather than only in the API response.
+    if (!asset.name.startsWith(`deckos-${targetVersion}-`)) {
+      throw new Error(
+        `Release asset ${safeLabel(asset.name)} is not named for version ${targetVersion}, so the signed manifest cannot vouch for the version being installed`
+      );
+    }
+
     const expectedDigest = sums.get(asset.name);
     if (!expectedDigest) {
       throw new Error(
@@ -1118,8 +1169,18 @@ export async function applyUpdate(
       );
     }
 
-    // 4. Validate every archive member before handing the file to tar.
-    await inspectReleaseArchive(tarPath);
+    // 4. Validate every archive member before handing the file to tar, and bind
+    //    the archive to the version it is being installed as. Without this an
+    //    attacker who controls the API response but not the signing key could
+    //    serve a genuinely signed older tarball under a newer tag_name and force
+    //    a downgrade: every signature and digest check would still pass.
+    const summary = await inspectReleaseArchive(tarPath);
+    const expectedRoot = `deckos-${targetVersion}`;
+    if (summary.root !== expectedRoot) {
+      throw new Error(
+        `Release archive contains ${safeLabel(summary.root)}, not ${expectedRoot}: refusing to install it as ${targetVersion}`
+      );
+    }
 
     extractTmp = join(releasesDir, `${targetVersion}.tmp`);
     await removeTree(extractTmp);
@@ -1191,16 +1252,31 @@ export async function applyUpdate(
     }
 
     clearUpdateStatusCache();
+    restartScheduled = true;
     scheduleRestart();
 
     return { targetVersion, restarting: true };
   } finally {
-    releaseUpdateLock();
+    // The restart is 250ms away and the process is about to be replaced; holding
+    // the lock stops a second update starting inside that window. The watchdog
+    // still releases it if the exit somehow never happens.
+    if (!restartScheduled) releaseUpdateLock();
+    // Cleanup must never replace the real error. Losing a temp directory is a
+    // nuisance; losing "Release checksum mismatch" is an outage the operator
+    // cannot diagnose.
     if (extractTmp) {
-      await removeTree(extractTmp);
+      try {
+        await removeTree(extractTmp);
+      } catch (err) {
+        console.warn(`[deckos] Failed to remove ${extractTmp}:`, err);
+      }
     }
     if (updateWorkDir) {
-      await removeTree(updateWorkDir);
+      try {
+        await removeTree(updateWorkDir);
+      } catch (err) {
+        console.warn(`[deckos] Failed to remove ${updateWorkDir}:`, err);
+      }
     }
   }
 }

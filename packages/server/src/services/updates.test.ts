@@ -203,6 +203,31 @@ describe("updates service", () => {
       expect((await updates.getUpdateStatus()).error).toContain("must not embed credentials");
     });
 
+    test("normalises a traversal in the API base rather than passing it through", async () => {
+      process.env.DECKOS_GITHUB_OWNER = "deckos";
+      process.env.DECKOS_GITHUB_REPO = "deckos";
+      process.env.DECKOS_GITHUB_API_BASE = "https://api.github.com/../..?x=1#y";
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          tag_name: "v0.3.0",
+          name: "0.3.0",
+          prerelease: false,
+          draft: false,
+          html_url: "https://example/release",
+          published_at: "2026-01-01T00:00:00.000Z",
+          assets: [],
+        }),
+      } as Response);
+
+      const updates = await import("./updates.js");
+      await updates.getUpdateStatus();
+
+      expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toBe(
+        "https://api.github.com/repos/deckos/deckos/releases/latest"
+      );
+    });
+
     test("accepts an https API base", async () => {
       process.env.DECKOS_GITHUB_OWNER = "deckos";
       process.env.DECKOS_GITHUB_REPO = "deckos";
@@ -256,7 +281,7 @@ describe("updates service", () => {
     process.env.DECKOS_GITHUB_OWNER = "deckos";
     process.env.DECKOS_GITHUB_REPO = "deckos";
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const hostile = `<script>${"A".repeat(5000)}</script>  trailing`;
+    const hostile = `<script>${"A".repeat(5000)}</script>\x07\x00 trailing`;
     vi.mocked(fetch).mockResolvedValue({
       ok: false,
       status: 500,
@@ -356,6 +381,21 @@ describe("updates service", () => {
       expect(compareSemver("1.0.0-1", "1.0.0-alpha")).toBeLessThan(0);
       // A longer identifier set outranks its prefix.
       expect(compareSemver("1.0.0-alpha", "1.0.0-alpha.1")).toBeLessThan(0);
+    });
+
+    test("isValidReleaseVersion is strict about the exact string", async () => {
+      const { isValidReleaseVersion, parseSemver } = await import("./updates.js");
+
+      expect(isValidReleaseVersion("1.2.3")).toBe(true);
+      expect(isValidReleaseVersion("1.2.3-rc.1")).toBe(true);
+
+      // parseSemver normalizes a tag prefix; this must not, because its result
+      // becomes a directory name, and `releases/v1.2.3` would be a second,
+      // separately pruned copy of `releases/1.2.3`.
+      expect(parseSemver("v1.2.3")).not.toBeNull();
+      for (const lenient of ["v1.2.3", "V1.2.3", " 1.2.3 ", " v1.2.3 "]) {
+        expect(isValidReleaseVersion(lenient)).toBe(false);
+      }
     });
 
     test("returns null instead of 0 for versions it cannot parse", async () => {

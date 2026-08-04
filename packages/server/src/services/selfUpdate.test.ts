@@ -145,7 +145,10 @@ function buildTar(entries: TarEntry[]): Buffer {
         mode: entry.mode ?? (type === "5" ? 0o755 : 0o644),
       })
     );
-    if ((type === "0" || type === "7") && entry.declaredSize === undefined) {
+    // Regular files and the metadata headers (pax, GNU long name) carry a
+    // payload; directories and links do not.
+    const hasPayload = ["0", "7", "x", "X", "g", "L", "K"].includes(type);
+    if (hasPayload && entry.declaredSize === undefined) {
       parts.push(padTo512(content));
     }
   }
@@ -250,10 +253,14 @@ function buildSignedRelease(options?: {
   omitSums?: boolean;
   omitSignature?: boolean;
   tagName?: string;
+  /** Version the archive actually contains, when it differs from the tag. */
+  archiveVersion?: string;
+  /** Asset filename, when it should not be named for the tag. */
+  assetName?: string;
 }) {
   const version = options?.version ?? RELEASE_VERSION;
-  const tarName = `deckos-${version}-linux-x64.tar.gz`;
-  const tarball = buildReleaseTarball(version);
+  const tarName = options?.assetName ?? `deckos-${version}-linux-x64.tar.gz`;
+  const tarball = buildReleaseTarball(options?.archiveVersion ?? version);
   const sums = options?.sumsOverride ?? buildSums([{ name: tarName, body: tarball }]);
   const signature =
     options?.signatureOverride ?? signBytes(sums, options?.signWith ?? signing.privateKey);
@@ -639,6 +646,20 @@ describe("selfUpdate service", () => {
       await expect(inspectBuffer(gzipSync(raw))).rejects.toThrow(/bad header checksum/);
     });
 
+    test("rejects a global pax header that rewrites member paths", async () => {
+      // libarchive applies a global `path` record to every following member;
+      // GNU tar ignores it. Rather than depend on which tar extracts, refuse it.
+      const record = "path=../../etc/cron.d/evil";
+      const payload = `${String(record.length + 5).padStart(3, "0")} ${record}\n`;
+      const tarball = gzipSync(
+        buildTar([
+          { name: "pax_global_header", type: "g", content: payload },
+          ...releaseEntries(),
+        ])
+      );
+      await expect(inspectBuffer(tarball)).rejects.toThrow(/global pax header/);
+    });
+
     test("rejects a pathological archive root name without backtracking", async () => {
       // The root name comes from the release channel. The previous pattern used a
       // repeated group whose introducer and body classes both contained "-", so
@@ -923,6 +944,48 @@ describe("selfUpdate service", () => {
         stubGithub({ release: signed.release, assets: signed.assets });
 
         await expect(runUpdate()).rejects.toThrow(/does not list/);
+      }
+    );
+
+    test.skipIf(!systemTar)(
+      "refuses a signed older archive served under a newer tag (downgrade)",
+      async () => {
+        await seedRelease("0.3.0");
+        await symlink(join(releasesDir, "0.3.0"), currentLink, "dir");
+
+        // The whole attack: an attacker who controls the API response but not the
+        // signing key replays a genuinely signed 0.1.0 tarball, with its real
+        // manifest and signature, under tag_name v9.9.9. Signature and digest both
+        // verify, because SHA256SUMS binds digests to filenames rather than tags.
+        const signed = buildSignedRelease({
+          version: "9.9.9",
+          assetName: "deckos-0.1.0-linux-x64.tar.gz",
+          archiveVersion: "0.1.0",
+        });
+        stubGithub({ release: signed.release, assets: signed.assets });
+
+        await expect(runUpdate()).rejects.toThrow(/is not named for version 9\.9\.9/);
+        expect(existsSync(join(releasesDir, "9.9.9"))).toBe(false);
+        expect(await readlink(currentLink)).toBe(join(releasesDir, "0.3.0"));
+      }
+    );
+
+    test.skipIf(!systemTar)(
+      "refuses an archive whose root directory disagrees with the target version",
+      async () => {
+        await seedRelease("0.3.0");
+        await symlink(join(releasesDir, "0.3.0"), currentLink, "dir");
+
+        // Correctly named and correctly signed asset, but the archive inside is a
+        // different release. Caught by binding the archive root to the tag.
+        const signed = buildSignedRelease({ archiveVersion: "0.1.0" });
+        stubGithub({ release: signed.release, assets: signed.assets });
+
+        await expect(runUpdate()).rejects.toThrow(
+          /contains deckos-0\.1\.0, not deckos-0\.4\.0/
+        );
+        expect(existsSync(join(releasesDir, RELEASE_VERSION))).toBe(false);
+        expect(await readlink(currentLink)).toBe(join(releasesDir, "0.3.0"));
       }
     );
 
