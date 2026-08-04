@@ -5,8 +5,11 @@ import { emitUnauthorizedEvent, fetchAuthStatus } from "../lib/auth";
 import { getReconnectDelayMs } from "./useDockerEvents";
 
 export function useMetricsStream() {
-  const { setMetrics, setConnected } = useMetricsStore();
-  const { setConnected: setConnection } = useConnectionStore();
+  // Selectors only: the setters are stable, so the effect below no longer
+  // re-subscribes on unrelated store writes.
+  const setMetrics = useMetricsStore((state) => state.setMetrics);
+  const setConnected = useMetricsStore((state) => state.setConnected);
+  const setConnection = useConnectionStore((state) => state.setConnected);
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -93,5 +96,7 @@ export function useMetricsStream() {
     };
   }, [setMetrics, setConnected, setConnection]);
 
+  // Intentionally the whole store: callers render the metrics, so they *do* want
+  // a re-render per tick.
   return useMetricsStore();
 }

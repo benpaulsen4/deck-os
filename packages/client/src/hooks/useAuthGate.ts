@@ -9,6 +9,7 @@ import {
   readAuthErrorResponse,
   type AuthFailureKind,
 } from "../lib/auth";
+import { getReconnectDelayMs } from "./useDockerEvents";
 
 /**
  * A failed status check fails *closed* (see below), which means a flaky proxy or
@@ -18,10 +19,6 @@ import {
  */
 const STATUS_RETRY_BASE_MS = 1_000;
 const STATUS_RETRY_MAX_MS = 30_000;
-
-function statusRetryDelayMs(attempt: number): number {
-  return Math.min(STATUS_RETRY_MAX_MS, STATUS_RETRY_BASE_MS * 2 ** Math.max(0, attempt));
-}
 
 export function useAuthGate() {
   const queryClient = useQueryClient();
@@ -38,6 +35,8 @@ export function useAuthGate() {
   const statusRetryTimeoutRef = useRef<number | null>(null);
   const statusRetryAttemptRef = useRef(0);
   const disposedRef = useRef(false);
+  /** Whether any status read has ever succeeded. Drives the fail-closed policy. */
+  const hasReadStatusRef = useRef(false);
   const refreshAuthRef = useRef<() => Promise<void>>(async () => {});
 
   const clearStatusRetry = useCallback(() => {
@@ -51,7 +50,10 @@ export function useAuthGate() {
     if (disposedRef.current || statusRetryTimeoutRef.current !== null) {
       return;
     }
-    const delay = statusRetryDelayMs(statusRetryAttemptRef.current);
+    const delay = getReconnectDelayMs(statusRetryAttemptRef.current, {
+      baseMs: STATUS_RETRY_BASE_MS,
+      maxMs: STATUS_RETRY_MAX_MS,
+    });
     statusRetryAttemptRef.current += 1;
     statusRetryTimeoutRef.current = window.setTimeout(() => {
       statusRetryTimeoutRef.current = null;
@@ -65,6 +67,7 @@ export function useAuthGate() {
   const refreshAuth = useCallback(async () => {
     try {
       const status = await fetchAuthStatus();
+      hasReadStatusRef.current = true;
       setAuthEnabled(status.enabled);
       setAuthUnlocked(status.unlocked);
       setAuthStatusError(null);
@@ -72,12 +75,23 @@ export function useAuthGate() {
       statusRetryAttemptRef.current = 0;
       clearStatusRetry();
     } catch (error) {
+      const kind = error instanceof AuthRequestError ? error.kind : "network";
       // Fail closed. Previously the permissive initial state (`enabled:false`,
       // `unlocked:true`) survived a failed status read and the full shell
       // rendered for an operator who had never unlocked anything.
-      setAuthEnabled(true);
-      setAuthUnlocked(false);
-      const kind = error instanceof AuthRequestError ? error.kind : "network";
+      //
+      // The one exception, decided deliberately: once a status read has
+      // succeeded, a *transport* failure (no HTTP answer at all) holds the
+      // last-known-good state while the retry runs, instead of throwing an
+      // already-authorized operator back to the gate and discarding whatever was
+      // in flight -- an unsaved compose edit, for instance. Any HTTP answer
+      // (401, 503, 5xx) is a real signal and always locks, and the very first
+      // read always locks, so CLI-4's guarantee holds: the shell is never
+      // rendered to someone who was never authorized.
+      if (!hasReadStatusRef.current || kind !== "network") {
+        setAuthEnabled(true);
+        setAuthUnlocked(false);
+      }
       setAuthErrorKind(kind);
       setAuthStatusError(
         error instanceof AuthRequestError ? error.message : AUTH_STATUS_UNAVAILABLE_MESSAGE
@@ -142,6 +156,18 @@ export function useAuthGate() {
           setRetryAfterMs(failure.retryAfterMs);
         }
         throw failure;
+      }
+      // The unlock response is itself an authoritative status. Adopting it before
+      // the confirming refresh means a transient failure in that refresh holds
+      // "unlocked" (see refreshAuth) rather than bouncing the operator straight
+      // back to the gate they just cleared.
+      const granted = (await response.json().catch(() => null)) as {
+        unlocked?: unknown;
+      } | null;
+      if (granted?.unlocked === true) {
+        hasReadStatusRef.current = true;
+        setAuthEnabled(true);
+        setAuthUnlocked(true);
       }
       setPin("");
       await refreshAuth();

@@ -14,6 +14,10 @@ export function SystemInfoBar() {
     // CONTAINERS counter stale after a start/stop.
     queryKey: ["stackStatusBatch", appIds],
     queryFn: async () => await trpcClient.docker.getStatuses.query({ appIds }),
+    // NOTE: `useAppStatus` additionally gates this key on the auth state. React
+    // Query runs a query if *any* observer is enabled, so that gate now survives
+    // only because this bar renders inside the unlocked shell. Keep it that way,
+    // or pass the auth state in.
     enabled: appIds.length > 0,
     refetchInterval: 5000,
   });

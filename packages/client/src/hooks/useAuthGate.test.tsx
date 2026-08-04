@@ -247,6 +247,102 @@ describe("useAuthGate", () => {
     expect(fetchAuthStatusMock).toHaveBeenCalledTimes(3);
   });
 
+  // CLI-4, review finding 3: fail closed, but do not flap an operator who is
+  // already authorized back to the gate on one unanswered request.
+  it("holds last-known-good on a transport failure after a status read has succeeded", async () => {
+    fetchAuthStatusMock
+      .mockResolvedValueOnce({
+        enabled: true,
+        unlocked: true,
+        sessionDurationMs: 86_400_000,
+      })
+      .mockRejectedValueOnce(new AuthRequestError("network", "offline"));
+
+    const { result } = renderAuthGate();
+    await waitFor(() => {
+      expect(result.current.authChecking).toBe(false);
+    });
+    expect(result.current.authUnlocked).toBe(true);
+
+    await act(async () => {
+      await result.current.refreshAuth();
+    });
+
+    expect(result.current.authUnlocked).toBe(true);
+    expect(result.current.authStatusError).toBe("offline");
+  });
+
+  it("still fails closed on an HTTP answer, even after a successful read", async () => {
+    fetchAuthStatusMock
+      .mockResolvedValueOnce({
+        enabled: true,
+        unlocked: true,
+        sessionDurationMs: 86_400_000,
+      })
+      .mockRejectedValueOnce(
+        new AuthRequestError("server-error", "boom", { status: 500 })
+      );
+
+    const { result } = renderAuthGate();
+    await waitFor(() => {
+      expect(result.current.authChecking).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.refreshAuth();
+    });
+
+    expect(result.current.authEnabled).toBe(true);
+    expect(result.current.authUnlocked).toBe(false);
+  });
+
+  it("keeps an operator unlocked when the refresh confirming their unlock fails", async () => {
+    fetchAuthStatusMock
+      .mockResolvedValueOnce({
+        enabled: true,
+        unlocked: false,
+        sessionDurationMs: 86_400_000,
+      })
+      .mockRejectedValue(new AuthRequestError("network", "offline"));
+    authFetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ enabled: true, unlocked: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+
+    const { result } = renderAuthGate();
+    await waitFor(() => {
+      expect(result.current.authChecking).toBe(false);
+    });
+
+    await act(async () => {
+      result.current.setPin("1234");
+    });
+    await act(async () => {
+      await result.current.handleUnlock();
+    });
+
+    expect(result.current.authUnlocked).toBe(true);
+    expect(result.current.pin).toBe("");
+  });
+
+  it("cancels the pending status retry on unmount", async () => {
+    vi.useFakeTimers();
+    fetchAuthStatusMock.mockRejectedValue(new AuthRequestError("network", "offline"));
+
+    const { unmount } = renderAuthGate();
+    await act(async () => {});
+    expect(fetchAuthStatusMock).toHaveBeenCalledTimes(1);
+
+    unmount();
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+
+    expect(fetchAuthStatusMock).toHaveBeenCalledTimes(1);
+  });
+
   // CLI-4: the response codes batch G added server-side.
   it("reports a 503 config-unreadable unlock as a repair task, not a wrong passcode", async () => {
     fetchAuthStatusMock.mockResolvedValue({

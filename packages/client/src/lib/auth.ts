@@ -157,7 +157,7 @@ export async function fetchAuthStatus(): Promise<AuthStatus> {
     throw await readAuthErrorResponse(response, AUTH_STATUS_UNAVAILABLE_MESSAGE);
   }
   const payload = (await response.json().catch(() => null)) as Partial<AuthStatus> | null;
-  if (!payload || typeof payload !== "object") {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new AuthRequestError("server-error", AUTH_STATUS_UNAVAILABLE_MESSAGE, {
       status: response.status,
     });

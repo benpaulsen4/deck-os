@@ -22,6 +22,16 @@ type PendingLogEntry = Omit<LogEntry, "seq">;
 const RECONNECT_BASE_MS = 3_000;
 const RECONNECT_MAX_MS = 60_000;
 
+/**
+ * How long a stream has to stay open before the reconnect counter is forgiven.
+ *
+ * Resetting on `res.ok` alone was wrong: an exited container answers 200 and then
+ * ends immediately, so the counter was cleared before a single byte was read and
+ * the delay never grew past the 3s base -- exactly the case the backoff exists
+ * for. A connection only counts as useful if it actually lasted.
+ */
+const STREAM_USEFUL_MS = 30_000;
+
 /** Carries the HTTP status so the retry policy can tell "gone" from "flaky". */
 class LogStreamHttpError extends Error {
   readonly status: number;
@@ -74,6 +84,13 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
   const [errorByContainer, setErrorByContainer] = useState<Record<string, string | null>>(
     {}
   );
+  // Mirrors `permanentlyFailedRef` for rendering: the latch below stops the
+  // retry loop, so without a visible Retry the only recovery would be navigating
+  // away and back.
+  const [permanentlyFailedByContainer, setPermanentlyFailedByContainer] = useState<
+    Record<string, boolean>
+  >({});
+  const [retryNonce, setRetryNonce] = useState(0);
   const [follow, setFollow] = useState<FollowState>(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamControllersRef = useRef<Record<string, AbortController>>({});
@@ -161,6 +178,7 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
 
       const controller = new AbortController();
       streamControllersRef.current[containerId] = controller;
+      const connectedAt = Date.now();
 
       try {
         const params = new URLSearchParams();
@@ -182,7 +200,8 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
           throw new LogStreamHttpError(res.status);
         }
 
-        reconnectAttemptsRef.current[containerId] = 0;
+        // NB: the attempt counter is deliberately *not* reset here. A 200 only
+        // means the request was accepted; see STREAM_USEFUL_MS.
         sinceByContainerRef.current[containerId] = Math.floor(Date.now() / 1000) - 2;
         setIsConnectedByContainer((prev) => ({ ...prev, [containerId]: true }));
         setIsConnectingByContainer((prev) => ({
@@ -266,6 +285,11 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
         const permanent = isPermanentLogStreamFailure(err);
         if (permanent) {
           permanentlyFailedRef.current[containerId] = true;
+          setPermanentlyFailedByContainer((prev) => ({ ...prev, [containerId]: true }));
+        } else if (Date.now() - connectedAt >= STREAM_USEFUL_MS) {
+          // The stream did real work before dropping, so start the next backoff
+          // from scratch. An exited container never gets here: it EOFs at once.
+          reconnectAttemptsRef.current[containerId] = 0;
         }
 
         setIsConnectedByContainer((prev) => ({
@@ -276,13 +300,10 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
           ...prev,
           [containerId]: false,
         }));
+        const message = err instanceof Error ? err.message : "Connection failed";
         setErrorByContainer((prev) => ({
           ...prev,
-          [containerId]: permanent
-            ? `${err instanceof Error ? err.message : "Connection failed"} - not retrying`
-            : err instanceof Error
-              ? err.message
-              : "Connection failed",
+          [containerId]: permanent ? `${message} - not retrying` : message,
         }));
       } finally {
         if (streamControllersRef.current[containerId] === controller) {
@@ -358,6 +379,9 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
     setLogsByContainer((prev) =>
       Object.fromEntries(Object.entries(prev).filter(([id]) => activeIds.has(id)))
     );
+    setPermanentlyFailedByContainer((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([id]) => activeIds.has(id)))
+    );
 
     containers.forEach((container) => {
       void startStream(container.id, true);
@@ -379,7 +403,7 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
       });
       setConnected("logs", false);
     };
-  }, [containerIdsKey, setConnected]);
+  }, [containerIdsKey, setConnected, retryNonce]);
 
   useEffect(() => {
     const currentFollow =
@@ -410,6 +434,18 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
     } else {
       setFollow(isAtBottom);
     }
+  };
+
+  const retryActiveStream = () => {
+    if (!activeContainerId) return;
+    delete permanentlyFailedRef.current[activeContainerId];
+    reconnectAttemptsRef.current[activeContainerId] = 0;
+    setPermanentlyFailedByContainer((prev) => ({
+      ...prev,
+      [activeContainerId]: false,
+    }));
+    setErrorByContainer((prev) => ({ ...prev, [activeContainerId]: null }));
+    setRetryNonce((nonce) => nonce + 1);
   };
 
   const toggleFollow = () => {
@@ -514,6 +550,16 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
     gap: "6px",
   };
 
+  const retryButtonStyle: React.CSSProperties = {
+    background: "transparent",
+    border: "1px solid var(--border-primary)",
+    color: "var(--text-secondary)",
+    padding: "2px 6px",
+    fontSize: "var(--text-xs)",
+    textTransform: "uppercase",
+    cursor: "pointer",
+  };
+
   const statusDotStyle: React.CSSProperties = {
     width: "6px",
     height: "6px",
@@ -567,6 +613,11 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
             <span> - DISCONNECTED</span>
           ) : null}
           {currentError ? <span> - {currentError}</span> : null}
+          {activeContainerId && permanentlyFailedByContainer[activeContainerId] ? (
+            <button type="button" onClick={retryActiveStream} style={retryButtonStyle}>
+              RETRY
+            </button>
+          ) : null}
         </div>
         <button
           type="button"
@@ -595,6 +646,8 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
           </div>
         ) : (
           currentLogs.map((log) => (
+            // `data-log-seq` exposes the key for LogViewer.test.tsx and is handy
+            // when debugging buffer churn; it carries no other meaning.
             <div key={log.seq} data-log-seq={log.seq} style={lineStyle}>
               {log.timestamp && (
                 <span style={timestampStyle}>

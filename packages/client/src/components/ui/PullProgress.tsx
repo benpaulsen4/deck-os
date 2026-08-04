@@ -45,7 +45,19 @@ async function safeJson(res: Response): Promise<unknown | null> {
   }
 }
 
-export const PULL_CANCELLED_MESSAGE = "Pull cancelled";
+/**
+ * Deliberately says "stopped watching", not "stopped pulling".
+ *
+ * Cancel aborts the client's request and closes the SSE stream, but the server's
+ * pull job runs to completion: `cancelPullJob(jobId)` already exists in
+ * `packages/server/src/services/pullJobs.ts:198` (it holds a live
+ * `AbortController` per job) and simply has no HTTP route -- `runtimeRoutes.ts`
+ * exposes only `POST /api/apps/:appId/pull/start` and the `GET /api/pull/:jobId`
+ * stream. Until a `POST /api/pull/:jobId/cancel` exists and is called from
+ * `cancelPull` below, claiming the download stopped would be a lie.
+ */
+export const PULL_CANCELLED_MESSAGE =
+  "Stopped watching the pull. The download continues on the server until it finishes.";
 
 export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressProps) {
   const [error, setError] = useState<string | null>(null);

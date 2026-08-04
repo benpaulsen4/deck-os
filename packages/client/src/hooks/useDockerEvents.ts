@@ -45,7 +45,9 @@ export function useDockerEvents(
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
   const disposedRef = useRef(false);
-  const { setConnected } = useConnectionStore();
+  // Selector only: subscribing to the whole store re-rendered every consumer on
+  // any connection change.
+  const setConnected = useConnectionStore((state) => state.setConnected);
   const enabled = options?.enabled ?? true;
 
   useEffect(() => {

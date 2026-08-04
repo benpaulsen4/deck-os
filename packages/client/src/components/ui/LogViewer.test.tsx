@@ -67,6 +67,24 @@ describe("LogViewer", () => {
     expect(screen.getByText(/not retrying/)).toBeInTheDocument();
   });
 
+  it("offers a manual retry out of the permanent-failure latch", async () => {
+    vi.useFakeTimers();
+    authFetchMock.mockResolvedValue(sseResponse([], 404));
+
+    render(<LogViewer containers={containers} />);
+    await settle();
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    authFetchMock.mockResolvedValue(sseResponse(["back"], 200));
+    await act(async () => {
+      screen.getByRole("button", { name: "RETRY" }).click();
+    });
+    await settle();
+
+    expect(authFetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/not retrying/)).not.toBeInTheDocument();
+  });
+
   it("keeps retrying a 401 so an unlock can resume the stream", async () => {
     vi.useFakeTimers();
     authFetchMock.mockResolvedValue(sseResponse([], 401));
@@ -83,9 +101,87 @@ describe("LogViewer", () => {
     expect(authFetchMock).toHaveBeenCalledTimes(2);
   });
 
-  // CLI-6: a stream that just ends (exited container) used to re-attach
-  // `docker logs` every 3s forever.
-  it("backs off exponentially when the stream keeps ending", async () => {
+  // CLI-6, the case the backoff exists for: an exited container answers 200 and
+  // then ends immediately. Resetting the attempt counter on `res.ok` pinned this
+  // to the 3s base forever, and the 500-based test below never reached that line.
+  it("backs off when a 200 stream ends immediately (exited container)", async () => {
+    vi.useFakeTimers();
+    authFetchMock.mockResolvedValue(sseResponse([], 200));
+
+    render(<LogViewer containers={containers} />);
+    await settle();
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    await settle();
+    expect(authFetchMock).toHaveBeenCalledTimes(2);
+
+    // The second retry must wait ~6s, not another 3s.
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    await settle();
+    expect(authFetchMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    await settle();
+    expect(authFetchMock).toHaveBeenCalledTimes(3);
+
+    // ...and the third ~12s.
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+    });
+    await settle();
+    expect(authFetchMock).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+    });
+    await settle();
+    expect(authFetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("forgives the backoff only after a stream has stayed open", async () => {
+    vi.useFakeTimers();
+    let release: (() => void) | null = null;
+    authFetchMock.mockImplementation(async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(`data: ${JSON.stringify({ line: "alive" })}\n\n`)
+          );
+          release = () => controller.close();
+        },
+      });
+      return new Response(stream, { status: 200 });
+    });
+
+    render(<LogViewer containers={containers} />);
+    await settle();
+    expect(authFetchMock).toHaveBeenCalledTimes(1);
+
+    // Stay connected past STREAM_USEFUL_MS, then drop.
+    await act(async () => {
+      vi.advanceTimersByTime(31_000);
+    });
+    await act(async () => {
+      release?.();
+    });
+    await settle();
+
+    // The counter is forgiven, so the next attempt is back at the 3s base.
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    await settle();
+    expect(authFetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("backs off exponentially when the stream keeps failing", async () => {
     vi.useFakeTimers();
     authFetchMock.mockResolvedValue(sseResponse([], 500));
 
