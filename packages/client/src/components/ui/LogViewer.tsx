@@ -2,10 +2,59 @@ import { useState, useEffect, useRef } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { useConnectionStore } from "../../stores/connection";
 import { authFetch } from "../../lib/auth";
+import { getReconnectDelayMs } from "../../hooks/useDockerEvents";
 
 interface LogEntry {
   timestamp?: string;
   line: string;
+  /**
+   * Monotonic id assigned when the line is enqueued. Index keys broke once the
+   * buffer hit its cap: `slice(-5000)` shifts every index, so React rewrote the
+   * text of every row on each 50ms flush (and dropped any text selection in the
+   * pane) instead of appending one row.
+   */
+  seq: number;
+}
+
+/** A log line before the buffer assigns it its sequence number. */
+type PendingLogEntry = Omit<LogEntry, "seq">;
+
+const RECONNECT_BASE_MS = 3_000;
+const RECONNECT_MAX_MS = 60_000;
+
+/**
+ * How long a stream has to stay open before the reconnect counter is forgiven.
+ *
+ * Resetting on `res.ok` alone was wrong: an exited container answers 200 and then
+ * ends immediately, so the counter was cleared before a single byte was read and
+ * the delay never grew past the 3s base -- exactly the case the backoff exists
+ * for. A connection only counts as useful if it actually lasted.
+ */
+const STREAM_USEFUL_MS = 30_000;
+
+/** Carries the HTTP status so the retry policy can tell "gone" from "flaky". */
+class LogStreamHttpError extends Error {
+  readonly status: number;
+  constructor(status: number) {
+    super(`HTTP ${status} from /api/logs`);
+    this.name = "LogStreamHttpError";
+    this.status = status;
+  }
+}
+
+/**
+ * A 4xx that is not 401 means this stream will never work: the container is gone,
+ * or the id is bad. Retrying it every few seconds just re-attaches `docker logs`
+ * on the server forever. 401 is excluded because `authFetch` has already raised
+ * the unauthorized event and a re-unlock should resume the stream.
+ */
+function isPermanentLogStreamFailure(error: unknown): boolean {
+  return (
+    error instanceof LogStreamHttpError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.status !== 401
+  );
 }
 
 interface ContainerTab {
@@ -35,6 +84,13 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
   const [errorByContainer, setErrorByContainer] = useState<Record<string, string | null>>(
     {}
   );
+  // Mirrors `permanentlyFailedRef` for rendering: the latch below stops the
+  // retry loop, so without a visible Retry the only recovery would be navigating
+  // away and back.
+  const [permanentlyFailedByContainer, setPermanentlyFailedByContainer] = useState<
+    Record<string, boolean>
+  >({});
+  const [retryNonce, setRetryNonce] = useState(0);
   const [follow, setFollow] = useState<FollowState>(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamControllersRef = useRef<Record<string, AbortController>>({});
@@ -44,7 +100,13 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
   const sinceByContainerRef = useRef<Record<string, number>>({});
   const recentLinesRef = useRef<Record<string, Map<string, number>>>({});
   const logsEndRefs = useRef<Record<string, HTMLDivElement>>({});
-  const { setConnected } = useConnectionStore();
+  const reconnectAttemptsRef = useRef<Record<string, number>>({});
+  const permanentlyFailedRef = useRef<Record<string, boolean>>({});
+  const seqRef = useRef(0);
+  // Selector, not the whole store: subscribing to everything meant every
+  // `setConnected` from the health poll, the metrics stream and the docker-events
+  // hook re-rendered up to 5000 log rows.
+  const setConnected = useConnectionStore((state) => state.setConnected);
   const maxEntriesPerContainer = 5000;
   const containerIdsKey = containers.map((c) => c.id).join("|");
 
@@ -63,11 +125,12 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
     const decoder = new TextDecoder();
     let disposed = false;
 
-    const enqueueLogs = (containerId: string, logs: LogEntry[]) => {
+    const enqueueLogs = (containerId: string, logs: PendingLogEntry[]) => {
       if (logs.length === 0) return;
+      const sequenced = logs.map((log) => ({ ...log, seq: seqRef.current++ }));
       pendingLogsRef.current[containerId] = [
         ...(pendingLogsRef.current[containerId] || []),
-        ...logs,
+        ...sequenced,
       ];
 
       if (flushTimeoutsRef.current[containerId]) return;
@@ -87,23 +150,35 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
 
     const scheduleReconnect = (containerId: string) => {
       if (disposed) return;
+      if (permanentlyFailedRef.current[containerId]) return;
       if (reconnectTimeoutsRef.current[containerId]) return;
+      const attempt = reconnectAttemptsRef.current[containerId] ?? 0;
+      reconnectAttemptsRef.current[containerId] = attempt + 1;
+      // Both a failing response and a stream that just ends (exited container)
+      // used to land on a flat 3s retry, so four exited containers on an open
+      // detail page meant ~80 `docker logs` attaches a minute, indefinitely.
+      const delay = getReconnectDelayMs(attempt, {
+        baseMs: RECONNECT_BASE_MS,
+        maxMs: RECONNECT_MAX_MS,
+      });
       reconnectTimeoutsRef.current[containerId] = window.setTimeout(() => {
         delete reconnectTimeoutsRef.current[containerId];
         if (disposed) return;
         if (!activeIds.has(containerId)) return;
         void startStream(containerId, false);
-      }, 3000);
+      }, delay);
     };
 
     const startStream = async (containerId: string, initial: boolean) => {
       if (streamControllersRef.current[containerId]) return;
+      if (permanentlyFailedRef.current[containerId]) return;
 
       setIsConnectingByContainer((prev) => ({ ...prev, [containerId]: true }));
       setErrorByContainer((prev) => ({ ...prev, [containerId]: null }));
 
       const controller = new AbortController();
       streamControllersRef.current[containerId] = controller;
+      const connectedAt = Date.now();
 
       try {
         const params = new URLSearchParams();
@@ -122,9 +197,11 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
         });
 
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status} from /api/logs`);
+          throw new LogStreamHttpError(res.status);
         }
 
+        // NB: the attempt counter is deliberately *not* reset here. A 200 only
+        // means the request was accepted; see STREAM_USEFUL_MS.
         sinceByContainerRef.current[containerId] = Math.floor(Date.now() / 1000) - 2;
         setIsConnectedByContainer((prev) => ({ ...prev, [containerId]: true }));
         setIsConnectingByContainer((prev) => ({
@@ -184,13 +261,13 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
                   if (dropped >= toDrop) break;
                 }
               }
-              const logEntry: LogEntry = {
+              const logEntry: PendingLogEntry = {
                 timestamp: new Date().toISOString(),
                 line,
               };
               enqueueLogs(containerId, [logEntry]);
             } catch {
-              const logEntry: LogEntry = {
+              const logEntry: PendingLogEntry = {
                 timestamp: new Date().toISOString(),
                 line: rawData,
               };
@@ -205,6 +282,16 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
       } catch (err) {
         if (controller.signal.aborted) return;
 
+        const permanent = isPermanentLogStreamFailure(err);
+        if (permanent) {
+          permanentlyFailedRef.current[containerId] = true;
+          setPermanentlyFailedByContainer((prev) => ({ ...prev, [containerId]: true }));
+        } else if (Date.now() - connectedAt >= STREAM_USEFUL_MS) {
+          // The stream did real work before dropping, so start the next backoff
+          // from scratch. An exited container never gets here: it EOFs at once.
+          reconnectAttemptsRef.current[containerId] = 0;
+        }
+
         setIsConnectedByContainer((prev) => ({
           ...prev,
           [containerId]: false,
@@ -213,9 +300,10 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
           ...prev,
           [containerId]: false,
         }));
+        const message = err instanceof Error ? err.message : "Connection failed";
         setErrorByContainer((prev) => ({
           ...prev,
-          [containerId]: err instanceof Error ? err.message : "Connection failed",
+          [containerId]: permanent ? `${message} - not retrying` : message,
         }));
       } finally {
         if (streamControllersRef.current[containerId] === controller) {
@@ -223,7 +311,9 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
         }
       }
 
-      if (activeIds.has(containerId)) scheduleReconnect(containerId);
+      if (activeIds.has(containerId) && !permanentlyFailedRef.current[containerId]) {
+        scheduleReconnect(containerId);
+      }
     };
 
     Object.keys(streamControllersRef.current).forEach((id) => {
@@ -265,6 +355,18 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
       }
     });
 
+    Object.keys(reconnectAttemptsRef.current).forEach((id) => {
+      if (!activeIds.has(id)) {
+        delete reconnectAttemptsRef.current[id];
+      }
+    });
+
+    Object.keys(permanentlyFailedRef.current).forEach((id) => {
+      if (!activeIds.has(id)) {
+        delete permanentlyFailedRef.current[id];
+      }
+    });
+
     setIsConnectedByContainer((prev) =>
       Object.fromEntries(Object.entries(prev).filter(([id]) => activeIds.has(id)))
     );
@@ -275,6 +377,9 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
       Object.fromEntries(Object.entries(prev).filter(([id]) => activeIds.has(id)))
     );
     setLogsByContainer((prev) =>
+      Object.fromEntries(Object.entries(prev).filter(([id]) => activeIds.has(id)))
+    );
+    setPermanentlyFailedByContainer((prev) =>
       Object.fromEntries(Object.entries(prev).filter(([id]) => activeIds.has(id)))
     );
 
@@ -298,7 +403,7 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
       });
       setConnected("logs", false);
     };
-  }, [containerIdsKey, setConnected]);
+  }, [containerIdsKey, setConnected, retryNonce]);
 
   useEffect(() => {
     const currentFollow =
@@ -329,6 +434,18 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
     } else {
       setFollow(isAtBottom);
     }
+  };
+
+  const retryActiveStream = () => {
+    if (!activeContainerId) return;
+    delete permanentlyFailedRef.current[activeContainerId];
+    reconnectAttemptsRef.current[activeContainerId] = 0;
+    setPermanentlyFailedByContainer((prev) => ({
+      ...prev,
+      [activeContainerId]: false,
+    }));
+    setErrorByContainer((prev) => ({ ...prev, [activeContainerId]: null }));
+    setRetryNonce((nonce) => nonce + 1);
   };
 
   const toggleFollow = () => {
@@ -433,6 +550,16 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
     gap: "6px",
   };
 
+  const retryButtonStyle: React.CSSProperties = {
+    background: "transparent",
+    border: "1px solid var(--border-primary)",
+    color: "var(--text-secondary)",
+    padding: "2px 6px",
+    fontSize: "var(--text-xs)",
+    textTransform: "uppercase",
+    cursor: "pointer",
+  };
+
   const statusDotStyle: React.CSSProperties = {
     width: "6px",
     height: "6px",
@@ -486,6 +613,11 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
             <span> - DISCONNECTED</span>
           ) : null}
           {currentError ? <span> - {currentError}</span> : null}
+          {activeContainerId && permanentlyFailedByContainer[activeContainerId] ? (
+            <button type="button" onClick={retryActiveStream} style={retryButtonStyle}>
+              RETRY
+            </button>
+          ) : null}
         </div>
         <button
           type="button"
@@ -513,8 +645,10 @@ export function LogViewer({ containers, height = "400px" }: LogViewerProps) {
             {activeContainerId ? "Waiting for logs..." : "Select a container"}
           </div>
         ) : (
-          currentLogs.map((log, i) => (
-            <div key={i} style={lineStyle}>
+          currentLogs.map((log) => (
+            // `data-log-seq` exposes the key for LogViewer.test.tsx and is handy
+            // when debugging buffer churn; it carries no other meaning.
+            <div key={log.seq} data-log-seq={log.seq} style={lineStyle}>
               {log.timestamp && (
                 <span style={timestampStyle}>
                   {new Date(log.timestamp).toLocaleTimeString("en-US", {

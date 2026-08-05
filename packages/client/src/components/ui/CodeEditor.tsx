@@ -69,6 +69,24 @@ export function CodeEditor({
 }: CodeEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  /**
+   * The update listener lives for as long as the `EditorView`, which is built
+   * before the file content has resolved. Capturing `onChange` directly meant the
+   * listener kept calling the very first handler -- one that compared edits
+   * against an empty baseline -- so reverting an edit left Save enabled and
+   * emptying a file looked clean. The ref keeps the listener stable *and*
+   * current, without rebuilding the view on every render.
+   */
+  const onChangeRef = useRef(onChange);
+  const readonlyRef = useRef(readonly);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    readonlyRef.current = readonly;
+  }, [readonly]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -132,8 +150,8 @@ export function CodeEditor({
           const userEvent = transaction.annotation(Transaction.userEvent);
           return typeof userEvent === "string";
         });
-        if (update.docChanged && changedByUser && !readonly) {
-          onChange(update.state.doc.toString());
+        if (update.docChanged && changedByUser && !readonlyRef.current) {
+          onChangeRef.current(update.state.doc.toString());
         }
       }),
     ];

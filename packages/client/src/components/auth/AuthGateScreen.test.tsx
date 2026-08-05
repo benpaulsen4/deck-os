@@ -43,7 +43,8 @@ describe("AuthGateScreen", () => {
     const onPinChange = vi.fn();
     renderAuthGateScreen({ pin: "1234", onUnlock, onPinChange });
 
-    const firstPinBox = screen.getAllByRole("textbox")[0];
+    // The pin boxes are masked (`type="password"`), so they carry no textbox role.
+    const firstPinBox = screen.getAllByLabelText(/^Passcode digit \d+ of \d+$/)[0];
     await user.click(firstPinBox);
     await user.paste("5");
     expect(onPinChange).toHaveBeenCalledWith("5234");

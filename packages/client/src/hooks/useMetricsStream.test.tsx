@@ -86,4 +86,84 @@ describe("useMetricsStream", () => {
     expect(fetchAuthStatusMock).toHaveBeenCalledTimes(1);
     expect(emitUnauthorizedEventMock).toHaveBeenCalledTimes(1);
   });
+
+  // CLI-7: an HTTP error response (401 from the auth middleware, 502 from a proxy
+  // during a self-update restart) closes an EventSource permanently, so the hook
+  // has to reconnect itself.
+  it("closes the stream and reconnects with a widening delay after an error", async () => {
+    vi.useFakeTimers();
+    fetchAuthStatusMock.mockResolvedValue({ enabled: false, unlocked: true });
+
+    renderHook(() => useMetricsStream());
+    const first = MockEventSource.latest();
+
+    act(() => {
+      first.dispatchError(new Error("http 502"));
+    });
+    expect(first.readyState).toBe(2);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(MockEventSource.instances.length).toBe(2);
+
+    act(() => {
+      MockEventSource.latest().dispatchError(new Error("http 502"));
+    });
+
+    // The second retry waits 2s, not another 1s.
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(MockEventSource.instances.length).toBe(2);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(MockEventSource.instances.length).toBe(3);
+  });
+
+  it("resets the reconnect delay once the stream opens again", async () => {
+    vi.useFakeTimers();
+    fetchAuthStatusMock.mockResolvedValue({ enabled: false, unlocked: true });
+
+    renderHook(() => useMetricsStream());
+
+    act(() => {
+      MockEventSource.latest().dispatchError(new Error("boom"));
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(MockEventSource.instances.length).toBe(2);
+
+    act(() => {
+      MockEventSource.latest().dispatchOpen();
+    });
+    act(() => {
+      MockEventSource.latest().dispatchError(new Error("boom"));
+    });
+
+    // Back to the base delay, because the connection had succeeded.
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(MockEventSource.instances.length).toBe(3);
+  });
+
+  it("stops reconnecting after unmount", async () => {
+    vi.useFakeTimers();
+    fetchAuthStatusMock.mockResolvedValue({ enabled: false, unlocked: true });
+
+    const { unmount } = renderHook(() => useMetricsStream());
+    act(() => {
+      MockEventSource.latest().dispatchError(new Error("boom"));
+    });
+    unmount();
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(MockEventSource.instances.length).toBe(1);
+  });
 });
