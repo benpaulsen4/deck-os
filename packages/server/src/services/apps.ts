@@ -54,6 +54,35 @@ export async function withAppLock<T>(appId: string, fn: () => Promise<T>): Promi
   }
 }
 
+export class AppBusyError extends Error {
+  constructor(readonly appId: string) {
+    super(`Another operation is already running for app ${appId}`);
+    this.name = "AppBusyError";
+  }
+}
+
+/**
+ * Fail-fast variant for interactive requests. `withAppLock` queues without a
+ * bound and neither it nor tRPC has a timeout, so a caller queued behind a
+ * `compose up` that sits until COMPOSE_TIMEOUT_MS would hang with no feedback -
+ * and a second `compose up` behind the first is redundant work anyway. Reject
+ * immediately instead so the UI can say why.
+ *
+ * The busy check and `withAppLock`'s registration of its tail both run
+ * synchronously, with no await in between, so this cannot miss a lock that is
+ * being taken concurrently. Reentrant acquisition is still allowed.
+ */
+export async function withAppLockOrBusy<T>(
+  appId: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const held = heldAppLocks.getStore();
+  if (!held?.has(appId) && appLockTails.has(appId)) {
+    throw new AppBusyError(appId);
+  }
+  return await withAppLock(appId, fn);
+}
+
 async function writeFileAtomic(filePath: string, contents: string): Promise<void> {
   const dir = path.dirname(filePath);
   const tmpPath = path.join(
@@ -73,6 +102,17 @@ async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
   await writeFileAtomic(filePath, `${JSON.stringify(data, null, 2)}\n`);
 }
 
+// listApps runs on every dashboard poll, so warn once per offender rather than
+// once per poll.
+const warnedIdentityMismatches = new Set<string>();
+const warnedSkippedDirectories = new Set<string>();
+
+function warnOnce(seen: Set<string>, key: string, message: string): void {
+  if (seen.has(key)) return;
+  seen.add(key);
+  console.warn(message);
+}
+
 /**
  * The directory name is the app's identity: every compose/metadata path and the
  * compose project name derive from it. Metadata that disagrees is repaired in
@@ -80,7 +120,9 @@ async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
  */
 function withDirectoryIdentity(appId: string, metadata: AppMetadata): AppMetadata {
   if (metadata.id === appId) return metadata;
-  console.warn(
+  warnOnce(
+    warnedIdentityMismatches,
+    `${appId}:${metadata.id}`,
     `[deckos] App ${appId} has metadata claiming id "${metadata.id}"; using the directory name as identity`
   );
   return { ...metadata, id: appId };
@@ -104,7 +146,14 @@ export async function listApps(): Promise<App[]> {
     } catch {
       // Not a valid app id, so it cannot be a DeckOS app directory (e.g.
       // `lost+found`, or a folder created through the file browser). Skip it
-      // rather than failing the whole listing.
+      // rather than failing the whole listing, but leave a trace: an app
+      // directory renamed to something almost-valid would otherwise vanish from
+      // the UI with no explanation.
+      warnOnce(
+        warnedSkippedDirectories,
+        appId,
+        `[deckos] Ignoring "${appId}" in the apps directory: not a valid app id`
+      );
       continue;
     }
 
@@ -250,7 +299,12 @@ export async function updateCompose(id: string, composeYaml: string): Promise<Ap
   });
 }
 
-export async function deleteApp(id: string): Promise<boolean> {
+/**
+ * Module-private on purpose: removing the directory without stopping the stack
+ * first is exactly the bug `deleteAppWithStack` exists to prevent, so there is
+ * no shorter name for a caller to reach for.
+ */
+async function removeAppDirectory(id: string): Promise<boolean> {
   const appDir = getAppDir(id);
   const exists = await fs.pathExists(appDir);
 
@@ -319,7 +373,7 @@ export async function deleteAppWithStack(
       containersMayRemain = remaining === null || remaining > 0;
     }
 
-    const deleted = await deleteApp(id);
+    const deleted = await removeAppDirectory(id);
     return { deleted, containersMayRemain, stopError };
   });
 }

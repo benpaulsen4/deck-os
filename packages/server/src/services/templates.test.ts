@@ -350,6 +350,11 @@ describe("shipped template rendering is unchanged", () => {
       expect(rendered, `${entry.name}: unresolved placeholders`).not.toMatch(
         /\{\{[A-Z0-9_]+\}\}/
       );
+      // parse() drops comments, so the deep-equal below cannot see a sentinel
+      // stranded in one. Assert against the raw text too.
+      expect(rendered, `${entry.name}: sentinel left in the output`).not.toContain(
+        "DECKOSPLACEHOLDER"
+      );
       expect(
         parse(rendered),
         `${entry.name}: rendered output differs semantically`
@@ -357,6 +362,29 @@ describe("shipped template rendering is unchanged", () => {
       compared++;
     }
 
+    // Bump this when you add a template under packages/server/templates/.
     expect(compared).toBe(158);
+  });
+
+  test("a placeholder outside a YAML value is rejected, not silently dropped", async () => {
+    const { templates } = await loadTemplatesModule();
+
+    // `visit`/`Scalar` never reaches a comment, so without the guard this would
+    // render as `# exposes DECKOSPLACEHOLDER0Z` and deployTemplate's `{{...}}`
+    // net could not fire, because the placeholder is already gone.
+    expect(() =>
+      templates.renderComposeTemplate(
+        "# exposes {{PORT}}\nservices:\n  app:\n    image: nginx\n    ports:\n      - \"{{PORT}}:80\"\n",
+        { PORT: "8080" }
+      )
+    ).toThrow("outside a YAML value");
+
+    // A comment with no placeholder is preserved untouched.
+    const rendered = templates.renderComposeTemplate(
+      '# the web port\nservices:\n  app:\n    image: nginx\n    ports:\n      - "{{PORT}}:80"\n',
+      { PORT: "8080" }
+    );
+    expect(rendered).toContain("# the web port");
+    expect(rendered).toContain("8080:80");
   });
 });

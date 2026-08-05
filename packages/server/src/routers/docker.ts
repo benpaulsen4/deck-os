@@ -9,8 +9,32 @@ import { AppIdSchema } from "../lib/schema.js";
 /**
  * Docker container ids are hex digests. Constraining the shape keeps arbitrary
  * strings out of the daemon paths dockerode builds by string concatenation.
+ *
+ * Full 64-character ids only. Every id reaching these procedures comes from
+ * `getStackContainers`, which returns `container.Id` in full, and both
+ * ownership checks compare ids exactly - accepting the short form `docker ps`
+ * prints would validate and then always fail those comparisons.
  */
-const ContainerIdSchema = z.string().regex(/^[0-9a-f]{12,64}$/, "Invalid container id");
+const ContainerIdSchema = z.string().regex(/^[0-9a-f]{64}$/, "Invalid container id");
+
+/**
+ * Runs `fn` under the app's lock, surfacing a contended lock as CONFLICT rather
+ * than queueing the request behind a compose command that may run for minutes.
+ */
+async function withAppLockOrBusy<T>(appId: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await appsService.withAppLockOrBusy(appId, fn);
+  } catch (error) {
+    if (error instanceof appsService.AppBusyError) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "Another operation is already running for this app. Try again shortly.",
+        cause: error,
+      });
+    }
+    throw error;
+  }
+}
 
 async function assertAppExists(appId: string): Promise<void> {
   const app = await appsService.getApp(appId);
@@ -46,6 +70,12 @@ export const dockerRouter = router({
       // `appId` is optional only so the existing client keeps working; it should
       // become required once the client passes the app it is rendering. Without
       // it we still refuse containers that no DeckOS compose project created.
+      //
+      // Caution for that follow-up: this branch costs one `listContainers`,
+      // whereas assertContainerInStack calls getStackContainers, which inspects
+      // every container in the stack. ContainerTable polls per running container
+      // every 5s, so requiring appId without an ownership-only fast path (or a
+      // short-TTL cache) would turn that into N x (1 list + N inspects).
       if (input.appId) {
         await assertContainerInStack(input.appId, input.containerId);
       } else if (!(await dockerService.isDeckosManagedContainer(input.containerId))) {
@@ -89,14 +119,16 @@ export const dockerRouter = router({
       return { available: true as const, statuses };
     }),
 
-  // Every compose invocation below runs inside the per-app lock: two clicks on
-  // Start would otherwise run two concurrent `compose up` against the same
-  // project, and a delete landing mid-start would pull the compose file out
-  // from under a running command.
+  // Every container-mutating compose invocation below runs inside the per-app
+  // lock: two clicks on Start would otherwise run two concurrent `compose up`
+  // against the same project, and a delete landing mid-start would pull the
+  // compose file out from under a running command. These use the fail-fast
+  // variant so a queued click is told the app is busy instead of hanging behind
+  // a compose command that may run for minutes.
   start: protectedProcedure
     .input(z.object({ appId: AppIdSchema }))
     .mutation(async ({ input }) => {
-      await appsService.withAppLock(input.appId, async () => {
+      await withAppLockOrBusy(input.appId, async () => {
         await assertAppExists(input.appId);
         await dockerService.startStack(input.appId);
       });
@@ -106,7 +138,7 @@ export const dockerRouter = router({
   stop: protectedProcedure
     .input(z.object({ appId: AppIdSchema }))
     .mutation(async ({ input }) => {
-      await appsService.withAppLock(input.appId, async () => {
+      await withAppLockOrBusy(input.appId, async () => {
         await assertAppExists(input.appId);
         await dockerService.stopStack(input.appId);
       });
@@ -116,7 +148,7 @@ export const dockerRouter = router({
   restart: protectedProcedure
     .input(z.object({ appId: AppIdSchema }))
     .mutation(async ({ input }) => {
-      await appsService.withAppLock(input.appId, async () => {
+      await withAppLockOrBusy(input.appId, async () => {
         await assertAppExists(input.appId);
         await dockerService.restartStack(input.appId);
       });
@@ -126,7 +158,7 @@ export const dockerRouter = router({
   removeContainer: protectedProcedure
     .input(z.object({ appId: AppIdSchema, containerId: ContainerIdSchema }))
     .mutation(async ({ input }) => {
-      await appsService.withAppLock(input.appId, async () => {
+      await withAppLockOrBusy(input.appId, async () => {
         await assertAppExists(input.appId);
 
         const containers = await dockerService.getStackContainers(input.appId);
@@ -151,13 +183,16 @@ export const dockerRouter = router({
       return { success: true };
     }),
 
+  // Deliberately NOT lock-held. `compose pull` only downloads images - it
+  // creates no containers - and it can run for many minutes, which is the same
+  // reason pullJobs.startPullJob stays outside the lock. Holding it here would
+  // block start/stop/delete for the duration. A delete landing mid-pull makes
+  // the pull fail with a compose error, which is self-correcting.
   pull: protectedProcedure
     .input(z.object({ appId: AppIdSchema }))
     .mutation(async ({ input }) => {
-      await appsService.withAppLock(input.appId, async () => {
-        await assertAppExists(input.appId);
-        await dockerService.pullStack(input.appId, () => {});
-      });
+      await assertAppExists(input.appId);
+      await dockerService.pullStack(input.appId, () => {});
       return { success: true };
     }),
 

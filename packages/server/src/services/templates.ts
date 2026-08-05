@@ -309,6 +309,14 @@ const PLACEHOLDER_PATTERN = /\{\{([A-Z0-9_]+)\}\}/g;
  * them across 14 shipped templates). The sentinel is a plain scalar in every
  * context a placeholder appears in, so the document keeps its original shape
  * and each substituted value inherits the surrounding scalar's quoting style.
+ *
+ * Two deliberate differences from the raw string replace this supersedes, both
+ * reachable only in a bare (unquoted) scalar position:
+ *  - a value that would re-parse as another type gets quoted, so an all-digit
+ *    secret stays the string "12345" instead of becoming the number 12345;
+ *  - an empty value renders as `KEY: ""` rather than `KEY:`, i.e. an empty
+ *    string rather than null. For a compose environment variable that is the
+ *    difference between "set to empty" and "unset, inherit from the host".
  */
 export function renderComposeTemplate(
   template: string,
@@ -350,7 +358,20 @@ export function renderComposeTemplate(
 
   // lineWidth: 0 disables line folding, so re-serialising a template does not
   // reflow scalars that were fine as they were.
-  return doc.toString({ lineWidth: 0 });
+  const rendered = doc.toString({ lineWidth: 0 });
+
+  // `visit`/`Scalar` only reaches values the parser models as scalars, so a
+  // placeholder written in a comment, tag or anchor keeps its sentinel and is
+  // never restored. The usual `{{...}}` net in deployTemplate cannot catch that
+  // because the placeholder is already gone by then - fail loudly instead of
+  // emitting a compose file with a sentinel baked into it.
+  if (rendered.includes(sentinelBase)) {
+    throw new Error(
+      "Template placeholder appears outside a YAML value (comment, tag or anchor)"
+    );
+  }
+
+  return rendered;
 }
 
 // eslint-disable-next-line no-control-regex

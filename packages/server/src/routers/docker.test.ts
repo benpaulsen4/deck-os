@@ -1,27 +1,42 @@
 import { TRPCError } from "@trpc/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const { AppBusyErrorMock } = vi.hoisted(() => {
+  class AppBusyErrorMock extends Error {
+    constructor(readonly appId: string) {
+      super(`Another operation is already running for app ${appId}`);
+      this.name = "AppBusyError";
+    }
+  }
+  return { AppBusyErrorMock };
+});
+
 const {
   getAppMock,
-  withAppLockMock,
+  withAppLockOrBusyMock,
   getStackContainersMock,
   removeContainerMock,
   getContainerStatsMock,
   isDeckosManagedContainerMock,
   startStackMock,
+  pullStackMock,
 } = vi.hoisted(() => ({
   getAppMock: vi.fn(),
-  withAppLockMock: vi.fn(async (_appId: string, fn: () => Promise<unknown>) => await fn()),
+  withAppLockOrBusyMock: vi.fn(
+    async (_appId: string, fn: () => Promise<unknown>) => await fn()
+  ),
   getStackContainersMock: vi.fn(),
   removeContainerMock: vi.fn(async () => undefined),
   getContainerStatsMock: vi.fn(async () => ({ cpu: 1, memory: 2, memoryBytes: 3 })),
   isDeckosManagedContainerMock: vi.fn(async () => true),
   startStackMock: vi.fn(async () => undefined),
+  pullStackMock: vi.fn(async () => undefined),
 }));
 
 vi.mock("../services/apps.js", () => ({
   getApp: getAppMock,
-  withAppLock: withAppLockMock,
+  withAppLockOrBusy: withAppLockOrBusyMock,
+  AppBusyError: AppBusyErrorMock,
 }));
 
 vi.mock("../services/docker.js", () => ({
@@ -30,6 +45,7 @@ vi.mock("../services/docker.js", () => ({
   getContainerStats: getContainerStatsMock,
   isDeckosManagedContainer: isDeckosManagedContainerMock,
   startStack: startStackMock,
+  pullStack: pullStackMock,
 }));
 
 import { dockerRouter } from "./docker.js";
@@ -66,7 +82,7 @@ function containerFixture(id: string, status: string) {
 describe("docker router", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    withAppLockMock.mockImplementation(
+    withAppLockOrBusyMock.mockImplementation(
       async (_appId: string, fn: () => Promise<unknown>) => await fn()
     );
     isDeckosManagedContainerMock.mockResolvedValue(true);
@@ -150,16 +166,16 @@ describe("docker router", () => {
     );
   });
 
-  it("runs lifecycle mutations inside the per-app lock", async () => {
+  it("runs container-mutating lifecycle procedures inside the per-app lock", async () => {
     await caller.start({ appId: "app-1" });
 
-    expect(withAppLockMock).toHaveBeenCalledWith("app-1", expect.any(Function));
+    expect(withAppLockOrBusyMock).toHaveBeenCalledWith("app-1", expect.any(Function));
     expect(startStackMock).toHaveBeenCalledWith("app-1");
 
     // The app existence check happens inside the critical section, so a delete
     // that lands first cannot be raced by a start that already passed the check.
     const callOrder: string[] = [];
-    withAppLockMock.mockImplementation(
+    withAppLockOrBusyMock.mockImplementation(
       async (_appId: string, fn: () => Promise<unknown>) => {
         callOrder.push("lock");
         return await fn();
@@ -173,5 +189,33 @@ describe("docker router", () => {
     await expect(caller.start({ appId: "app-1" })).rejects.toThrow("App not found");
     expect(callOrder).toEqual(["lock", "getApp"]);
     expect(startStackMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a contended app as CONFLICT rather than queueing the request", async () => {
+    withAppLockOrBusyMock.mockRejectedValue(new AppBusyErrorMock("app-1"));
+
+    await expect(caller.start({ appId: "app-1" })).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    await expect(caller.stop({ appId: "app-1" })).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    await expect(caller.restart({ appId: "app-1" })).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+    expect(startStackMock).not.toHaveBeenCalled();
+  });
+
+  it("does not hold the app lock for the duration of a pull", async () => {
+    await expect(caller.pull({ appId: "app-1" })).resolves.toEqual({ success: true });
+
+    // `compose pull` only downloads images and can run for many minutes;
+    // holding the lock would block start/stop/delete for its duration.
+    expect(pullStackMock).toHaveBeenCalledWith("app-1", expect.any(Function));
+    expect(withAppLockOrBusyMock).not.toHaveBeenCalled();
+
+    getAppMock.mockResolvedValue(null);
+    await expect(caller.pull({ appId: "app-1" })).rejects.toThrow("App not found");
+    expect(pullStackMock).toHaveBeenCalledTimes(1);
   });
 });

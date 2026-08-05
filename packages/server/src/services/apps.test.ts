@@ -131,7 +131,7 @@ describe("apps service", () => {
     await expect(apps.updateCompose(created.id, "services:\n  api: invalid")).rejects.toThrow();
   });
 
-  test("deleteApp removes existing app and returns false for missing app", async () => {
+  test("deleteAppWithStack removes an existing app and reports a missing one", async () => {
     const dataDir = await createTempDir("deckos-apps-delete-");
     const apps = await loadAppsModule(dataDir);
     const created = await apps.createApp(
@@ -142,9 +142,9 @@ describe("apps service", () => {
       "services:\n  web:\n    image: nginx:latest\n"
     );
 
-    expect(await apps.deleteApp(created.id)).toBe(true);
+    expect((await apps.deleteAppWithStack(created.id)).deleted).toBe(true);
     expect(await apps.getApp(created.id)).toBeNull();
-    expect(await apps.deleteApp(created.id)).toBe(false);
+    expect((await apps.deleteAppWithStack(created.id)).deleted).toBe(false);
   });
 
   test("reorderApps applies explicit order and appends unspecified apps", async () => {
@@ -313,6 +313,42 @@ describe("apps service", () => {
         apps.withAppLock("app-a", async () => "nested")
       )
     ).resolves.toBe("nested");
+  });
+
+  test("withAppLockOrBusy fails fast instead of queueing behind a held lock", async () => {
+    const dataDir = await createTempDir("deckos-apps-busy-");
+    const apps = await loadAppsModule(dataDir);
+
+    let release: () => void = () => undefined;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const holder = apps.withAppLock("app-a", async () => {
+      await blocked;
+      return "held";
+    });
+
+    // Contended: reject immediately rather than waiting for the holder.
+    const busy = vi.fn(async () => "should-not-run");
+    await expect(apps.withAppLockOrBusy("app-a", busy)).rejects.toThrow(apps.AppBusyError);
+    expect(busy).not.toHaveBeenCalled();
+
+    // A different app is unaffected.
+    await expect(apps.withAppLockOrBusy("app-b", async () => "ok")).resolves.toBe("ok");
+
+    // Reentrant acquisition is still allowed, not reported as busy.
+    await expect(
+      apps.withAppLock("app-c", async () =>
+        apps.withAppLockOrBusy("app-c", async () => "nested")
+      )
+    ).resolves.toBe("nested");
+
+    release();
+    await holder;
+
+    // Once free, the lock is acquirable again.
+    await expect(apps.withAppLockOrBusy("app-a", async () => "free")).resolves.toBe("free");
   });
 
   test("deleteAppWithStack refuses to delete when containers survive a failed stop", async () => {
