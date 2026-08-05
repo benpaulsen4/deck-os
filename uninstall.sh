@@ -73,8 +73,12 @@ EOF
 require_value() {
   local flag="$1"
   local remaining="$2"
+  local value="${3-}"
   if (( remaining < 2 )); then
     die "Missing value for ${flag}"
+  fi
+  if [[ -z "$value" ]]; then
+    die "${flag} was given an empty value"
   fi
 }
 
@@ -167,9 +171,9 @@ main() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --install-root) require_value "$1" "$#"; INSTALL_ROOT="$2"; shift 2;;
-      --data-dir) require_value "$1" "$#"; DATA_DIR="$2"; shift 2;;
-      --service-name) require_value "$1" "$#"; SERVICE_NAME="$2"; shift 2;;
+      --install-root) require_value "$1" "$#" "${2-}"; INSTALL_ROOT="$2"; shift 2;;
+      --data-dir) require_value "$1" "$#" "${2-}"; DATA_DIR="$2"; shift 2;;
+      --service-name) require_value "$1" "$#" "${2-}"; SERVICE_NAME="$2"; shift 2;;
       --keep-data) KEEP_DATA=1; shift 1;;
       --dry-run) DRY_RUN=1; shift 1;;
       --yes|-y) ASSUME_YES=1; shift 1;;
@@ -192,6 +196,12 @@ main() {
   DATA_DIR="${DATA_DIR:-$(read_env_value "DECKOS_DATA_DIR" "$DEFAULT_DATA_DIR" "$ENV_FILE")}"
   SERVICE_NAME="${SERVICE_NAME:-$DEFAULT_SERVICE_NAME}"
 
+  # Reject the .service suffix exactly as install.sh does. Accepting it here
+  # would build "deckos.service.service", match no unit, and silently leave the
+  # real service installed while deleting everything else around it.
+  if [[ "$SERVICE_NAME" == *.service ]]; then
+    die "Invalid --service-name: ${SERVICE_NAME} (omit the .service suffix)"
+  fi
   if [[ ! "$SERVICE_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]*$ ]]; then
     die "Invalid --service-name: ${SERVICE_NAME}"
   fi

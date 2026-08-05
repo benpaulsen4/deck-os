@@ -41,10 +41,10 @@ sudo systemctl restart deckos
 1. Run the hosted uninstall script on the DeckOS host. It reads your install root and data directory back out of `/etc/deckos/deckos.env`, so you no longer have to remember what you passed at install time.
 
 ```bash
-curl -fsSL https://script.benpaulsen.tech/uninstall-deckos | sudo bash -s -- --yes
+curl -fsSL https://script.benpaulsen.tech/uninstall-deckos | sudo bash
 ```
 
-2. The script prints exactly what it is about to delete and asks for confirmation. When it is piped there is usually no terminal to prompt on, so pass `--yes` as above to confirm up front, or download the script and run it directly to get the prompt. Use `--dry-run` first if you want to see the plan without removing anything:
+2. The script prints exactly what it is about to delete and waits for confirmation. It reads your answer from `/dev/tty`, so it still prompts normally when piped from an interactive shell. Pass `--yes` to skip the prompt, which you will need in a script, a CI job, or anywhere else with no controlling terminal. Use `--dry-run` first if you want to see the plan without removing anything:
 
 ```bash
 curl -fsSL https://script.benpaulsen.tech/uninstall-deckos | sudo bash -s -- --dry-run

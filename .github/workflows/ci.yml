@@ -6,6 +6,10 @@ on:
     branches:
       - main
   workflow_dispatch:
+  # Weekly early warning for dependency advisories, so a new one is found out
+  # of band rather than by failing an unrelated PR.
+  schedule:
+    - cron: "17 6 * * 1"
 
 # Least privilege by default; each job requests only what it needs.
 permissions: {}
@@ -41,6 +45,17 @@ jobs:
           shellcheck --severity=warning --shell=bash \
             install.sh uninstall.sh migrate-install-defaults.sh
 
+      # install.sh and migrate-install-defaults.sh carry duplicate unit
+      # templates, and comments alone were not keeping them in sync.
+      - name: Check systemd unit templates are in sync
+        run: bash scripts/check-unit-template-sync.sh
+
+      # Same problem for the override maps in package.json and
+      # pnpm-workspace.yaml. Node is preinstalled on the runner image and this
+      # script has no dependencies, so it needs no pnpm install.
+      - name: Check dependency overrides are in sync
+        run: node scripts/check-overrides-sync.mjs
+
   quality-and-tests:
     runs-on: ubuntu-24.04
     permissions:
@@ -67,12 +82,24 @@ jobs:
       # Regression guard for the dependency overrides in package.json /
       # pnpm-workspace.yaml: if an override stops matching, the advisory it was
       # suppressing comes back and this fails.
+      #
+      # Gated at `high` so a newly published low or moderate advisory against
+      # some transitive dependency cannot turn main red on an unrelated PR with
+      # no code change. The scheduled run below catches the rest, out of band.
       - name: Audit dependencies
+        run: pnpm audit --audit-level=high
+
+      # Weekly run only: fails on any advisory at any level, so a moderate is
+      # noticed and triaged before it ever escalates to high and blocks a PR.
+      - name: Audit dependencies (all levels)
+        if: github.event_name == 'schedule'
         run: pnpm audit
 
       # Scoped rather than repo-wide: `pnpm format:check` currently reports 77
       # pre-existing files under packages/ and packages/server/templates/.
       # Widen this to `pnpm format:check` once those have been reformatted.
+      # Only extensions `pnpm format` can repair are checked, so a failure here
+      # always has a command that fixes it.
       - name: Format check
         run: pnpm format:check:scoped
 

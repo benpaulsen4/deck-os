@@ -129,12 +129,18 @@ array_contains() {
 }
 
 # Emits an explicit error when a flag is given without its value, instead of
-# letting `shift 2` abort the script silently under `set -e`.
+# letting `shift 2` abort the script silently under `set -e`. Also rejects an
+# explicitly empty value, which would otherwise pass and silently fall back to
+# the env file or a default.
 require_value() {
   local flag="$1"
   local remaining="$2"
+  local value="${3-}"
   if (( remaining < 2 )); then
     die "Missing value for ${flag}"
+  fi
+  if [[ -z "$value" ]]; then
+    die "${flag} was given an empty value"
   fi
 }
 
@@ -377,17 +383,17 @@ main() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --owner) require_value "$1" "$#"; OWNER="$2"; shift 2;;
-      --repo) require_value "$1" "$#"; REPO="$2"; shift 2;;
-      --token) require_value "$1" "$#"; TOKEN="$2"; shift 2;;
-      --token-file) require_value "$1" "$#"; TOKEN_FILE="$2"; shift 2;;
+      --owner) require_value "$1" "$#" "${2-}"; OWNER="$2"; shift 2;;
+      --repo) require_value "$1" "$#" "${2-}"; REPO="$2"; shift 2;;
+      --token) require_value "$1" "$#" "${2-}"; TOKEN="$2"; shift 2;;
+      --token-file) require_value "$1" "$#" "${2-}"; TOKEN_FILE="$2"; shift 2;;
       --token-stdin) TOKEN_FROM_STDIN=1; shift 1;;
-      --version) require_value "$1" "$#"; REQUESTED_VERSION="$2"; shift 2;;
-      --install-root) require_value "$1" "$#"; INSTALL_ROOT="$2"; shift 2;;
-      --data-dir) require_value "$1" "$#"; DATA_DIR="$2"; shift 2;;
-      --port) require_value "$1" "$#"; PORT="$2"; shift 2;;
-      --service-name) require_value "$1" "$#"; SERVICE_NAME="$2"; shift 2;;
-      --api-base) require_value "$1" "$#"; GITHUB_API_BASE="$2"; shift 2;;
+      --version) require_value "$1" "$#" "${2-}"; REQUESTED_VERSION="$2"; shift 2;;
+      --install-root) require_value "$1" "$#" "${2-}"; INSTALL_ROOT="$2"; shift 2;;
+      --data-dir) require_value "$1" "$#" "${2-}"; DATA_DIR="$2"; shift 2;;
+      --port) require_value "$1" "$#" "${2-}"; PORT="$2"; shift 2;;
+      --service-name) require_value "$1" "$#" "${2-}"; SERVICE_NAME="$2"; shift 2;;
+      --api-base) require_value "$1" "$#" "${2-}"; GITHUB_API_BASE="$2"; shift 2;;
       --help|-h) usage; exit 0;;
       *) echo "Unknown arg: $1" >&2; usage >&2; exit 1;;
     esac
@@ -492,6 +498,124 @@ main() {
 
   apt-get update -y
   apt-get install -y ca-certificates curl gnupg jq openssl tar xz-utils bash sudo coreutils
+
+  # ---------------------------------------------------------------------
+  # Fetch and verify the release BEFORE mutating the host.
+  #
+  # This block needs only curl, jq, openssl and coreutils, all installed
+  # above. Everything below it changes the machine -- the Docker apt repo and
+  # engine, the deckos account, its docker-group membership, the NOPASSWD
+  # sudoers rule, nvm and Node, and deckos.env. Verifying first means a bad
+  # signature aborts while the host is still essentially untouched, and in
+  # particular leaves deckos.env describing the release that is actually
+  # installed rather than one that never arrived.
+  # ---------------------------------------------------------------------
+  step "Fetching release metadata from GitHub"
+  local API RELEASE_URL TAG
+  API="${GITHUB_API_BASE%/}/repos/${OWNER}/${REPO}"
+
+  if [[ "$REQUESTED_VERSION" == "latest" ]]; then
+    RELEASE_URL="${API}/releases/latest"
+  else
+    TAG="v${REQUESTED_VERSION#v}"
+    RELEASE_URL="${API}/releases/tags/${TAG}"
+  fi
+
+  step "GET ${RELEASE_URL}"
+  debug "GET (shell-escaped) $(printf '%q' "$RELEASE_URL")"
+  local RELEASE_JSON TAG_NAME VER
+  RELEASE_JSON="$(github_fetch_json "${RELEASE_URL}")"
+
+  TAG_NAME="$(printf '%s' "$RELEASE_JSON" | jq -r '.tag_name')"
+  VER="${TAG_NAME#v}"
+
+  local ASSET_LINE ASSET_ID ASSET_NAME SUMS_ID SIG_ID
+  ASSET_LINE="$(select_tarball_asset "$RELEASE_JSON")"
+  if [[ -z "$ASSET_LINE" ]]; then
+    die "No .tar.gz asset found on release ${TAG_NAME}"
+  fi
+  ASSET_ID="${ASSET_LINE%%$'\t'*}"
+  ASSET_NAME="${ASSET_LINE#*$'\t'}"
+  if [[ -z "$ASSET_ID" || "$ASSET_ID" == "null" || -z "$ASSET_NAME" ]]; then
+    die "No .tar.gz asset found on release ${TAG_NAME}"
+  fi
+  # ASSET_NAME is server-supplied and becomes a path component below.
+  if [[ ! "$ASSET_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    die "Refusing to use release asset name with unexpected characters: ${ASSET_NAME}"
+  fi
+
+  SUMS_ID="$(asset_id_by_name "$RELEASE_JSON" "$SUMS_ASSET_NAME")"
+  SIG_ID="$(asset_id_by_name "$RELEASE_JSON" "$SIG_ASSET_NAME")"
+  if [[ -z "$SUMS_ID" || "$SUMS_ID" == "null" || -z "$SIG_ID" || "$SIG_ID" == "null" ]]; then
+    echo "Release ${TAG_NAME} does not publish ${SUMS_ASSET_NAME} and ${SIG_ASSET_NAME}." >&2
+    echo "DeckOS only installs signed releases. Choose a release that ships both" >&2
+    echo "assets, or re-publish this tag with the current release workflow." >&2
+    die "Aborting: release ${TAG_NAME} cannot be verified."
+  fi
+
+  local TAR_PATH SUMS_PATH SIG_PATH PUBKEY_PATH
+  TAR_PATH="${DOWNLOAD_TMP_DIR}/${ASSET_NAME}"
+  SUMS_PATH="${DOWNLOAD_TMP_DIR}/${SUMS_ASSET_NAME}"
+  SIG_PATH="${DOWNLOAD_TMP_DIR}/${SIG_ASSET_NAME}"
+  PUBKEY_PATH="${DOWNLOAD_TMP_DIR}/deckos-release.pub"
+
+  step "Downloading release asset ${ASSET_NAME}"
+  debug "GET (shell-escaped) $(printf '%q' "${API}/releases/assets/${ASSET_ID}")"
+  github_fetch_to_file "application/octet-stream" "${API}/releases/assets/${ASSET_ID}" "$TAR_PATH"
+  step "Downloading ${SUMS_ASSET_NAME}"
+  github_fetch_to_file "application/octet-stream" "${API}/releases/assets/${SUMS_ID}" "$SUMS_PATH"
+  step "Downloading ${SIG_ASSET_NAME}"
+  github_fetch_to_file "application/octet-stream" "${API}/releases/assets/${SIG_ID}" "$SIG_PATH"
+
+  # Write the embedded key to a real file (not a process substitution) so this
+  # works when the script is invoked through a plain `sh`-style shell too.
+  printf '%s\n' "$DECKOS_RELEASE_PUBLIC_KEY" > "$PUBKEY_PATH"
+  chmod 0644 "$PUBKEY_PATH"
+  if ! openssl pkey -pubin -in "$PUBKEY_PATH" -noout >/dev/null 2>&1; then
+    die "Embedded DeckOS release public key is not a valid PEM public key."
+  fi
+
+  step "Verifying ${SUMS_ASSET_NAME} signature"
+  if ! openssl pkeyutl -verify -pubin -inkey "$PUBKEY_PATH" -rawin \
+    -sigfile "$SIG_PATH" -in "$SUMS_PATH" >/dev/null 2>&1; then
+    echo "Signature verification FAILED for ${SUMS_ASSET_NAME} on release ${TAG_NAME}." >&2
+    echo "The release manifest is not signed by the DeckOS release key. This may" >&2
+    echo "mean the download was tampered with, or that the release was signed" >&2
+    echo "with a different key than this installer trusts." >&2
+    die "Aborting install. The host has not been modified."
+  fi
+
+  step "Verifying ${ASSET_NAME} digest"
+  local EXPECTED_DIGEST ACTUAL_DIGEST
+  EXPECTED_DIGEST="$(digest_for_asset "$SUMS_PATH" "$ASSET_NAME")"
+  if [[ ! "$EXPECTED_DIGEST" =~ ^[0-9a-f]{64}$ ]]; then
+    die "${SUMS_ASSET_NAME} has no valid SHA256 entry for ${ASSET_NAME}."
+  fi
+  ACTUAL_DIGEST="$(sha256sum "$TAR_PATH" | awk '{print $1}')"
+  if [[ "$EXPECTED_DIGEST" != "$ACTUAL_DIGEST" ]]; then
+    echo "Checksum mismatch for ${ASSET_NAME}:" >&2
+    echo "  expected: ${EXPECTED_DIGEST}" >&2
+    echo "  actual:   ${ACTUAL_DIGEST}" >&2
+    die "Aborting install. The host has not been modified."
+  fi
+
+  step "Validating downloaded archive"
+  if ! gzip -t "$TAR_PATH" >/dev/null 2>&1; then
+    local FILE_SIZE
+    FILE_SIZE="$(stat -c%s "$TAR_PATH" 2>/dev/null || echo "unknown")"
+    echo "Downloaded asset is not a valid .tar.gz (size: ${FILE_SIZE})." >&2
+    if [[ "$DEBUG" == "1" ]]; then
+      echo "DEBUG: First bytes (printable):" >&2
+      head -c 600 "$TAR_PATH" | tr -cd '\11\12\15\40-\176' >&2 || true
+      echo >&2
+    fi
+    die "Aborting install. The host has not been modified."
+  fi
+  step "Release ${TAG_NAME} verified"
+
+  # ---------------------------------------------------------------------
+  # Everything below this line mutates the host.
+  # ---------------------------------------------------------------------
 
   if ! command -v docker >/dev/null 2>&1; then
     install -m 0755 -d /etc/apt/keyrings
@@ -623,104 +747,6 @@ EOF
   fi
   chmod 600 "$ENV_FILE"
 
-  step "Fetching release metadata from GitHub"
-  local API RELEASE_URL TAG
-  API="${GITHUB_API_BASE%/}/repos/${OWNER}/${REPO}"
-
-  if [[ "$REQUESTED_VERSION" == "latest" ]]; then
-    RELEASE_URL="${API}/releases/latest"
-  else
-    TAG="v${REQUESTED_VERSION#v}"
-    RELEASE_URL="${API}/releases/tags/${TAG}"
-  fi
-
-  step "GET ${RELEASE_URL}"
-  debug "GET (shell-escaped) $(printf '%q' "$RELEASE_URL")"
-  local RELEASE_JSON TAG_NAME VER
-  RELEASE_JSON="$(github_fetch_json "${RELEASE_URL}")"
-
-  TAG_NAME="$(printf '%s' "$RELEASE_JSON" | jq -r '.tag_name')"
-  VER="${TAG_NAME#v}"
-
-  local ASSET_LINE ASSET_ID ASSET_NAME SUMS_ID SIG_ID
-  ASSET_LINE="$(select_tarball_asset "$RELEASE_JSON")"
-  if [[ -z "$ASSET_LINE" ]]; then
-    die "No .tar.gz asset found on release ${TAG_NAME}"
-  fi
-  ASSET_ID="${ASSET_LINE%%$'\t'*}"
-  ASSET_NAME="${ASSET_LINE#*$'\t'}"
-  if [[ -z "$ASSET_ID" || "$ASSET_ID" == "null" || -z "$ASSET_NAME" ]]; then
-    die "No .tar.gz asset found on release ${TAG_NAME}"
-  fi
-
-  SUMS_ID="$(asset_id_by_name "$RELEASE_JSON" "$SUMS_ASSET_NAME")"
-  SIG_ID="$(asset_id_by_name "$RELEASE_JSON" "$SIG_ASSET_NAME")"
-  if [[ -z "$SUMS_ID" || "$SUMS_ID" == "null" || -z "$SIG_ID" || "$SIG_ID" == "null" ]]; then
-    echo "Release ${TAG_NAME} does not publish ${SUMS_ASSET_NAME} and ${SIG_ASSET_NAME}." >&2
-    echo "DeckOS only installs signed releases. Choose a release that ships both" >&2
-    echo "assets, or re-publish this tag with the current release workflow." >&2
-    die "Aborting: release ${TAG_NAME} cannot be verified."
-  fi
-
-  local TAR_PATH SUMS_PATH SIG_PATH PUBKEY_PATH
-  TAR_PATH="${DOWNLOAD_TMP_DIR}/${ASSET_NAME}"
-  SUMS_PATH="${DOWNLOAD_TMP_DIR}/${SUMS_ASSET_NAME}"
-  SIG_PATH="${DOWNLOAD_TMP_DIR}/${SIG_ASSET_NAME}"
-  PUBKEY_PATH="${DOWNLOAD_TMP_DIR}/deckos-release.pub"
-
-  step "Downloading release asset ${ASSET_NAME}"
-  debug "GET (shell-escaped) $(printf '%q' "${API}/releases/assets/${ASSET_ID}")"
-  github_fetch_to_file "application/octet-stream" "${API}/releases/assets/${ASSET_ID}" "$TAR_PATH"
-  step "Downloading ${SUMS_ASSET_NAME}"
-  github_fetch_to_file "application/octet-stream" "${API}/releases/assets/${SUMS_ID}" "$SUMS_PATH"
-  step "Downloading ${SIG_ASSET_NAME}"
-  github_fetch_to_file "application/octet-stream" "${API}/releases/assets/${SIG_ID}" "$SIG_PATH"
-
-  # Write the embedded key to a real file (not a process substitution) so this
-  # works when the script is invoked through a plain `sh`-style shell too.
-  printf '%s\n' "$DECKOS_RELEASE_PUBLIC_KEY" > "$PUBKEY_PATH"
-  chmod 0644 "$PUBKEY_PATH"
-  if ! openssl pkey -pubin -in "$PUBKEY_PATH" -noout >/dev/null 2>&1; then
-    die "Embedded DeckOS release public key is not a valid PEM public key."
-  fi
-
-  step "Verifying ${SUMS_ASSET_NAME} signature"
-  if ! openssl pkeyutl -verify -pubin -inkey "$PUBKEY_PATH" -rawin \
-    -sigfile "$SIG_PATH" -in "$SUMS_PATH" >/dev/null 2>&1; then
-    echo "Signature verification FAILED for ${SUMS_ASSET_NAME} on release ${TAG_NAME}." >&2
-    echo "The release manifest is not signed by the DeckOS release key. This may" >&2
-    echo "mean the download was tampered with, or that the release was signed" >&2
-    echo "with a different key than this installer trusts." >&2
-    die "Aborting install."
-  fi
-
-  step "Verifying ${ASSET_NAME} digest"
-  local EXPECTED_DIGEST ACTUAL_DIGEST
-  EXPECTED_DIGEST="$(digest_for_asset "$SUMS_PATH" "$ASSET_NAME")"
-  if [[ ! "$EXPECTED_DIGEST" =~ ^[0-9a-f]{64}$ ]]; then
-    die "${SUMS_ASSET_NAME} has no valid SHA256 entry for ${ASSET_NAME}."
-  fi
-  ACTUAL_DIGEST="$(sha256sum "$TAR_PATH" | awk '{print $1}')"
-  if [[ "$EXPECTED_DIGEST" != "$ACTUAL_DIGEST" ]]; then
-    echo "Checksum mismatch for ${ASSET_NAME}:" >&2
-    echo "  expected: ${EXPECTED_DIGEST}" >&2
-    echo "  actual:   ${ACTUAL_DIGEST}" >&2
-    die "Aborting install."
-  fi
-
-  step "Validating downloaded archive"
-  if ! gzip -t "$TAR_PATH" >/dev/null 2>&1; then
-    local FILE_SIZE
-    FILE_SIZE="$(stat -c%s "$TAR_PATH" 2>/dev/null || echo "unknown")"
-    echo "Downloaded asset is not a valid .tar.gz (size: ${FILE_SIZE})." >&2
-    if [[ "$DEBUG" == "1" ]]; then
-      echo "DEBUG: First bytes (printable):" >&2
-      head -c 600 "$TAR_PATH" | tr -cd '\11\12\15\40-\176' >&2 || true
-      echo >&2
-    fi
-    die "Aborting install."
-  fi
-
   local TARGET_DIR="${INSTALL_ROOT}/releases/${VER}"
   rm -rf "${TARGET_DIR}.tmp"
   mkdir -p "${TARGET_DIR}.tmp"
@@ -755,10 +781,15 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 # NoNewPrivileges is deliberately NOT set: the UI's restart/shutdown actions
 # go through setuid sudo and would break. Membership of the docker group is
 # root-equivalent anyway, so these directives are containment, not a sandbox.
+#
+# ReadWritePaths takes precedence over ProtectHome, so /home stays writable:
+# the file browser is a headline feature and /home is where a home-server
+# user's files live. The net effect of ProtectHome here is that /root and
+# /run/user are read-only.
 PrivateTmp=yes
 ProtectSystem=yes
 ProtectHome=read-only
-ReadWritePaths=-${INSTALL_ROOT} -${DATA_DIR}
+ReadWritePaths=-${INSTALL_ROOT} -${DATA_DIR} -/home
 EnvironmentFile=/etc/deckos/deckos.env
 WorkingDirectory=${INSTALL_ROOT}/current
 ExecStartPre=+/usr/local/bin/deckos-fix-cpu-power-perms

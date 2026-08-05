@@ -48,21 +48,23 @@ This matters because releases are unpacked as `root` into `/opt/deckos`. There i
 
 ## Service Hardening
 
-The DeckOS `systemd` unit sets `PrivateTmp=yes`, `ProtectSystem=yes`, and `ProtectHome=read-only`.
+The DeckOS `systemd` unit sets `PrivateTmp=yes`, `ProtectSystem=yes`, `ProtectHome=read-only`, and `ReadWritePaths=` covering the install root, the data directory, and `/home`.
 
-Two consequences are worth knowing:
+Three consequences are worth knowing:
 
-- the file browser can read but not write under `/home` and `/root`, and cannot write under `/usr`. Keep files you intend to manage through DeckOS outside those trees.
+- `/home` stays writable. `ReadWritePaths=` takes precedence over `ProtectHome=`, which is deliberate: the file browser is a headline feature and `/home` is where most people keep the files they want to manage.
+- `/root` and `/run/user` are read-only, and `/usr` and `/boot` are read-only. The file browser can still read them.
 - `/tmp` as DeckOS sees it is private to the service, so it will not match what you see from a shell on the same host.
 
 `NoNewPrivileges` is deliberately not set, because the restart and shutdown actions rely on `sudo`. These directives contain a compromise; they do not sandbox DeckOS. Membership of the `docker` group remains root-equivalent, so treat the service account as privileged regardless.
 
-If you genuinely need DeckOS to write under `/home`, relax it with a drop-in rather than editing the unit, because the installer rewrites the unit on every run:
+If you want the stricter behaviour, where DeckOS cannot write anywhere under `/home` either, drop `-/home` from `ReadWritePaths=` with a drop-in rather than editing the unit, because the installer rewrites the unit on every run:
 
 ```bash
 sudo systemctl edit deckos
 # [Service]
-# ProtectHome=
+# ReadWritePaths=
+# ReadWritePaths=-/opt/deckos -/var/lib/deckos
 ```
 
 ## Tokens And Secrets

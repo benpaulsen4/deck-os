@@ -69,6 +69,56 @@ validate_port() {
   fi
 }
 
+# Kept in sync with install.sh. INSTALL_ROOT and DATA_DIR are interpolated into
+# the systemd unit heredoc below (WorkingDirectory, ExecStart, ReadWritePaths),
+# so a newline in either would inject arbitrary [Service] directives.
+validate_abs_path() {
+  local flag="$1"
+  local value="$2"
+  if [[ -z "$value" ]]; then
+    echo "${flag} must not be empty" >&2
+    exit 1
+  fi
+  if [[ "$value" != /* ]]; then
+    echo "${flag} must be an absolute path: ${value}" >&2
+    exit 1
+  fi
+  if [[ "$value" == "/" ]]; then
+    echo "${flag} must not be the filesystem root" >&2
+    exit 1
+  fi
+  if [[ "$value" =~ [[:cntrl:]] ]]; then
+    echo "${flag} must not contain control characters" >&2
+    exit 1
+  fi
+  if [[ "$value" == *" "* ]]; then
+    echo "${flag} must not contain spaces (the systemd unit cannot express them): ${value}" >&2
+    exit 1
+  fi
+  case "$value" in
+    *"/../"*|*"/..")
+      echo "${flag} must not contain '..': ${value}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+validate_service_name() {
+  local value="$1"
+  if [[ -z "$value" ]]; then
+    echo "--service-name must not be empty" >&2
+    exit 1
+  fi
+  if [[ "$value" == *.service ]]; then
+    echo "Invalid --service-name: ${value} (omit the .service suffix)" >&2
+    exit 1
+  fi
+  if [[ ! "$value" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]*$ ]]; then
+    echo "Invalid --service-name: ${value}" >&2
+    exit 1
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --service-name) SERVICE_NAME="${2:-}"; shift 2;;
@@ -90,11 +140,12 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 1
 fi
 
-if [[ -z "$SERVICE_NAME" ]]; then
-  echo "Service name cannot be empty" >&2
-  exit 1
-fi
+SERVICE_NAME="$(printf '%s' "$SERVICE_NAME" | tr -d ' \t\n\r')"
+INSTALL_ROOT="$(printf '%s' "$INSTALL_ROOT" | tr -d '\t\n\r')"
+DATA_DIR="$(printf '%s' "$DATA_DIR" | tr -d '\t\n\r')"
+PORT="$(printf '%s' "$PORT" | tr -d ' \t\n\r')"
 
+validate_service_name "$SERVICE_NAME"
 validate_port "$PORT"
 
 ENV_DIR="/etc/deckos"
@@ -108,6 +159,13 @@ GITHUB_API_BASE="${GITHUB_API_BASE:-$(read_env_value "DECKOS_GITHUB_API_BASE" "$
 if [[ -z "$TOKEN" ]]; then
   TOKEN="$(read_env_value "DECKOS_GITHUB_TOKEN" "" "$ENV_FILE")"
 fi
+
+# Validate after the env-file fallback: values read back out of deckos.env are
+# no more trustworthy than values passed on the command line.
+validate_abs_path "--install-root" "$INSTALL_ROOT"
+validate_abs_path "--data-dir" "$DATA_DIR"
+INSTALL_ROOT="${INSTALL_ROOT%/}"
+DATA_DIR="${DATA_DIR%/}"
 
 step "Preparing DeckOS runtime configuration"
 install -d -m 0755 "$ENV_DIR"
@@ -156,10 +214,15 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 # NoNewPrivileges is deliberately NOT set: the UI's restart/shutdown actions
 # go through setuid sudo and would break. Membership of the docker group is
 # root-equivalent anyway, so these directives are containment, not a sandbox.
+#
+# ReadWritePaths takes precedence over ProtectHome, so /home stays writable:
+# the file browser is a headline feature and /home is where a home-server
+# user's files live. The net effect of ProtectHome here is that /root and
+# /run/user are read-only.
 PrivateTmp=yes
 ProtectSystem=yes
 ProtectHome=read-only
-ReadWritePaths=-${INSTALL_ROOT} -${DATA_DIR}
+ReadWritePaths=-${INSTALL_ROOT} -${DATA_DIR} -/home
 EnvironmentFile=/etc/deckos/deckos.env
 WorkingDirectory=${INSTALL_ROOT}/current
 ExecStartPre=+/usr/local/bin/deckos-fix-cpu-power-perms
