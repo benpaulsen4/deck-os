@@ -12,9 +12,43 @@ import type {
 import { POLL_INTERVAL_MS, METRICS_HISTORY_SIZE } from "../lib/config.js";
 
 let cachedMetrics: SystemMetrics | null = null;
+let cachedMetricsAtMs: number | null = null;
 const metricsSubscribers: Set<(metrics: SystemMetrics) => void> = new Set();
 let pollInterval: NodeJS.Timeout | null = null;
 const metricsHistory: SystemMetrics[] = [];
+
+/**
+ * `si.currentLoad()`, `si.networkStats()` and the RAPL energy counter are all
+ * delta-based over module-level state, so two overlapping collections would
+ * split one interval's delta across two samples (one absurdly high, the next
+ * near zero). Concurrent callers therefore share a single in-flight collection.
+ */
+let inFlightCollection: Promise<SystemMetrics> | null = null;
+
+/** Guards against publishing the same shared collection to history twice. */
+let lastPublishedMetrics: SystemMetrics | null = null;
+
+/**
+ * A full process-table enumeration shells out to `ps` on Linux, which is far
+ * too expensive to run on the 2-second poll interval just to fill four
+ * integers. Counts are re-sampled on this slower sub-interval instead.
+ */
+const PROCESS_SAMPLE_INTERVAL_MS = 10_000;
+let lastProcessMetrics: ProcessMetrics | null = null;
+let lastProcessSampleAtMs: number | null = null;
+
+/**
+ * Polling stops once the last SSE subscriber disconnects, so the cache can be
+ * arbitrarily old by the time a `getMetrics` query arrives. Beyond this age the
+ * query collects instead of serving the cache.
+ */
+const CACHED_METRICS_MAX_AGE_MS = POLL_INTERVAL_MS * 2;
+
+type MetricsSection = "cpu" | "memory" | "processes" | "disk" | "network";
+
+/** Sections currently failing, so each broken collector is logged once. */
+const failingSections = new Set<MetricsSection>();
+let pollFailureLogged = false;
 
 let cpuPowerPath: string | null | undefined = undefined;
 let cpuPowerMode: "rapl_energy" | "hwmon_power" | null | undefined = undefined;
@@ -270,13 +304,25 @@ async function collectMemoryMetrics(): Promise<MemoryMetrics> {
 }
 
 async function collectProcessMetrics(): Promise<ProcessMetrics> {
+  const nowMs = Date.now();
+  if (
+    lastProcessMetrics !== null &&
+    lastProcessSampleAtMs !== null &&
+    nowMs - lastProcessSampleAtMs < PROCESS_SAMPLE_INTERVAL_MS
+  ) {
+    return lastProcessMetrics;
+  }
+
   const processes = await si.processes();
-  return {
+  const sample: ProcessMetrics = {
     all: processes.all,
     running: processes.running,
     blocked: processes.blocked,
     sleeping: processes.sleeping,
   };
+  lastProcessMetrics = sample;
+  lastProcessSampleAtMs = nowMs;
+  return sample;
 }
 
 async function collectDiskMetrics(): Promise<DiskMetrics> {
@@ -325,14 +371,83 @@ async function collectNetworkMetrics(): Promise<NetworkMetrics> {
   return { interfaces };
 }
 
-async function collectMetrics(): Promise<SystemMetrics> {
-  const [cpu, memory, processes, disk, network] = await Promise.all([
+/**
+ * Resolves one section of a settled collection: the fresh value when the
+ * collector succeeded, otherwise the previous value for that section, or null
+ * when that collector has never produced one. A single flaky collector must not
+ * blank the whole snapshot, and a permanently broken one must not log on every
+ * tick, so failures are logged on the transition into and out of failure.
+ */
+function resolveSection<K extends MetricsSection>(
+  section: K,
+  result: PromiseSettledResult<SystemMetrics[K]>,
+  previous: SystemMetrics[K] | undefined
+): SystemMetrics[K] | null {
+  if (result.status === "fulfilled") {
+    if (failingSections.delete(section)) {
+      console.warn(`[deckos] Metrics collector "${section}" recovered.`);
+    }
+    return result.value;
+  }
+
+  if (!failingSections.has(section)) {
+    failingSections.add(section);
+    console.error(
+      `[deckos] Metrics collector "${section}" failed; keeping last known value for it:`,
+      result.reason
+    );
+  }
+  return previous ?? null;
+}
+
+async function collectMetricsUncoordinated(): Promise<SystemMetrics> {
+  const previous = cachedMetrics;
+  const results = await Promise.allSettled([
     collectCPUMetrics(),
     collectMemoryMetrics(),
     collectProcessMetrics(),
     collectDiskMetrics(),
     collectNetworkMetrics(),
   ]);
+  const [cpuResult, memoryResult, processesResult, diskResult, networkResult] = results;
+
+  const sections = {
+    cpu: resolveSection("cpu", cpuResult, previous?.cpu),
+    memory: resolveSection("memory", memoryResult, previous?.memory),
+    processes: resolveSection("processes", processesResult, previous?.processes),
+    disk: resolveSection("disk", diskResult, previous?.disk),
+    network: resolveSection("network", networkResult, previous?.network),
+  };
+
+  // Degrading to a stale section is honest; fabricating one is not. A section
+  // that has never succeeded would have to be invented from zeroes, which reads
+  // downstream as a genuinely idle machine, so treat it as a failed collection
+  // and leave the cache untouched instead. This subsumes the all-collectors-
+  // failed case.
+  // Every collector failed at once: the machine, not one subsystem, is the
+  // problem. Publishing an entirely stale snapshot under a fresh timestamp would
+  // present a frozen host as a live one, so leave the cache alone.
+  if (results.every((result) => result.status === "rejected")) {
+    throw new Error(
+      `All metrics collectors failed (${(Object.keys(sections) as MetricsSection[]).join(", ")})`
+    );
+  }
+
+  const { cpu, memory, processes, disk, network } = sections;
+  if (
+    cpu === null ||
+    memory === null ||
+    processes === null ||
+    disk === null ||
+    network === null
+  ) {
+    const unavailable = (Object.keys(sections) as MetricsSection[]).filter(
+      (section) => sections[section] === null
+    );
+    throw new Error(
+      `Metrics collection incomplete; no data has ever been collected for: ${unavailable.join(", ")}`
+    );
+  }
 
   const metrics: SystemMetrics = {
     cpu,
@@ -344,6 +459,33 @@ async function collectMetrics(): Promise<SystemMetrics> {
   };
 
   cachedMetrics = metrics;
+  cachedMetricsAtMs = Date.now();
+  return metrics;
+}
+
+function collectMetrics(): Promise<SystemMetrics> {
+  if (inFlightCollection) {
+    return inFlightCollection;
+  }
+
+  const collection = collectMetricsUncoordinated().finally(() => {
+    if (inFlightCollection === collection) {
+      inFlightCollection = null;
+    }
+  });
+  inFlightCollection = collection;
+  return collection;
+}
+
+/**
+ * History and subscriber fan-out belong to the poller alone: a read-only query
+ * must not evict genuine interval samples or push duplicate frames to every
+ * connected dashboard.
+ */
+function publishMetrics(metrics: SystemMetrics): void {
+  if (lastPublishedMetrics === metrics) return;
+  lastPublishedMetrics = metrics;
+
   metricsHistory.push(metrics);
   if (metricsHistory.length > METRICS_HISTORY_SIZE) {
     metricsHistory.shift();
@@ -352,20 +494,47 @@ async function collectMetrics(): Promise<SystemMetrics> {
   metricsSubscribers.forEach((subscriber) => {
     subscriber(metrics);
   });
-
-  return metrics;
 }
 
-export function startMetricsPolling(): void {
+async function runPollCycle(): Promise<void> {
+  try {
+    const metrics = await collectMetrics();
+    pollFailureLogged = false;
+    publishMetrics(metrics);
+  } catch (error: unknown) {
+    if (pollFailureLogged) return;
+    pollFailureLogged = true;
+    console.error("[deckos] Metrics polling failed:", error);
+  }
+}
+
+/**
+ * Polling exists only to feed subscribers, so its lifetime is refcounted on the
+ * subscriber set: started on the 0->1 transition and stopped on 1->0. Starting
+ * it with nobody listening would leak a 2-second collector for the lifetime of
+ * the process, which is exactly what an SSE handler that fails between its
+ * `startMetricsPolling()` and its `subscribeToMetrics()` call used to do.
+ */
+function syncPollingWithSubscribers(): void {
+  if (metricsSubscribers.size === 0) {
+    stopMetricsPolling();
+    return;
+  }
   if (pollInterval) return;
-  void collectMetrics().catch((error: unknown) => {
-    console.error("[deckos] Initial metrics collection failed:", error);
-  });
+
+  void runPollCycle();
   pollInterval = setInterval(() => {
-    void collectMetrics().catch((error: unknown) => {
-      console.error("[deckos] Metrics polling failed:", error);
-    });
+    void runPollCycle();
   }, POLL_INTERVAL_MS);
+}
+
+/**
+ * Retained for `http/runtimeRoutes.ts`, which calls this before subscribing.
+ * Polling is refcounted on the subscriber set now, so this is a no-op until a
+ * subscriber exists and the call can be removed by that file's owner.
+ */
+export function startMetricsPolling(): void {
+  syncPollingWithSubscribers();
 }
 
 export function stopMetricsPolling(): void {
@@ -373,6 +542,14 @@ export function stopMetricsPolling(): void {
     clearInterval(pollInterval);
     pollInterval = null;
   }
+  // Once collection stops the gap to the next sample is unbounded, so every
+  // carried-over sample is dropped and re-taken on resume. It matters most for
+  // the RAPL counter, which wraps at `max_energy_range_uj` and would otherwise
+  // yield a silently wrong delta measured across the gap.
+  lastCpuEnergyUj = null;
+  lastCpuEnergyAtMs = null;
+  lastProcessMetrics = null;
+  lastProcessSampleAtMs = null;
 }
 
 export function getCachedMetrics(): SystemMetrics | null {
@@ -387,9 +564,36 @@ export function subscribeToMetrics(
   callback: (metrics: SystemMetrics) => void
 ): () => void {
   metricsSubscribers.add(callback);
-  return () => metricsSubscribers.delete(callback);
+  // Refcounted start: the first subscriber turns the poller on, so no caller has
+  // to remember to, and one that fails before subscribing cannot leave it running.
+  syncPollingWithSubscribers();
+
+  let unsubscribed = false;
+  return () => {
+    if (unsubscribed) return;
+    unsubscribed = true;
+    metricsSubscribers.delete(callback);
+    // Nothing is listening any more; stop paying for collection until the next
+    // dashboard connects.
+    syncPollingWithSubscribers();
+  };
 }
 
 export async function getOneShotMetrics(): Promise<SystemMetrics> {
+  return await collectMetrics();
+}
+
+/**
+ * Read path for queries: serve the poller's cache when it is fresh, otherwise
+ * collect once. Never touches history or subscribers.
+ */
+export async function getMetricsSnapshot(): Promise<SystemMetrics> {
+  if (
+    cachedMetrics !== null &&
+    cachedMetricsAtMs !== null &&
+    Date.now() - cachedMetricsAtMs <= CACHED_METRICS_MAX_AGE_MS
+  ) {
+    return cachedMetrics;
+  }
   return await collectMetrics();
 }
