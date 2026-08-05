@@ -9,6 +9,11 @@ import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { PullProgress } from "../../components/ui/PullProgress";
 import { AppIcon } from "../../components/ui/AppIcon";
 import { useToastStore } from "../../stores/toast";
+import {
+  APP_BUSY_MESSAGE,
+  APP_BUSY_TITLE,
+  isConflictError,
+} from "../../hooks/useTRPCErrors";
 import { LogViewer } from "../../components/ui/LogViewer";
 import { MetadataEditModal } from "../../components/layout/MetadataEditModal";
 import { ComposeEditor } from "../../components/layout/ComposeEditor";
@@ -60,6 +65,19 @@ function AppDetailPage() {
     return String(err);
   };
 
+  /**
+   * A rejected-because-busy lifecycle call is not an error the user can act on
+   * beyond waiting, so it gets a plain informational toast instead of a
+   * "Failed to ..." one. Anything else keeps the original wording.
+   */
+  const notifyActionError = (prefix: string, err: unknown) => {
+    if (isConflictError(err)) {
+      addToast(APP_BUSY_MESSAGE, "info");
+      return;
+    }
+    addToast(`${prefix}: ${getErrorMessage(err)}`, "error");
+  };
+
   const invalidateStatusQueries = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["stackStatus", appId] }),
@@ -76,7 +94,7 @@ function AppDetailPage() {
       addToast("App started", "success");
       await invalidateStatusQueries();
     },
-    onError: (err) => addToast(`Failed to start: ${getErrorMessage(err)}`, "error"),
+    onError: (err) => notifyActionError("Failed to start", err),
   });
 
   const stopMutation = useMutation({
@@ -85,7 +103,7 @@ function AppDetailPage() {
       addToast("App stopped", "success");
       await invalidateStatusQueries();
     },
-    onError: (err) => addToast(`Failed to stop: ${getErrorMessage(err)}`, "error"),
+    onError: (err) => notifyActionError("Failed to stop", err),
   });
 
   const restartMutation = useMutation({
@@ -94,7 +112,7 @@ function AppDetailPage() {
       addToast("App restarted", "success");
       await invalidateStatusQueries();
     },
-    onError: (err) => addToast(`Failed to restart: ${getErrorMessage(err)}`, "error"),
+    onError: (err) => notifyActionError("Failed to restart", err),
   });
 
   const removeUnknownContainerMutation = useMutation({
@@ -104,7 +122,7 @@ function AppDetailPage() {
       addToast("Unknown container removed", "success");
       await invalidateStatusQueries();
     },
-    onError: (err) => addToast(`Failed to remove container: ${getErrorMessage(err)}`, "error"),
+    onError: (err) => notifyActionError("Failed to remove container", err),
     onSettled: () => {
       setRemovingContainerId(null);
     },
@@ -133,6 +151,22 @@ function AppDetailPage() {
     if (action === "stop") stopMutation.mutate();
     else if (action === "delete") deleteMutation.mutate();
   };
+
+  /**
+   * The server serialises lifecycle work per app, so a second action started
+   * while one is in flight is either rejected as busy (the docker procedures)
+   * or queued behind a compose command that may run for minutes (apps.delete).
+   * Disable the whole group, not just the button that was clicked - the common
+   * case was clicking RESTART during a START, which the per-mutation guard let
+   * straight through.
+   */
+  const isAppBusy =
+    startMutation.isPending ||
+    stopMutation.isPending ||
+    restartMutation.isPending ||
+    removeUnknownContainerMutation.isPending ||
+    deleteMutation.isPending;
+  const busyTitle = isAppBusy ? APP_BUSY_TITLE : undefined;
 
   const isRunning = (stackStatus?.running ?? 0) > 0;
   const safeUrl = (() => {
@@ -223,21 +257,24 @@ function AppDetailPage() {
                 <Button
                   variant="primary"
                   onClick={() => startMutation.mutate()}
-                  disabled={startMutation.isPending || isRunning}
+                  disabled={isAppBusy || isRunning}
+                  title={busyTitle}
                 >
                   <Play size={16} style={{ marginRight: "8px" }} /> START
                 </Button>
                 <Button
                   variant="danger"
                   onClick={() => handleConfirmAction("stop")}
-                  disabled={stopMutation.isPending || !isRunning}
+                  disabled={isAppBusy || !isRunning}
+                  title={busyTitle}
                 >
                   <Square size={16} style={{ marginRight: "8px" }} /> STOP
                 </Button>
                 <Button
                   variant="secondary"
                   onClick={() => restartMutation.mutate()}
-                  disabled={restartMutation.isPending}
+                  disabled={isAppBusy}
+                  title={busyTitle}
                 >
                   <RotateCcw size={16} style={{ marginRight: "8px" }} /> RESTART
                 </Button>
@@ -247,7 +284,8 @@ function AppDetailPage() {
                 <Button
                   variant="danger"
                   onClick={() => handleConfirmAction("delete")}
-                  disabled={deleteMutation.isPending}
+                  disabled={isAppBusy}
+                  title={busyTitle}
                 >
                   <Trash2 size={16} style={{ marginRight: "8px" }} /> DELETE
                 </Button>

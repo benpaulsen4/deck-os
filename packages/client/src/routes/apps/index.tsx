@@ -4,6 +4,7 @@ import { useTRPC } from "../../trpc";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { trpcClient } from "../../trpc";
 import { useToastStore } from "../../stores/toast";
+import { APP_BUSY_MESSAGE, isConflictError } from "../../hooks/useTRPCErrors";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { AppRow } from "../../components/layout/AppRow";
 
@@ -30,6 +31,20 @@ function AppsPage() {
 
   const { data: apps } = useQuery(trpc.apps.list.queryOptions());
 
+  /**
+   * A rejected-because-busy lifecycle call is not an error the user can act on
+   * beyond waiting, so it gets a plain informational toast instead of a
+   * "Failed to ..." one. Anything else keeps the original wording.
+   */
+  const notifyActionError = (prefix: string, err: unknown) => {
+    if (isConflictError(err)) {
+      addToast(APP_BUSY_MESSAGE, "info");
+      return;
+    }
+    const message = err instanceof Error ? err.message : "Unknown error";
+    addToast(`${prefix}: ${message}`, "error");
+  };
+
   const invalidateStatusQueries = async (appId: string) => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["stackStatus", appId] }),
@@ -43,10 +58,7 @@ function AppsPage() {
       addToast("App started", "success");
       await invalidateStatusQueries(appId);
     },
-    onError: (err: unknown) => {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      addToast(`Failed to start: ${message}`, "error");
-    },
+    onError: (err: unknown) => notifyActionError("Failed to start", err),
   });
 
   const stopMutation = useMutation({
@@ -55,10 +67,7 @@ function AppsPage() {
       addToast("App stopped", "success");
       await invalidateStatusQueries(appId);
     },
-    onError: (err: unknown) => {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      addToast(`Failed to stop: ${message}`, "error");
-    },
+    onError: (err: unknown) => notifyActionError("Failed to stop", err),
   });
 
   const restartMutation = useMutation({
@@ -68,10 +77,7 @@ function AppsPage() {
       addToast("App restarted", "success");
       await invalidateStatusQueries(appId);
     },
-    onError: (err: unknown) => {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      addToast(`Failed to restart: ${message}`, "error");
-    },
+    onError: (err: unknown) => notifyActionError("Failed to restart", err),
   });
 
   const deleteMutation = useMutation({
@@ -87,10 +93,7 @@ function AppsPage() {
         queryClient.invalidateQueries({ queryKey: ["stackStatusBatch"] }),
       ]);
     },
-    onError: (err: unknown) => {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      addToast(`Failed to delete: ${message}`, "error");
-    },
+    onError: (err: unknown) => notifyActionError("Failed to delete", err),
   });
 
   const handleAction = (appId: string, action: string, e: React.MouseEvent) => {
@@ -122,20 +125,26 @@ function AppsPage() {
     }
   };
 
-  const isActionPending = (appId: string, action: string) => {
-    switch (action) {
-      case "start":
-        return startMutation.isPending && startMutation.variables === appId;
-      case "stop":
-        return stopMutation.isPending && stopMutation.variables === appId;
-      case "restart":
-        return restartMutation.isPending && restartMutation.variables === appId;
-      case "delete":
-        return deleteMutation.isPending && deleteMutation.variables === appId;
-      default:
-        return false;
-    }
-  };
+  /**
+   * The server serialises lifecycle work per app, so a second action started
+   * while one is in flight is either rejected as busy (the docker procedures)
+   * or queued behind a compose command that may run for minutes (apps.delete).
+   * Disabling only the button that was clicked let the common case straight
+   * through - clicking Restart on a row that is mid-Start - so every action on
+   * a busy row is disabled instead. Other rows stay live: the lock is per app,
+   * and operations on different apps really do run concurrently - hence a set
+   * rather than a single "busy app".
+   */
+  const busyAppIds = new Set(
+    [
+      startMutation.isPending ? startMutation.variables : undefined,
+      stopMutation.isPending ? stopMutation.variables : undefined,
+      restartMutation.isPending ? restartMutation.variables : undefined,
+      deleteMutation.isPending ? deleteMutation.variables : undefined,
+    ].filter((appId): appId is string => typeof appId === "string")
+  );
+
+  const isActionDisabled = (appId: string) => busyAppIds.has(appId);
 
   const tableStyle: React.CSSProperties = {
     width: "100%",
@@ -185,7 +194,7 @@ function AppsPage() {
                     key={app.id}
                     app={app}
                     onAction={handleAction}
-                    isActionPending={isActionPending}
+                    isActionDisabled={isActionDisabled}
                   />
                 ))}
               </tbody>
