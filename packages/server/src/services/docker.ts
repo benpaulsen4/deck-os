@@ -6,6 +6,39 @@ import { getComposePath, getComposeProjectName } from "../lib/config.js";
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * `docker compose up` pulls missing images, so give it room, but never let a
+ * request hang forever: `execFile` defaults to `timeout: 0` and a 1 MB
+ * `maxBuffer`, and overflowing that buffer SIGTERMs compose mid-run.
+ */
+const COMPOSE_TIMEOUT_MS = 15 * 60 * 1000;
+const COMPOSE_MAX_BUFFER_BYTES = 32 * 1024 * 1024;
+
+const DECKOS_COMPOSE_PROJECT_PREFIX = "deckos-";
+const COMPOSE_PROJECT_LABEL = "com.docker.compose.project";
+
+/**
+ * dockerode honours DOCKER_SOCKET_PATH but the compose CLI only reads
+ * DOCKER_HOST. Without this translation an operator pointing DeckOS at a
+ * rootless daemon would read status from one daemon while starting containers
+ * on another.
+ */
+export function dockerCliEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  if (!env.DOCKER_HOST && env.DOCKER_SOCKET_PATH && process.platform !== "win32") {
+    env.DOCKER_HOST = `unix://${env.DOCKER_SOCKET_PATH}`;
+  }
+  return env;
+}
+
+function composeExecOptions() {
+  return {
+    timeout: COMPOSE_TIMEOUT_MS,
+    maxBuffer: COMPOSE_MAX_BUFFER_BYTES,
+    env: dockerCliEnv(),
+  };
+}
+
 interface DockerPullEvent {
   id?: string;
   status?: string;
@@ -115,30 +148,47 @@ async function ensureDockerAvailable(): Promise<Docker> {
 }
 
 export async function startStack(appId: string): Promise<void> {
-  const projectName = await getComposeProjectName(appId);
-  const composePath = await getComposePath(appId);
+  const projectName = getComposeProjectName(appId);
+  const composePath = getComposePath(appId);
 
   const args = ["compose", "-f", composePath, "-p", projectName, "up", "-d"];
 
-  await execFileAsync("docker", args);
+  await execFileAsync("docker", args, composeExecOptions());
 }
 
 export async function stopStack(appId: string): Promise<void> {
-  const projectName = await getComposeProjectName(appId);
-  const composePath = await getComposePath(appId);
+  const projectName = getComposeProjectName(appId);
+  const composePath = getComposePath(appId);
 
   const args = ["compose", "-f", composePath, "-p", projectName, "down"];
 
-  await execFileAsync("docker", args);
+  await execFileAsync("docker", args, composeExecOptions());
 }
 
 export async function restartStack(appId: string): Promise<void> {
-  const projectName = await getComposeProjectName(appId);
-  const composePath = await getComposePath(appId);
+  const projectName = getComposeProjectName(appId);
+  const composePath = getComposePath(appId);
 
   const args = ["compose", "-f", composePath, "-p", projectName, "restart"];
 
-  await execFileAsync("docker", args);
+  await execFileAsync("docker", args, composeExecOptions());
+}
+
+/**
+ * True when the container was created by a DeckOS compose project. Used to keep
+ * container-scoped endpoints from reaching containers DeckOS does not manage.
+ */
+export async function isDeckosManagedContainer(containerId: string): Promise<boolean> {
+  const dockerClient = await ensureDockerAvailable();
+  const matches = await dockerClient.listContainers({
+    all: true,
+    filters: { id: [containerId] },
+  });
+  const found = matches.find((container) => container.Id === containerId);
+  const project = found?.Labels?.[COMPOSE_PROJECT_LABEL];
+  return (
+    typeof project === "string" && project.startsWith(DECKOS_COMPOSE_PROJECT_PREFIX)
+  );
 }
 
 export async function removeContainer(containerId: string): Promise<void> {
@@ -160,7 +210,7 @@ export async function pullStack(
 
     const args = ["compose", "-f", composePath, "-p", projectName, "pull"];
 
-    const child = spawn("docker", args);
+    const child = spawn("docker", args, { env: dockerCliEnv() });
 
     if (signal) {
       if (signal.aborted) {
@@ -366,6 +416,13 @@ export async function pullImagesWithProgress(
                 reject(followErr);
                 return;
               }
+              // Destroying the stream ends followProgress without an error, so
+              // an aborted pull looks exactly like a completed one. Check the
+              // signal before claiming success.
+              if (signal?.aborted) {
+                reject(new Error("Pull aborted"));
+                return;
+              }
               const existing = state.get(image) || {
                 layers: new Map<string, { current?: number; total?: number }>(),
               };
@@ -424,7 +481,20 @@ export async function getStackContainers(appId: string): Promise<ContainerInfo[]
 
   for (const container of containers) {
     const containerObj = dockerClient.getContainer(container.Id);
-    const inspect = await containerObj.inspect();
+
+    // `compose up` and `restart` recreate containers, so a container listed a
+    // moment ago can be gone by the time we inspect it. Skip it instead of
+    // failing the whole stack's status.
+    let inspect: Awaited<ReturnType<typeof containerObj.inspect>>;
+    try {
+      inspect = await containerObj.inspect();
+    } catch (error) {
+      console.warn(
+        `[deckos] Skipping container ${container.Id} that disappeared during status collection:`,
+        error instanceof Error ? error.message : String(error)
+      );
+      continue;
+    }
 
     const state = inspect.State;
     const portBindings = inspect.NetworkSettings.Ports || {};

@@ -1,7 +1,7 @@
+import { TRPCError } from "@trpc/server";
 import { router, protectedProcedure } from "../trpc/trpc.js";
 import { z } from "zod";
 import * as appsService from "../services/apps.js";
-import * as dockerService from "../services/docker.js";
 import {
   AppIdSchema,
   OptionalUrlOrPathSchema,
@@ -104,18 +104,31 @@ export const appsRouter = router({
     }),
 
   delete: protectedProcedure
-    .input(z.object({ id: AppIdSchema }))
+    .input(z.object({ id: AppIdSchema, force: z.boolean().optional().default(false) }))
     .mutation(async ({ input }) => {
+      let result: appsService.DeleteAppResult;
       try {
-        await dockerService.stopStack(input.id);
-      } catch {
-        // Ignore stop errors during delete
+        result = await appsService.deleteAppWithStack(input.id, { force: input.force });
+      } catch (error) {
+        if (error instanceof appsService.StackStillRunningError) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `${error.message}. Stop the app first, or retry with force to delete it anyway and leave the containers running.`,
+            cause: error,
+          });
+        }
+        throw error;
       }
-      const deleted = await appsService.deleteApp(input.id);
-      if (!deleted) {
+
+      if (!result.deleted) {
         throw new AppNotFoundError(input.id);
       }
-      return { success: true };
+
+      return {
+        success: true,
+        containersMayRemain: result.containersMayRemain,
+        stopError: result.stopError,
+      };
     }),
 
   reorder: protectedProcedure
