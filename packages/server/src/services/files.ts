@@ -1,6 +1,7 @@
 import fs from "fs-extra";
 import * as path from "node:path";
-import { open as openFile } from "node:fs/promises";
+import { open as openFile, opendir } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { DATA_DIR } from "../lib/config.js";
 
 type FileEntryType = "directory" | "file" | "symlink" | "other";
@@ -13,17 +14,30 @@ export interface FileEntry {
   modifiedAt: string | null;
   createdAt: string | null;
   mimeType: string | null;
+  /**
+   * True when the entry itself is a symlink. `type` continues to describe what the
+   * link resolves to so the UI can still navigate into a symlinked directory.
+   */
+  isSymlink: boolean;
+  /** Resolved destination of a symlink, or null for ordinary entries. */
+  linkTarget: string | null;
 }
 
 export interface FilesListResult {
   cwd: string;
   parent: string | null;
   entries: FileEntry[];
+  /** True when the directory held more entries than the server is willing to return. */
+  truncated: boolean;
 }
 
 export interface FilesListOptions {
   showHidden: boolean;
   directoriesOnly?: boolean;
+  /** Lower the returned-entry cap below MAX_LIST_ENTRIES; it can never raise it. */
+  maxEntries?: number;
+  /** Lower the examined-entry cap below MAX_LIST_SCAN_ENTRIES; it can never raise it. */
+  maxScanEntries?: number;
 }
 
 export interface FileMeta {
@@ -65,9 +79,29 @@ export class FilesNotDirectoryError extends Error {
 }
 
 export class FilesNotFileError extends Error {
-  constructor(targetPath: string) {
-    super(`Path is not a file: ${targetPath}`);
+  constructor(targetPath: string, message?: string) {
+    super(message ?? `Path is not a file: ${targetPath}`);
     this.name = "FilesNotFileError";
+  }
+}
+
+/**
+ * Raised when a text file is too large for the editor to load in full. Extending
+ * FilesNotFileError keeps the existing error mapping intact (400 / BAD_REQUEST with
+ * this message) while giving callers a distinct type to branch on.
+ */
+export class FilesTextTooLargeError extends FilesNotFileError {
+  readonly size: number;
+  readonly maxSize: number;
+
+  constructor(targetPath: string, size: number, maxSize: number) {
+    super(
+      targetPath,
+      `File is too large to edit safely: ${targetPath} is ${size} bytes and the editor limit is ${maxSize} bytes`
+    );
+    this.name = "FilesTextTooLargeError";
+    this.size = size;
+    this.maxSize = maxSize;
   }
 }
 
@@ -80,9 +114,18 @@ export class FilesAlreadyExistsError extends Error {
 
 const FILES_DATA_DIR = path.join(DATA_DIR, "files");
 const PINS_PATH = path.join(FILES_DATA_DIR, "pins.json");
+const SECURITY_DATA_DIR = path.join(DATA_DIR, "security");
 const LARGE_TEXT_READONLY_BYTES = 512 * 1024;
-const MAX_TEXT_READ_BYTES = 2 * 1024 * 1024;
 const LIST_DIRECTORY_CONCURRENCY = 24;
+
+/** Largest text payload readText will return, and the largest file writeText will replace. */
+export const MAX_TEXT_READ_BYTES = 2 * 1024 * 1024;
+/** Read this far past the stat-time size so growth during the read is still detected. */
+const TEXT_READ_GROWTH_SLACK_BYTES = 64 * 1024;
+/** Largest number of entries a single listDirectory response will contain. */
+export const MAX_LIST_ENTRIES = 10_000;
+/** Largest number of directory entries examined before a listing is reported truncated. */
+export const MAX_LIST_SCAN_ENTRIES = 100_000;
 
 function normalizeComparePath(value: string): string {
   const resolved = path.resolve(value);
@@ -98,6 +141,24 @@ function isSameOrChildPath(target: string, base: string): boolean {
   );
 }
 
+/**
+ * Paths the file browser refuses to touch.
+ *
+ * This is a guard-rail, not a security boundary. It is a prefix comparison over a
+ * path string, so:
+ *   - it cannot see through bind mounts. `realpath` does not unwind them, so a
+ *     container that bind-mounts the host's `/proc` at `/host/proc` produces a
+ *     resolved path matching none of these prefixes (FILE-12).
+ *   - callers re-open the resolved path afterwards (streams, stat, rename), so a
+ *     path that passes this check can in principle be swapped underneath us before
+ *     it is used. Both cases need a local foothold on the host, which already
+ *     implies more privilege than the panel grants.
+ *
+ * It deliberately does not try to enumerate every sensitive directory on the host:
+ * DeckOS runs as a root-equivalent service user by design and browsing `/etc` is a
+ * feature, not a bug. `DATA_DIR/security` is the exception — the panel must not be
+ * able to read or rewrite its own credential store through the file browser.
+ */
 function getProtectedPathDenylist(): string[] {
   if (process.platform === "win32") {
     const systemDrive = process.env.SystemDrive || "C:";
@@ -106,16 +167,38 @@ function getProtectedPathDenylist(): string[] {
       path.join(systemDrive, "Program Files"),
       path.join(systemDrive, "Program Files (x86)"),
       path.join(systemDrive, "ProgramData"),
+      SECURITY_DATA_DIR,
     ];
   }
-  return ["/proc", "/sys", "/dev", "/run", "/var/run"];
+  return ["/proc", "/sys", "/dev", "/run", "/var/run", SECURITY_DATA_DIR];
 }
 
-function assertNotDeniedPath(targetPath: string): void {
-  for (const deniedPath of getProtectedPathDenylist()) {
-    if (isSameOrChildPath(targetPath, deniedPath)) {
-      throw new FilesAccessDeniedError(targetPath);
-    }
+// Normalized once: isDeniedPath runs per listed entry, so rebuilding and re-resolving
+// the list on every call costs thousands of path operations on a large directory.
+let normalizedDenylist: string[] | null = null;
+
+function getNormalizedDenylist(): string[] {
+  normalizedDenylist ??= getProtectedPathDenylist().map(normalizeComparePath);
+  return normalizedDenylist;
+}
+
+export function isDeniedPath(targetPath: string): boolean {
+  const normalizedTarget = normalizeComparePath(targetPath);
+  return getNormalizedDenylist().some(
+    (deniedPath) =>
+      normalizedTarget === deniedPath ||
+      normalizedTarget.startsWith(`${deniedPath}${path.sep}`)
+  );
+}
+
+/**
+ * Throws FilesAccessDeniedError when `targetPath` is inside a protected location.
+ * Exported so other services (for example disk analysis) apply the same denylist
+ * instead of maintaining a second copy of it.
+ */
+export function assertNotDeniedPath(targetPath: string): void {
+  if (isDeniedPath(targetPath)) {
+    throw new FilesAccessDeniedError(targetPath);
   }
 }
 
@@ -278,17 +361,21 @@ async function toDirectoryEntry(
     const entryLstat = await fs.lstat(entryPath);
     const isSymlink = entryLstat.isSymbolicLink();
     let targetStat = entryLstat;
+    let linkTarget: string | null = null;
 
     if (isSymlink) {
       const symlinkTarget = await fs.realpath(entryPath).catch(() => null);
       if (symlinkTarget) {
         assertNotDeniedPath(symlinkTarget);
+        linkTarget = symlinkTarget;
         targetStat = await fs.stat(entryPath).catch(() => entryLstat);
       }
     } else {
       assertNotDeniedPath(entryPath);
     }
 
+    // `type` describes what the entry resolves to, so a symlinked directory stays
+    // navigable; `isSymlink` / `linkTarget` let the UI badge it as a link (FILE-3).
     const entryType: FileEntryType = targetStat.isDirectory()
       ? "directory"
       : targetStat.isFile()
@@ -305,10 +392,50 @@ async function toDirectoryEntry(
       modifiedAt: toIsoTime(targetStat.mtimeMs),
       createdAt: toIsoTime(targetStat.birthtimeMs),
       mimeType: targetStat.isFile() ? getMimeTypeFromPath(entryPath) : null,
+      isSymlink,
+      linkTarget,
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * Streams a directory instead of materializing every entry, and stops at
+ * MAX_LIST_ENTRIES kept entries / MAX_LIST_SCAN_ENTRIES examined entries so a
+ * directory with millions of children cannot exhaust the process (FILE-11).
+ */
+async function collectDirents(
+  realPath: string,
+  showHidden: boolean,
+  maxEntries: number,
+  maxScanEntries: number
+): Promise<{ dirents: fs.Dirent[]; truncated: boolean }> {
+  const dirents: fs.Dirent[] = [];
+  let scanned = 0;
+  let truncated = false;
+  const directoryHandle = await opendir(realPath);
+  try {
+    for await (const dirent of directoryHandle) {
+      scanned += 1;
+      if (scanned > maxScanEntries) {
+        truncated = true;
+        break;
+      }
+      if (!showHidden && dirent.name.startsWith(".")) {
+        continue;
+      }
+      if (dirents.length >= maxEntries) {
+        truncated = true;
+        break;
+      }
+      dirents.push(dirent);
+    }
+  } finally {
+    // Breaking out of the async iterator already closes the handle.
+    await directoryHandle.close().catch(() => undefined);
+  }
+  return { dirents, truncated };
 }
 
 export async function listDirectory(
@@ -316,6 +443,14 @@ export async function listDirectory(
   options: FilesListOptions
 ): Promise<FilesListResult> {
   const { showHidden, directoriesOnly = false } = options;
+  const maxEntries = Math.max(
+    1,
+    Math.min(options.maxEntries ?? MAX_LIST_ENTRIES, MAX_LIST_ENTRIES)
+  );
+  const maxScanEntries = Math.max(
+    1,
+    Math.min(options.maxScanEntries ?? MAX_LIST_SCAN_ENTRIES, MAX_LIST_SCAN_ENTRIES)
+  );
   const basePath = inputPath.trim().length > 0 ? inputPath : getRootPath();
   const requestedPath = ensureAbsolutePath(basePath);
   assertNotDeniedPath(requestedPath);
@@ -333,9 +468,11 @@ export async function listDirectory(
     throw new FilesNotDirectoryError(realPath);
   }
 
-  const directoryEntries = await fs.readdir(realPath, { withFileTypes: true });
-  const visibleEntries = directoryEntries.filter(
-    (dirent) => showHidden || !dirent.name.startsWith(".")
+  const { dirents: visibleEntries, truncated } = await collectDirents(
+    realPath,
+    showHidden,
+    maxEntries,
+    maxScanEntries
   );
   const resolvedEntries = await mapWithConcurrencyLimit(
     visibleEntries,
@@ -357,6 +494,7 @@ export async function listDirectory(
     cwd: realPath,
     parent: getParentPath(realPath),
     entries: scopedEntries,
+    truncated,
   };
 }
 
@@ -392,15 +530,93 @@ export async function resolveExistingDirectoryPath(inputPath: string): Promise<s
   return realPath;
 }
 
-export async function resolveTargetPath(inputPath: string): Promise<string> {
-  const targetPath = ensureAbsolutePath(inputPath);
-  assertNotDeniedPath(targetPath);
-  const parentPath = path.dirname(targetPath);
-  const parentRealPath = await resolveExistingPath(parentPath);
-  if (!isSameOrChildPath(targetPath, parentRealPath)) {
-    throw new FilesAccessDeniedError(targetPath);
+export interface ResolvedMutationPath {
+  /** Absolute input path with the final component's symlink left intact. */
+  path: string;
+  /** Fully resolved path, used for denylist and containment checks only. */
+  realPath: string;
+  /** True when the final path component is itself a symlink. */
+  isSymlink: boolean;
+}
+
+/**
+ * Resolves a path for a destructive operation. The denylist is applied to both the
+ * literal path and the real path, but the returned `path` still points at the literal
+ * entry so that deleting/renaming a symlink acts on the link and never on whatever it
+ * points at (FILE-3). Unlike resolveExistingPath this uses `lstat`, so a dangling
+ * symlink is treated as an existing entry that can be removed.
+ *
+ * Containment is not checked here — destinations go through resolveTargetPath, and
+ * refusing to operate on a filesystem root is assertMutableSource's job.
+ */
+export async function resolveExistingMutationPath(
+  inputPath: string
+): Promise<ResolvedMutationPath> {
+  const requestedPath = ensureAbsolutePath(inputPath);
+  assertNotDeniedPath(requestedPath);
+
+  const linkStat = await fs.lstat(requestedPath).catch(() => null);
+  if (!linkStat) {
+    throw new FilesNotFoundError(requestedPath);
   }
+
+  const realPath = await fs.realpath(requestedPath).catch(() => requestedPath);
+  assertNotDeniedPath(realPath);
+
+  return { path: requestedPath, realPath, isSymlink: linkStat.isSymbolicLink() };
+}
+
+export async function resolveTargetPath(inputPath: string): Promise<string> {
+  const requestedPath = ensureAbsolutePath(inputPath);
+  assertNotDeniedPath(requestedPath);
+  const parentPath = path.dirname(requestedPath);
+  const parentRealPath = await resolveExistingPath(parentPath);
+  // Rebase onto the parent's real path: with /srv/link -> /mnt/data, a target of
+  // /srv/link/new is legitimate even though it does not sit under its own realpath,
+  // and the joined path is what the operation should actually act on (FILE-13).
+  const targetPath = path.join(parentRealPath, path.basename(requestedPath));
+  // Invariant, not a filter: path.resolve has already collapsed the input, so basename
+  // can never be ".." and the join can never leave the parent. Kept as an assertion in
+  // case either of those assumptions is ever broken upstream.
+  if (!isSameOrChildPath(targetPath, parentRealPath)) {
+    throw new FilesAccessDeniedError(requestedPath);
+  }
+  assertNotDeniedPath(targetPath);
   return targetPath;
+}
+
+/**
+ * rename(2) replaces an existing destination atomically and silently, so mkdir/copy
+ * were the only operations that refused to clobber. Reject up front instead (FILE-4).
+ * `lstat` is deliberate: a dangling symlink at the destination would also be replaced.
+ *
+ * This is a check-then-act, and Node exposes no RENAME_NOREPLACE, so it narrows
+ * "always clobbers" to "clobbers only if the destination appears between the check and
+ * the rename". That residual window is acceptable for a single-admin panel.
+ *
+ * `sameEntryAs` exempts a destination that *is* the source: a case-only rename on a
+ * case-insensitive filesystem, or a source reached through a symlinked ancestor, names
+ * one entry by two spellings, and rename(2) treats that as a no-op success. Identity is
+ * compared by device and inode rather than by string, because path normalization cannot
+ * know whether the underlying filesystem folds case.
+ */
+async function assertTargetIsFree(targetPath: string, sameEntryAs?: string): Promise<void> {
+  const existing = await fs.lstat(targetPath).catch(() => null);
+  if (!existing) {
+    return;
+  }
+  if (sameEntryAs) {
+    const sourceStat = await fs.lstat(sameEntryAs).catch(() => null);
+    if (
+      sourceStat &&
+      sourceStat.ino !== 0 &&
+      sourceStat.ino === existing.ino &&
+      sourceStat.dev === existing.dev
+    ) {
+      return;
+    }
+  }
+  throw new FilesAlreadyExistsError(targetPath);
 }
 
 function normalizeFsError(error: unknown, fallbackPath: string): never {
@@ -425,15 +641,25 @@ export async function mkdir(targetPathInput: string): Promise<void> {
   }
 }
 
+function assertMutableSource(source: ResolvedMutationPath): void {
+  ensureNotRootPath(source.path);
+  if (!source.isSymlink) {
+    // A symlink is only ever detached from its parent, so its target being a root is
+    // irrelevant; for everything else the resolved path is what would be moved.
+    ensureNotRootPath(source.realPath);
+  }
+}
+
 export async function rename(
   sourcePathInput: string,
   targetPathInput: string
 ): Promise<void> {
-  const sourcePath = await resolveExistingPath(sourcePathInput);
+  const source = await resolveExistingMutationPath(sourcePathInput);
   const targetPath = await resolveTargetPath(targetPathInput);
-  ensureNotRootPath(sourcePath);
+  assertMutableSource(source);
+  await assertTargetIsFree(targetPath, source.path);
   try {
-    await fs.rename(sourcePath, targetPath);
+    await fs.rename(source.path, targetPath);
   } catch (error) {
     normalizeFsError(error, targetPath);
   }
@@ -443,10 +669,19 @@ export async function copy(
   sourcePathInput: string,
   targetPathInput: string
 ): Promise<void> {
-  const sourcePath = await resolveExistingPath(sourcePathInput);
+  const source = await resolveExistingMutationPath(sourcePathInput);
   const targetPath = await resolveTargetPath(targetPathInput);
+  // fs-extra's symlink branch honours neither `overwrite` nor `errorOnExist`, so the
+  // destination has to be checked here before the copy starts. No same-entry exemption:
+  // copying an entry onto itself is a mistake rather than a no-op.
+  await assertTargetIsFree(targetPath);
   try {
-    await fs.copy(sourcePath, targetPath, { overwrite: false, errorOnExist: true });
+    await fs.copy(source.path, targetPath, {
+      overwrite: false,
+      errorOnExist: true,
+      // Copy a link as a link rather than duplicating everything it points at.
+      dereference: false,
+    });
   } catch (error) {
     normalizeFsError(error, targetPath);
   }
@@ -456,11 +691,12 @@ export async function move(
   sourcePathInput: string,
   targetPathInput: string
 ): Promise<void> {
-  const sourcePath = await resolveExistingPath(sourcePathInput);
+  const source = await resolveExistingMutationPath(sourcePathInput);
   const targetPath = await resolveTargetPath(targetPathInput);
-  ensureNotRootPath(sourcePath);
+  assertMutableSource(source);
+  await assertTargetIsFree(targetPath, source.path);
   try {
-    await fs.rename(sourcePath, targetPath);
+    await fs.rename(source.path, targetPath);
     return;
   } catch (error) {
     const code =
@@ -469,14 +705,33 @@ export async function move(
       normalizeFsError(error, targetPath);
     }
   }
-  await copy(sourcePath, targetPath);
-  await fs.remove(sourcePath);
+  // Cross-filesystem fallback: copy-then-delete, still treating a link as a link.
+  try {
+    await fs.copy(source.path, targetPath, {
+      overwrite: false,
+      errorOnExist: true,
+      dereference: false,
+    });
+  } catch (error) {
+    normalizeFsError(error, targetPath);
+  }
+  await removeResolved(source);
+}
+
+async function removeResolved(target: ResolvedMutationPath): Promise<void> {
+  if (target.isSymlink) {
+    // Detach the link only. Recursing into it would destroy the real directory it
+    // points at, which is what the UI showed as an ordinary folder (FILE-3).
+    await fs.unlink(target.path);
+    return;
+  }
+  await fs.remove(target.path);
 }
 
 export async function remove(targetPathInput: string): Promise<void> {
-  const targetPath = await resolveExistingPath(targetPathInput);
-  ensureNotRootPath(targetPath);
-  await fs.remove(targetPath);
+  const target = await resolveExistingMutationPath(targetPathInput);
+  assertMutableSource(target);
+  await removeResolved(target);
 }
 
 export async function getMeta(inputPath: string): Promise<FileMeta> {
@@ -503,19 +758,26 @@ export async function readText(
     throw new FilesNotFileError(fileMeta.path);
   }
   const fileHandle = await openFile(fileMeta.path, "r");
-  const buffer = Buffer.alloc(MAX_TEXT_READ_BYTES + 1);
+  // Size the buffer to the file instead of always allocating the 2 MB cap, but read
+  // past the stat-time size: this editor gets pointed at live logs, and a file that
+  // grew between the stat and the read would otherwise come back as a silent prefix
+  // labelled `truncated: false`. Filling the buffer completely is itself proof that
+  // more content exists.
+  const readLength = Math.min(
+    fileMeta.size + TEXT_READ_GROWTH_SLACK_BYTES,
+    MAX_TEXT_READ_BYTES + 1
+  );
+  const buffer = Buffer.alloc(readLength);
   const bytesRead = await (async () => {
     try {
-      const result = await fileHandle.read(buffer, 0, MAX_TEXT_READ_BYTES + 1, 0);
+      const result = await fileHandle.read(buffer, 0, readLength, 0);
       return result.bytesRead;
     } finally {
       await fileHandle.close();
     }
   })();
-  const truncated = bytesRead > MAX_TEXT_READ_BYTES;
-  const contentBuffer = truncated
-    ? buffer.subarray(0, MAX_TEXT_READ_BYTES)
-    : buffer.subarray(0, bytesRead);
+  const truncated = bytesRead > MAX_TEXT_READ_BYTES || bytesRead === readLength;
+  const contentBuffer = buffer.subarray(0, Math.min(bytesRead, MAX_TEXT_READ_BYTES));
   const readOnlySuggested = !forceEditable && fileMeta.size > LARGE_TEXT_READONLY_BYTES;
   return {
     content: contentBuffer.toString("utf8"),
@@ -530,7 +792,36 @@ export async function writeText(inputPath: string, content: string): Promise<voi
   if (!fileMeta.isTextLike) {
     throw new FilesNotFileError(fileMeta.path);
   }
-  await fs.writeFile(fileMeta.path, content, "utf8");
+  // readText only ever returned the first MAX_TEXT_READ_BYTES of a larger file, so a
+  // save from the editor would write that prefix over the whole file. Refuse instead of
+  // truncating; the caller cannot have the rest of the content to send back (FILE-6).
+  if (fileMeta.size > MAX_TEXT_READ_BYTES) {
+    throw new FilesTextTooLargeError(fileMeta.path, fileMeta.size, MAX_TEXT_READ_BYTES);
+  }
+
+  const targetPath = fileMeta.path;
+  const targetStat = await fs.stat(targetPath);
+  // Write to a sibling temp file and rename over the target so a failed or partial
+  // write cannot leave the original half-rewritten. This is a deliberate trade, not an
+  // inherited pattern: the replacement is a new inode, so hardlinks to the old file are
+  // severed, xattrs/ACLs/SELinux labels are dropped (only mode and ownership are
+  // restored below), and the write now needs permission on the parent directory rather
+  // than just the file. Atomicity is worth more here than any of those.
+  const tempPath = path.join(
+    path.dirname(targetPath),
+    `.${path.basename(targetPath)}.deckos-${randomUUID()}.tmp`
+  );
+  try {
+    await fs.writeFile(tempPath, content, "utf8");
+    // Best-effort ownership/permission preservation: the temp file is created with the
+    // service user's umask, not the original file's mode.
+    await fs.chmod(tempPath, targetStat.mode & 0o777).catch(() => undefined);
+    await fs.chown(tempPath, targetStat.uid, targetStat.gid).catch(() => undefined);
+    await fs.rename(tempPath, targetPath);
+  } catch (error) {
+    await fs.remove(tempPath).catch(() => undefined);
+    normalizeFsError(error, targetPath);
+  }
 }
 
 export function getPathMimeType(targetPath: string): string {
