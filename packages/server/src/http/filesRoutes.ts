@@ -198,6 +198,8 @@ export function registerFilesRoutes(app: Hono) {
 
         hasFile = true;
         filesCount += 1;
+        // Unreachable while limits.files is set: busboy emits `filesLimit` and skips the
+        // part rather than delivering it. Kept as defence in depth if that limit moves.
         if (filesCount > MAX_UPLOAD_FILES) {
           setUploadError(
             new UploadRequestError(400, `Too many files. Maximum is ${MAX_UPLOAD_FILES}.`)

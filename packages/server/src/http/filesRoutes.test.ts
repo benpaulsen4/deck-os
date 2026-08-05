@@ -246,10 +246,19 @@ describe("filesRoutes", () => {
       { field: "files", filename: "dupe.txt", content: "second" },
     ]);
 
-    // Whether the first part finished writing before the request was torn down is
-    // timing-dependent; the guarantee under test is that the collision is reported
-    // instead of one part silently overwriting the other.
     expect(res.status).toBe(409);
+    // Both tasks await resolveTargetPath before opening, so which of the two wins the
+    // `open(..., "wx")` race is genuinely nondeterministic — the loser gets EEXIST and,
+    // correctly, does not unlink a file it did not create. What is deterministic is the
+    // shape: at most one dupe.txt survives and it holds exactly one part's bytes, never
+    // a mix and never a partial write.
+    const entries = await fs.readdir(destination);
+    expect(entries.length).toBeLessThanOrEqual(1);
+    if (entries.length === 1) {
+      expect(entries[0]).toBe("dupe.txt");
+      const written = await fs.readFile(path.join(destination, "dupe.txt"), "utf8");
+      expect(["first", "second"]).toContain(written);
+    }
   });
 
   test("a traversal filename cannot escape the destination directory", async () => {

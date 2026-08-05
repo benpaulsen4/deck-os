@@ -1,4 +1,4 @@
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 import fs from "fs-extra";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +13,7 @@ import {
   MAX_TEXT_READ_BYTES,
   assertNotDeniedPath,
   copy,
+  isDeniedPath,
   listDirectory,
   mkdir,
   move,
@@ -150,6 +151,16 @@ test("the denylist covers the auth store and matches on path segments, not strin
   expect(() => assertNotDeniedPath("/run/lock")).toThrow(FilesAccessDeniedError);
   expect(() => assertNotDeniedPath("/runner")).not.toThrow();
   expect(() => assertNotDeniedPath("/sysfoo")).not.toThrow();
+});
+
+test("isDeniedPath is the predicate form of the same denylist", () => {
+  // Exported for batch B (disk analysis), which wants to skip a subtree rather than
+  // abort a scan, so it is worth pinning independently of assertNotDeniedPath.
+  expect(isDeniedPath(path.join(DATA_DIR, "security", "passcode.json"))).toBe(true);
+  expect(isDeniedPath(path.join(DATA_DIR, "apps"))).toBe(false);
+  expect(isDeniedPath(DENIED_SYSTEM_DIR)).toBe(true);
+  expect(isDeniedPath(path.join(DENIED_SYSTEM_DIR, "nested", "deeper"))).toBe(true);
+  expect(isDeniedPath(`${DENIED_SYSTEM_DIR}-sibling`)).toBe(false);
 });
 
 test("traversal segments cannot walk back into a denied path", async () => {
@@ -348,6 +359,45 @@ test("rename, move and copy refuse to overwrite an existing destination", async 
   await fs.remove(root);
 });
 
+test("a case-only rename is allowed even where the filesystem folds case", async () => {
+  const root = await createTempDir("deckos-files-case-rename-");
+  const lowerPath = path.join(root, "notes.txt");
+  const upperPath = path.join(root, "NOTES.TXT");
+  await fs.writeFile(lowerPath, "content", "utf8");
+
+  // On a case-insensitive filesystem the destination already "exists" — it is the same
+  // inode — so identity has to be compared by dev/ino rather than by path string.
+  await rename(lowerPath, upperPath);
+
+  const entries = await fs.readdir(root);
+  expect(entries).toEqual(["NOTES.TXT"]);
+  expect(await fs.readFile(upperPath, "utf8")).toBe("content");
+
+  await fs.remove(root);
+});
+
+test("renaming an entry onto its own path through a symlinked parent is not a collision", async (ctx) => {
+  const root = await createTempDir("deckos-files-same-entry-");
+  if (!(await canCreateSymlink(root))) {
+    await fs.remove(root);
+    ctx.skip();
+    return;
+  }
+  const realDir = path.join(root, "real");
+  await fs.ensureDir(realDir);
+  const linkedDir = path.join(root, "linked");
+  await fs.symlink(realDir, linkedDir, "dir");
+  await fs.writeFile(path.join(realDir, "notes.txt"), "content", "utf8");
+
+  // The source keeps its literal spelling while the destination is rebased onto the
+  // parent's real path, so the two sides disagree as strings while naming one entry.
+  // Comparing device and inode is what makes this a no-op rather than a false 409.
+  await rename(path.join(linkedDir, "notes.txt"), path.join(linkedDir, "notes.txt"));
+  expect(await fs.readFile(path.join(realDir, "notes.txt"), "utf8")).toBe("content");
+
+  await fs.remove(root);
+});
+
 test("rename refuses a destination occupied by a dangling symlink", async (ctx) => {
   const root = await createTempDir("deckos-files-dangling-");
   if (!(await canCreateSymlink(root))) {
@@ -416,6 +466,27 @@ test("listDirectory caps the entries it returns and reports truncation", async (
   await fs.remove(root);
 });
 
+test("listDirectory stops scanning long before it can exhaust memory", async () => {
+  const root = await createTempDir("deckos-files-list-scan-");
+  await Promise.all(
+    Array.from({ length: 12 }, (_unused, index) =>
+      fs.writeFile(path.join(root, `.hidden-${index}`), "x", "utf8")
+    )
+  );
+
+  // The scan cap bounds work even when nothing survives the hidden-file filter, which
+  // is the case the returned-entry cap alone cannot cover.
+  const scanned = await listDirectory(root, { showHidden: false, maxScanEntries: 3 });
+  expect(scanned.entries).toEqual([]);
+  expect(scanned.truncated).toBe(true);
+
+  const withHidden = await listDirectory(root, { showHidden: true, maxScanEntries: 3 });
+  expect(withHidden.entries.length).toBe(3);
+  expect(withHidden.truncated).toBe(true);
+
+  await fs.remove(root);
+});
+
 test("writeText refuses to save a file larger than it can read back", async () => {
   const root = await createTempDir("deckos-files-write-large-");
   const largePath = path.join(root, "large.log");
@@ -442,6 +513,60 @@ test("writeText replaces content atomically and leaves no temp files behind", as
   await writeText(targetPath, "updated");
   expect(await fs.readFile(targetPath, "utf8")).toBe("updated");
   expect(await fs.readdir(root)).toEqual(["notes.txt"]);
+
+  await fs.remove(root);
+});
+
+test("writeText restores the original file mode onto the replacement", async (ctx) => {
+  if (process.platform === "win32") {
+    // Windows only models the read-only bit, so there is no mode to preserve.
+    ctx.skip();
+    return;
+  }
+  const root = await createTempDir("deckos-files-write-mode-");
+  const targetPath = path.join(root, "config.yaml");
+  await fs.writeFile(targetPath, "original", "utf8");
+  await fs.chmod(targetPath, 0o640);
+  const before = await fs.stat(targetPath);
+
+  // The replacement is a new inode created under the service user's umask, so mode and
+  // ownership are copied across explicitly.
+  await writeText(targetPath, "updated");
+
+  const after = await fs.stat(targetPath);
+  expect(after.mode & 0o777).toBe(0o640);
+  expect(after.uid).toBe(before.uid);
+  expect(after.gid).toBe(before.gid);
+
+  await fs.remove(root);
+});
+
+test("readText reports truncation when the file grows after it is measured", async () => {
+  const root = await createTempDir("deckos-files-read-grow-");
+  const logPath = path.join(root, "live.log");
+  await fs.writeFile(logPath, "x".repeat(512 * 1024), "utf8");
+
+  // Simulates an append landing between getMeta's stat and the read, which is the
+  // normal case for the live logs this editor gets pointed at: the stat reports a
+  // stale, much smaller size.
+  const originalStat = fs.stat.bind(fs);
+  const statSpy = vi.spyOn(fs, "stat").mockImplementation((async (target: fs.PathLike) => {
+    const stats = await originalStat(target as string);
+    if (typeof target === "string" && path.resolve(target) === path.resolve(logPath)) {
+      stats.size = 64;
+    }
+    return stats;
+  }) as unknown as typeof fs.stat);
+
+  try {
+    const result = await readText(logPath, true);
+    // The content is a prefix of a larger file, so it must not be labelled complete —
+    // the editor's read-only handling keys off this flag.
+    expect(result.truncated).toBe(true);
+    expect(result.content.length).toBeGreaterThan(64);
+  } finally {
+    statSpy.mockRestore();
+  }
 
   await fs.remove(root);
 });
