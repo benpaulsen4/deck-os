@@ -48,23 +48,22 @@ This matters because releases are unpacked as `root` into `/opt/deckos`. There i
 
 ## Service Hardening
 
-The DeckOS `systemd` unit sets `PrivateTmp=yes`, `ProtectSystem=yes`, `ProtectHome=read-only`, and `ReadWritePaths=` covering the install root, the data directory, and `/home`.
+The DeckOS `systemd` unit sets `PrivateTmp=yes`, `ProtectSystem=yes`, `ReadOnlyPaths=-/root -/run/user`, and `ReadWritePaths=` covering the install root and the data directory.
 
 Three consequences are worth knowing:
 
-- `/home` stays writable. `ReadWritePaths=` takes precedence over `ProtectHome=`, which is deliberate: the file browser is a headline feature and `/home` is where most people keep the files they want to manage.
+- `/home` stays writable, subject to ordinary file permissions. The file browser is a headline feature and `/home` is where most people keep the files they want to manage, so nothing in the unit makes it read-only. DeckOS runs as the `deckos` user, so it can write its own home directory and anywhere else that user has been granted access — not other users' home directories.
 - `/root` and `/run/user` are read-only, and `/usr` and `/boot` are read-only. The file browser can still read them.
 - `/tmp` as DeckOS sees it is private to the service, so it will not match what you see from a shell on the same host.
 
 `NoNewPrivileges` is deliberately not set, because the restart and shutdown actions rely on `sudo`. These directives contain a compromise; they do not sandbox DeckOS. Membership of the `docker` group remains root-equivalent, so treat the service account as privileged regardless.
 
-If you want the stricter behaviour, where DeckOS cannot write anywhere under `/home` either, drop `-/home` from `ReadWritePaths=` with a drop-in rather than editing the unit, because the installer rewrites the unit on every run:
+If you want the stricter behaviour, where DeckOS cannot write anywhere under `/home`, add it to `ReadOnlyPaths=` with a drop-in rather than editing the unit, because the installer rewrites the unit on every run:
 
 ```bash
 sudo systemctl edit deckos
 # [Service]
-# ReadWritePaths=
-# ReadWritePaths=-/opt/deckos -/var/lib/deckos
+# ReadOnlyPaths=-/root -/run/user -/home
 ```
 
 ## Tokens And Secrets

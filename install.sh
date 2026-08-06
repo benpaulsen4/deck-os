@@ -782,14 +782,20 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 # go through setuid sudo and would break. Membership of the docker group is
 # root-equivalent anyway, so these directives are containment, not a sandbox.
 #
-# ReadWritePaths takes precedence over ProtectHome, so /home stays writable:
-# the file browser is a headline feature and /home is where a home-server
-# user's files live. The net effect of ProtectHome here is that /root and
-# /run/user are read-only.
+# ProtectHome= is deliberately NOT set. 0.4.4 shipped ProtectHome=read-only
+# alongside ReadWritePaths=-/home, on the assumption that ReadWritePaths would
+# win. It does not: systemd documents ReadWritePaths= as an escape hatch for
+# ProtectSystem= only, and every write under /home failed at runtime while the
+# unit started cleanly. The file browser is a headline feature and /home is
+# where a home-server user's files live, so /home must stay writable.
+#
+# The only thing ProtectHome bought here was read-only /root and /run/user,
+# which ReadOnlyPaths= states directly and without the interaction. /root is
+# mode 0700 root-owned, so the deckos user could not read it regardless.
 PrivateTmp=yes
 ProtectSystem=yes
-ProtectHome=read-only
-ReadWritePaths=-${INSTALL_ROOT} -${DATA_DIR} -/home
+ReadOnlyPaths=-/root -/run/user
+ReadWritePaths=-${INSTALL_ROOT} -${DATA_DIR}
 EnvironmentFile=/etc/deckos/deckos.env
 WorkingDirectory=${INSTALL_ROOT}/current
 ExecStartPre=+/usr/local/bin/deckos-fix-cpu-power-perms
