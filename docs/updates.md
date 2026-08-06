@@ -28,11 +28,11 @@ DeckOS keeps the last few releases so you can roll back if needed.
 
 Every DeckOS release is signed, and each release publishes three assets:
 
-| Asset | What it is |
-| --- | --- |
-| `deckos-<version>-linux-<arch>.tar.gz` | the release itself |
-| `SHA256SUMS` | standard `sha256sum` output listing each artifact |
-| `SHA256SUMS.sig` | a raw 64-byte ed25519 signature over `SHA256SUMS` |
+| Asset                                  | What it is                                        |
+| -------------------------------------- | ------------------------------------------------- |
+| `deckos-<version>-linux-<arch>.tar.gz` | the release itself                                |
+| `SHA256SUMS`                           | standard `sha256sum` output listing each artifact |
+| `SHA256SUMS.sig`                       | a raw 64-byte ed25519 signature over `SHA256SUMS` |
 
 DeckOS refuses to install a release it cannot verify. **There is no way to skip verification**, and no setting downgrades a failed check to a warning. This is deliberate: the updater unpacks code that then runs as the `deckos` service user, which is in the `docker` group and can therefore reach root.
 
@@ -65,13 +65,13 @@ The fix is always to publish a signed release, never to bypass the check. If you
 
 ### Other Verification Failures
 
-| Message | What it means |
-| --- | --- |
-| `Release signature verification failed` | `SHA256SUMS` was not signed by the DeckOS release key. Treat the download as untrusted rather than retrying blindly. |
-| `Release checksum mismatch` | The tarball does not match the signed manifest. Usually a corrupt or truncated download, but it can also mean the artifact was tampered with. |
-| `Release asset ... is not named for version X` | The release's tag and its artifacts disagree. DeckOS refuses it rather than installing one version under another version's number. |
-| `Release archive contains deckos-X, not deckos-Y` | The archive is not the version the release claims. Same protection, checked against the archive itself. |
-| `Release signature verification is not configured` | The build you are running was compiled without a real signing key. Rebuild from a release that has one. |
+| Message                                            | What it means                                                                                                                                 |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Release signature verification failed`            | `SHA256SUMS` was not signed by the DeckOS release key. Treat the download as untrusted rather than retrying blindly.                          |
+| `Release checksum mismatch`                        | The tarball does not match the signed manifest. Usually a corrupt or truncated download, but it can also mean the artifact was tampered with. |
+| `Release asset ... is not named for version X`     | The release's tag and its artifacts disagree. DeckOS refuses it rather than installing one version under another version's number.            |
+| `Release archive contains deckos-X, not deckos-Y`  | The archive is not the version the release claims. Same protection, checked against the archive itself.                                       |
+| `Release signature verification is not configured` | The build you are running was compiled without a real signing key. Rebuild from a release that has one.                                       |
 
 ## When A Token Is Required
 
