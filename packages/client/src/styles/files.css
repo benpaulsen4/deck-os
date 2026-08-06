@@ -142,6 +142,14 @@
   gap: 10px;
 }
 
+.files-binary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 .files-binary-title {
   font-size: var(--text-base);
   color: var(--text-primary);

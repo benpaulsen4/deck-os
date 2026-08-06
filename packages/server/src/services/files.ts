@@ -55,6 +55,8 @@ export interface ReadTextResult {
   encoding: "utf-8";
   truncated: boolean;
   readOnlySuggested: boolean;
+  /** True when the extension map did not call this text and the caller forced it open. */
+  forcedTextRead: boolean;
 }
 
 export class FilesAccessDeniedError extends Error {
@@ -239,8 +241,81 @@ function toIsoTime(timestampMs: number): string | null {
   return new Date(timestampMs).toISOString();
 }
 
+/**
+ * Extensions that are plain text but carry no standard MIME type, plus the
+ * dotfile-style names that have no extension at all.
+ *
+ * These are the files a homelab admin actually reaches for - `/etc/fstab`, a
+ * `.env`, a `systemd` unit - and without them the editor refuses to open any of
+ * them. `path.extname(".env")` is `""`, so the whole basename is matched too.
+ */
+const TEXT_CONFIG_EXTENSIONS = new Set([
+  ".conf",
+  ".config",
+  ".cfg",
+  ".ini",
+  ".toml",
+  ".env",
+  ".properties",
+  ".service",
+  ".socket",
+  ".timer",
+  ".target",
+  ".mount",
+  ".path",
+  ".rules",
+  ".list",
+  ".repo",
+  ".pref",
+  ".gitignore",
+  ".gitconfig",
+  ".dockerignore",
+  ".editorconfig",
+  ".patch",
+  ".diff",
+]);
+
+// Deliberately absent: .pem, .crt, .key, .pub, .lock. Those are text often
+// enough to be tempting and binary often enough to matter - a DER-encoded
+// certificate under a .crt name would render as mojibake and save back
+// corrupted. They open through "Open as text", where the content check decides.
+
+const TEXT_CONFIG_BASENAMES = new Set([
+  ".env",
+  ".bashrc",
+  ".bash_profile",
+  ".bash_aliases",
+  ".zshrc",
+  ".profile",
+  ".gitignore",
+  ".gitconfig",
+  ".dockerignore",
+  ".editorconfig",
+  ".npmrc",
+  ".nvmrc",
+  ".vimrc",
+  "dockerfile",
+  "makefile",
+  "fstab",
+  "hosts",
+  "hostname",
+  "passwd",
+  "group",
+  "crontab",
+  "resolv.conf",
+  "sources.list",
+  "authorized_keys",
+  "known_hosts",
+  "license",
+  "readme",
+  "changelog",
+]);
+
 function getMimeTypeFromPath(targetPath: string): string {
   const extension = path.extname(targetPath).toLowerCase();
+  const baseName = path.basename(targetPath).toLowerCase();
+  if (TEXT_CONFIG_EXTENSIONS.has(extension) || TEXT_CONFIG_BASENAMES.has(baseName))
+    return "text/plain";
   if (extension === ".txt" || extension === ".log" || extension === ".md")
     return "text/plain";
   if (extension === ".json") return "application/json";
@@ -293,6 +368,50 @@ function getMimeTypeFromPath(targetPath: string): string {
   if (extension === ".m4a") return "audio/mp4";
   if (extension === ".flac") return "audio/flac";
   return "application/octet-stream";
+}
+
+/**
+ * Content-based fallback for files the extension map cannot classify.
+ *
+ * Extension matching will always be incomplete, so `forceEditable` exists to
+ * open the rest. That escape hatch must not become a way to load a JPEG into a
+ * text editor and save a mangled UTF-8 round-trip over it, so the bytes get a
+ * vote: a NUL byte, or a sequence that is not valid UTF-8, means binary.
+ *
+ * Deliberately conservative. It only has to be right about "is this safe to
+ * round-trip through a string", not about detecting every encoding.
+ */
+function looksBinary(buffer: Buffer): boolean {
+  if (buffer.includes(0)) {
+    return true;
+  }
+  // A truncated read can slice a multi-byte character in half, which is not
+  // evidence of binary content. Decode with a replacement-free check over the
+  // whole buffer minus a possible trailing partial sequence.
+  const trimmed = trimTrailingPartialUtf8(buffer);
+  return !isValidUtf8(trimmed);
+}
+
+/** Drops an incomplete multi-byte UTF-8 sequence from the end of `buffer`. */
+function trimTrailingPartialUtf8(buffer: Buffer): Buffer {
+  for (let back = 1; back <= 3 && back <= buffer.length; back += 1) {
+    const byte = buffer[buffer.length - back] as number;
+    if ((byte & 0xc0) === 0x80) continue; // continuation byte, keep walking back
+    const needed =
+      (byte & 0xe0) === 0xc0 ? 2 : (byte & 0xf0) === 0xe0 ? 3 : (byte & 0xf8) === 0xf0 ? 4 : 1;
+    return needed > back ? buffer.subarray(0, buffer.length - back) : buffer;
+  }
+  return buffer;
+}
+
+function isValidUtf8(buffer: Buffer): boolean {
+  // Node's decoder inserts U+FFFD for invalid input rather than throwing, so a
+  // replacement character that was not already in the bytes means invalid UTF-8.
+  const decoded = new TextDecoder("utf-8", { fatal: false }).decode(buffer);
+  if (!decoded.includes("�")) {
+    return true;
+  }
+  return buffer.includes(Buffer.from("�", "utf8"));
 }
 
 function isTextLikeMimeType(mimeType: string): boolean {
@@ -754,7 +873,11 @@ export async function readText(
   forceEditable: boolean
 ): Promise<ReadTextResult> {
   const fileMeta = await getMeta(inputPath);
-  if (!fileMeta.isTextLike) {
+  // The extension map is the fast path. `forceEditable` is the escape hatch for
+  // everything it has never heard of; the content check below is what keeps that
+  // hatch from being a way to corrupt a binary.
+  const forcedTextRead = !fileMeta.isTextLike;
+  if (forcedTextRead && !forceEditable) {
     throw new FilesNotFileError(fileMeta.path);
   }
   const fileHandle = await openFile(fileMeta.path, "r");
@@ -778,18 +901,46 @@ export async function readText(
   })();
   const truncated = bytesRead > MAX_TEXT_READ_BYTES || bytesRead === readLength;
   const contentBuffer = buffer.subarray(0, Math.min(bytesRead, MAX_TEXT_READ_BYTES));
+  if (forcedTextRead && looksBinary(contentBuffer)) {
+    throw new FilesNotFileError(fileMeta.path);
+  }
   const readOnlySuggested = !forceEditable && fileMeta.size > LARGE_TEXT_READONLY_BYTES;
   return {
     content: contentBuffer.toString("utf8"),
     encoding: "utf-8",
     truncated,
     readOnlySuggested,
+    forcedTextRead,
   };
+}
+
+/**
+ * Whether `writeText` will accept this file: either the extension map calls it
+ * text, or its current bytes read as text. The second arm exists so that a file
+ * opened through `forceEditable` can also be saved - an editor that loads a file
+ * and then refuses to save it is worse than one that never opened it.
+ */
+async function isSafeToReplaceAsText(targetPath: string, size: number): Promise<boolean> {
+  if (isTextLikeMimeType(getMimeTypeFromPath(targetPath))) {
+    return true;
+  }
+  const sampleLength = Math.min(size, MAX_TEXT_READ_BYTES);
+  if (sampleLength === 0) {
+    return true;
+  }
+  const fileHandle = await openFile(targetPath, "r");
+  try {
+    const sample = Buffer.alloc(sampleLength);
+    const { bytesRead } = await fileHandle.read(sample, 0, sampleLength, 0);
+    return !looksBinary(sample.subarray(0, bytesRead));
+  } finally {
+    await fileHandle.close().catch(() => undefined);
+  }
 }
 
 export async function writeText(inputPath: string, content: string): Promise<void> {
   const fileMeta = await getMeta(inputPath);
-  if (!fileMeta.isTextLike) {
+  if (!(await isSafeToReplaceAsText(fileMeta.path, fileMeta.size))) {
     throw new FilesNotFileError(fileMeta.path);
   }
   // readText only ever returned the first MAX_TEXT_READ_BYTES of a larger file, so a

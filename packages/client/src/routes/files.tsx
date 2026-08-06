@@ -383,6 +383,9 @@ function FilesPage() {
   const [clipboard, setClipboard] = useState<ClipboardState>(null);
   const [viewerPath, setViewerPath] = useState<string | null>(null);
   const [forceEditable, setForceEditable] = useState(false);
+  // Set by "Open as text" on the no-preview card, for files the extension map
+  // does not recognise. The server still refuses if the bytes read as binary.
+  const [forceTextView, setForceTextView] = useState(false);
   const [editorContent, setEditorContent] = useState("");
   const [editorBaseline, setEditorBaseline] = useState("");
   const [editorDirty, setEditorDirty] = useState(false);
@@ -523,6 +526,7 @@ function FilesPage() {
 
   useEffect(() => {
     setForceEditable(false);
+    setForceTextView(false);
     setEditorContent("");
     setEditorBaseline("");
     setEditorDirty(false);
@@ -569,12 +573,16 @@ function FilesPage() {
       }
     )
   );
-  const viewerMode = fileMetaQuery.data
+  const detectedViewerMode = fileMetaQuery.data
     ? getViewerMode(fileMetaQuery.data.mimeType)
     : null;
+  // Only "binary" is overridable: an image or a PDF has a real preview, and
+  // forcing those into the editor would be a downgrade rather than an escape hatch.
+  const viewerMode =
+    forceTextView && detectedViewerMode === "binary" ? "text" : detectedViewerMode;
   const readTextQuery = useQuery(
     trpc.files.readText.queryOptions(
-      { path: viewerPath ?? "", forceEditable },
+      { path: viewerPath ?? "", forceEditable: forceEditable || forceTextView },
       {
         enabled: !!viewerPath && viewerMode === "text",
       }
@@ -995,19 +1003,29 @@ function FilesPage() {
                 <div className="files-binary-meta">
                   {formatSize(fileMetaQuery.data?.size ?? null)}
                 </div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() =>
-                    window.open(
-                      `/api/files/download?path=${encodeURIComponent(viewerPath)}`,
-                      "_blank"
-                    )
-                  }
-                >
-                  <Download size={14} />
-                  <span>Download</span>
-                </Button>
+                <div className="files-binary-actions">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setForceTextView(true)}
+                  >
+                    <FileText size={14} />
+                    <span>Open as text</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() =>
+                      window.open(
+                        `/api/files/download?path=${encodeURIComponent(viewerPath)}`,
+                        "_blank"
+                      )
+                    }
+                  >
+                    <Download size={14} />
+                    <span>Download</span>
+                  </Button>
+                </div>
               </div>
             </div>
           )}

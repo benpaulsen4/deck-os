@@ -17,6 +17,7 @@ import {
   listDirectory,
   mkdir,
   move,
+  getMeta,
   readText,
   remove,
   rename,
@@ -585,6 +586,120 @@ test("readText only allocates what the file holds", async () => {
   const empty = await readText(emptyPath, false);
   expect(empty.content).toBe("");
   expect(empty.truncated).toBe(false);
+
+  await fs.remove(root);
+});
+
+test("config files without a known extension are treated as text", async () => {
+  const root = await createTempDir("deckos-files-config-mime-");
+  // A homelab file browser that cannot open these is not much of a file browser.
+  const names = [
+    "app.conf",
+    "settings.ini",
+    "pyproject.toml",
+    ".env",
+    "deckos.service",
+    "fstab",
+    "hosts",
+    "Dockerfile",
+    "known_hosts",
+  ];
+
+  for (const name of names) {
+    const filePath = path.join(root, name);
+    await fs.writeFile(filePath, `# ${name}\nkey=value\n`, "utf8");
+    const meta = await getMeta(filePath);
+    expect(meta.isTextLike, `${name} should be text-like`).toBe(true);
+    const read = await readText(filePath, false);
+    expect(read.content).toContain("key=value");
+  }
+
+  await fs.remove(root);
+});
+
+test("forceEditable opens a file the extension map does not recognise", async () => {
+  const root = await createTempDir("deckos-files-force-unknown-");
+  const oddPath = path.join(root, "notes.unheardof");
+  await fs.writeFile(oddPath, "plain text in a strange suit\n", "utf8");
+
+  // Without the flag the extension map decides, and it has never heard of this.
+  await expect(readText(oddPath, false)).rejects.toBeInstanceOf(FilesNotFileError);
+
+  const forced = await readText(oddPath, true);
+  expect(forced.content).toBe("plain text in a strange suit\n");
+  expect(forced.forcedTextRead).toBe(true);
+
+  await fs.remove(root);
+});
+
+test("forceEditable still refuses genuinely binary content", async () => {
+  const root = await createTempDir("deckos-files-force-binary-");
+  const binaryPath = path.join(root, "blob.unheardof");
+  // A NUL byte is the giveaway; forcing this into a UTF-8 string and saving it
+  // back would silently destroy the file.
+  await fs.writeFile(binaryPath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x1a, 0x0a]));
+
+  await expect(readText(binaryPath, true)).rejects.toBeInstanceOf(FilesNotFileError);
+
+  await fs.remove(root);
+});
+
+test("writeText saves a file that only opened because it was forced", async () => {
+  const root = await createTempDir("deckos-files-force-write-");
+  const oddPath = path.join(root, "notes.unheardof");
+  await fs.writeFile(oddPath, "before\n", "utf8");
+
+  // readText let this through, so a Save from the same editor must not bounce.
+  await readText(oddPath, true);
+  await writeText(oddPath, "after\n");
+  expect(await fs.readFile(oddPath, "utf8")).toBe("after\n");
+
+  await fs.remove(root);
+});
+
+test("writeText refuses to overwrite binary content", async () => {
+  const root = await createTempDir("deckos-files-write-binary-");
+  const binaryPath = path.join(root, "blob.unheardof");
+  await fs.writeFile(binaryPath, Buffer.from([0x00, 0x01, 0x02, 0x03]));
+
+  await expect(writeText(binaryPath, "clobbered")).rejects.toBeInstanceOf(
+    FilesNotFileError
+  );
+  expect(await fs.readFile(binaryPath)).toEqual(Buffer.from([0x00, 0x01, 0x02, 0x03]));
+
+  await fs.remove(root);
+});
+
+test("forced reads keep multi-byte UTF-8 text out of the binary bucket", async () => {
+  const root = await createTempDir("deckos-files-force-utf8-");
+  const utf8Path = path.join(root, "notes.unheardof");
+  // Accents, CJK, an emoji outside the BMP, and a literal replacement character
+  // that was genuinely in the source - none of these are binary.
+  const text = "café 日本語 🚀 straße — ok\u{FFFD}\n";
+  await fs.writeFile(utf8Path, text, "utf8");
+
+  const forced = await readText(utf8Path, true);
+  expect(forced.content).toBe(text);
+  expect(forced.forcedTextRead).toBe(true);
+
+  await writeText(utf8Path, `${text}more\n`);
+  expect(await fs.readFile(utf8Path, "utf8")).toBe(`${text}more\n`);
+
+  await fs.remove(root);
+});
+
+test("a truncated multi-byte character does not look binary", async () => {
+  const root = await createTempDir("deckos-files-force-split-");
+  const splitPath = path.join(root, "split.unheardof");
+  // Ends mid-character: the last 🚀 is cut after two of its four bytes.
+  const rocket = Buffer.from("🚀", "utf8");
+  await fs.writeFile(
+    splitPath,
+    Buffer.concat([Buffer.from("ok ", "utf8"), rocket.subarray(0, 2)])
+  );
+
+  const forced = await readText(splitPath, true);
+  expect(forced.content.startsWith("ok ")).toBe(true);
 
   await fs.remove(root);
 });
