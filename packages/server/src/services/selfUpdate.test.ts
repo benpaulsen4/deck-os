@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { createHash, generateKeyPairSync, randomUUID, sign as cryptoSign } from "node:crypto";
+import {
+  createHash,
+  createPublicKey,
+  generateKeyPairSync,
+  randomUUID,
+  sign as cryptoSign,
+} from "node:crypto";
 import { existsSync, lstatSync, readlinkSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readlink, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -403,13 +409,50 @@ describe("selfUpdate service", () => {
 
     test("refuses to verify while the public key is still the sentinel", async () => {
       const { verifyReleaseSignature } = await importSelfUpdate();
+      const { RELEASE_PUBLIC_KEY_SENTINEL } = await import("../lib/releaseKey.js");
+      const sums = sumsFixture();
+
+      // Passed explicitly rather than reading the shipped constant: a real key
+      // is now compiled in, and the fail-closed behaviour still has to hold for
+      // any future build that ships the placeholder again.
+      expect(() =>
+        verifyReleaseSignature(sums, signBytes(sums), RELEASE_PUBLIC_KEY_SENTINEL)
+      ).toThrow(/still the placeholder/);
+      expect(() => verifyReleaseSignature(sums, signBytes(sums), "")).toThrow(
+        /still the placeholder/
+      );
+    });
+
+    test("ships a real ed25519 public key, not the placeholder", async () => {
+      const { RELEASE_PUBLIC_KEY_PEM, isPlaceholderReleaseKey } = await import(
+        "../lib/releaseKey.js"
+      );
+
+      expect(isPlaceholderReleaseKey(RELEASE_PUBLIC_KEY_PEM)).toBe(false);
+
+      // The updater refuses anything that is not ed25519 SPKI, so a malformed
+      // paste during the key ceremony must fail here rather than at update time
+      // on a user's host.
+      const key = createPublicKey(RELEASE_PUBLIC_KEY_PEM);
+      expect(key.asymmetricKeyType).toBe("ed25519");
+      expect(RELEASE_PUBLIC_KEY_PEM.startsWith("-----BEGIN PUBLIC KEY-----\n")).toBe(true);
+      expect(RELEASE_PUBLIC_KEY_PEM.endsWith("-----END PUBLIC KEY-----\n")).toBe(true);
+      expect(RELEASE_PUBLIC_KEY_PEM).not.toContain("\r");
+    });
+
+    test("rejects a signature made by a different ed25519 key", async () => {
+      const { verifyReleaseSignature } = await importSelfUpdate();
       const { RELEASE_PUBLIC_KEY_PEM } = await import("../lib/releaseKey.js");
       const sums = sumsFixture();
 
-      expect(RELEASE_PUBLIC_KEY_PEM).toBe("REPLACE_WITH_DECKOS_RELEASE_PUBLIC_KEY");
-      expect(() =>
-        verifyReleaseSignature(sums, signBytes(sums), RELEASE_PUBLIC_KEY_PEM)
-      ).toThrow(/still the placeholder/);
+      // Signed with a *different* ed25519 key: proves the shipped key is load
+      // bearing and not merely well formed.
+      const other = generateKeyPairSync("ed25519");
+      const foreign = cryptoSign(null, sums, other.privateKey);
+
+      expect(() => verifyReleaseSignature(sums, foreign, RELEASE_PUBLIC_KEY_PEM)).toThrow(
+        /not signed by the DeckOS release key/
+      );
     });
 
     test("rejects a public key that is not ed25519", async () => {
@@ -926,13 +969,37 @@ describe("selfUpdate service", () => {
     test("refuses to install anything while the signing key is the sentinel", async () => {
       const signed = buildSignedRelease();
       const calls = stubGithub({ release: signed.release, assets: signed.assets });
+      const { RELEASE_PUBLIC_KEY_SENTINEL } = await import("../lib/releaseKey.js");
 
-      const { applyUpdate } = await importSelfUpdate();
-      await expect(applyUpdate()).rejects.toThrow(/still the placeholder/);
+      // The sentinel is injected rather than read off the shipped constant: a
+      // real key is compiled in now, but a build that ever ships the
+      // placeholder again must still refuse before touching the network.
+      await expect(
+        runUpdate({ publicKeyPem: RELEASE_PUBLIC_KEY_SENTINEL })
+      ).rejects.toThrow(/still the placeholder/);
       // Metadata only: no asset was downloaded and nothing was written.
       expect(calls.every((c) => !/\/releases\/assets\//.test(c.url))).toBe(true);
       expect(existsSync(join(releasesDir, "0.4.0"))).toBe(false);
     });
+
+    test.skipIf(!systemTar)(
+      "falls back to the compiled-in release key when no override is given",
+      async () => {
+        // Signed with the test keypair, verified against whatever key the
+        // service picks by default. It must reject - which is only possible if
+        // the default really is the shipped RELEASE_PUBLIC_KEY_PEM and not the
+        // fixture key. This is the wiring the old sentinel assertion covered.
+        const signed = buildSignedRelease();
+        stubGithub({ release: signed.release, assets: signed.assets });
+
+        const { applyUpdate } = await importSelfUpdate();
+        vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+        await expect(
+          applyUpdate(undefined, { tarBinary: systemTar as string })
+        ).rejects.toThrow(/not signed by the DeckOS release key/);
+        expect(existsSync(join(releasesDir, "0.4.0"))).toBe(false);
+      }
+    );
 
     test.skipIf(!systemTar)(
       "rejects a manifest that does not list the downloaded asset",

@@ -14,21 +14,29 @@
  *     byte-identical: here, and inline in `install.sh` (which is fetched standalone
  *     via `curl | bash` and therefore cannot read files out of the repository).
  *
- * The keypair has not been generated yet, so the constant below is still the
- * agreed sentinel. Verification is mandatory: the updater refuses to install
- * anything while the sentinel is in place rather than falling back to an
- * unverified install.
+ * Verification is mandatory: while the key below is the sentinel the updater
+ * refuses to install anything rather than falling back to an unverified
+ * install. The sentinel constant itself must stay a literal - it is what
+ * `isPlaceholderReleaseKey` compares against, so it survives the ceremony.
  */
 export const RELEASE_PUBLIC_KEY_SENTINEL = "REPLACE_WITH_DECKOS_RELEASE_PUBLIC_KEY";
 
 /**
- * ed25519 public key in PEM SPKI form.
+ * ed25519 public key in PEM SPKI form, generated 2026-08-06.
  *
- * Replace with the output of:
- *   openssl pkey -in deckos-release-signing.key -pubout
- * and keep the copy inlined in `install.sh` identical.
+ * Produced by:
+ *   openssl genpkey -algorithm ed25519 -out deckos-release.key
+ *   openssl pkey -in deckos-release.key -pubout
+ *
+ * Written with explicit `\n` escapes rather than a template literal so that
+ * reindenting this file can never inject leading whitespace into the PEM. The
+ * same key is inlined in `install.sh`, which is fetched standalone via
+ * `curl | bash` and so cannot read it from here - the two MUST stay identical.
  */
-export const RELEASE_PUBLIC_KEY_PEM = "REPLACE_WITH_DECKOS_RELEASE_PUBLIC_KEY";
+export const RELEASE_PUBLIC_KEY_PEM =
+  "-----BEGIN PUBLIC KEY-----\n" +
+  "MCowBQYDK2VwAyEAnwysTGZxSPefWzF3LBCdUcihmBM9rVTYVmfaCp+FEcw=\n" +
+  "-----END PUBLIC KEY-----\n";
 
 export const RELEASE_KEY_NOT_CONFIGURED_MESSAGE = [
   "Release signature verification is not configured:",
