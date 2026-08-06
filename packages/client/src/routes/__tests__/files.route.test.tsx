@@ -269,6 +269,28 @@ describe("files route", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
+  it("offers Open as text for a file with no preview, and switches the viewer", async () => {
+    // The extension map has never heard of this, so the server calls it
+    // octet-stream and the viewer lands on the no-preview card.
+    state.meta = { mimeType: "application/octet-stream", size: 512 };
+    state.text = { content: "root=/dev/sda1", truncated: false, readOnlySuggested: false };
+
+    renderWithAppRouter({ initialEntries: ["/files"] });
+    fireEvent.doubleClick(await screen.findByText("note.txt"));
+
+    expect(await screen.findByText("Preview not available")).toBeInTheDocument();
+    const openAsText = screen.getByRole("button", { name: /Open as text/i });
+
+    fireEvent.click(openAsText);
+
+    // The card is replaced by the editor, and Save is live: a file opened this
+    // way that could not be saved would be worse than not opening it.
+    await waitFor(() => {
+      expect(screen.queryByText("Preview not available")).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+  });
+
   it("preserves row interaction semantics for selection and open", async () => {
     renderWithAppRouter({ initialEntries: ["/files"] });
     fireEvent.click(await screen.findByText("note.txt"));
