@@ -16,7 +16,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 install_script="${repo_root}/install.sh"
 migrate_script="${repo_root}/migrate-install-defaults.sh"
 
-DIRECTIVE_PATTERN='^(Type|User|Group|SupplementaryGroups|AmbientCapabilities|CapabilityBoundingSet|NoNewPrivileges|PrivateTmp|ProtectSystem|ProtectHome|ProtectKernelTunables|ReadWritePaths|EnvironmentFile|WorkingDirectory|ExecStartPre|ExecStart|Restart|RestartSec)='
+DIRECTIVE_PATTERN='^(Type|User|Group|SupplementaryGroups|AmbientCapabilities|CapabilityBoundingSet|NoNewPrivileges|PrivateTmp|ProtectSystem|ProtectHome|ProtectKernelTunables|ReadOnlyPaths|ReadWritePaths|EnvironmentFile|WorkingDirectory|ExecStartPre|ExecStart|Restart|RestartSec)='
 
 extract_directives() {
   grep -Eo "${DIRECTIVE_PATTERN}.*" "$1" | sort

@@ -50,6 +50,12 @@ jobs:
       - name: Check systemd unit templates are in sync
         run: bash scripts/check-unit-template-sync.sh
 
+      # 0.4.4 shipped a unit that started cleanly and then failed every write
+      # under /home, because ReadWritePaths= does not override ProtectHome=.
+      # Nothing in bash -n, shellcheck or a unit parser catches that.
+      - name: Check systemd unit hardening is self-consistent
+        run: bash scripts/check-unit-hardening.sh
+
       # Same problem for the override maps in package.json and
       # pnpm-workspace.yaml. Node is preinstalled on the runner image and this
       # script has no dependencies, so it needs no pnpm install.
