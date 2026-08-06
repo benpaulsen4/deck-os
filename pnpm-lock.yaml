@@ -6,19 +6,19 @@ settings:
 
 overrides:
   '@protobufjs/utf8@<=1.1.0': '>=1.1.1'
-  wait-on@9.0.5>axios: 1.16.1
-  '@babel/core': 7.29.7
-  '@grpc/grpc-js': 1.14.4
-  dockerode>@grpc/grpc-js: 1.14.4
-  brace-expansion@>=3.0.0 <5.0.8: 5.0.8
+  '@babel/core': ^7.29.7
+  '@grpc/grpc-js': ^1.14.4
+  dockerode>@grpc/grpc-js: ^1.14.4
+  brace-expansion@>=3.0.0 <5.0.9: ^5.0.9
   test-exclude>glob: ^11.0.0
-  flatted: 3.4.2
-  follow-redirects: 1.16.0
+  flatted: ^3.4.2
+  follow-redirects: ^1.16.0
+  hono: ^4.12.34
   postcss: '>=8.5.18'
   shell-quote: '>=1.9.0'
-  dockerode>protobufjs: 7.6.5
-  '@grpc/proto-loader@0.7.15>protobufjs': 7.6.5
-  '@grpc/proto-loader@0.8.0>protobufjs': 7.6.5
+  undici: ^7.29.0
+  dockerode>protobufjs: ^7.6.5
+  '@grpc/proto-loader>protobufjs': ^7.6.5
 
 importers:
 
@@ -213,14 +213,14 @@ importers:
         specifier: workspace:*
         version: link:../contracts
       '@grpc/grpc-js':
-        specifier: 1.14.4
+        specifier: ^1.14.4
         version: 1.14.4
       '@hono/node-server':
         specifier: ^2.0.11
-        version: 2.0.11(hono@4.12.32)
+        version: 2.0.11(hono@4.13.0)
       '@hono/trpc-server':
         specifier: ^0.4.2
-        version: 0.4.2(@trpc/server@11.9.0(typescript@5.9.3))(hono@4.12.32)
+        version: 0.4.2(@trpc/server@11.9.0(typescript@5.9.3))(hono@4.13.0)
       '@trpc/server':
         specifier: ^11.9.0
         version: 11.9.0(typescript@5.9.3)
@@ -234,8 +234,8 @@ importers:
         specifier: ^11.3.3
         version: 11.3.3
       hono:
-        specifier: ^4.12.27
-        version: 4.12.32
+        specifier: ^4.12.34
+        version: 4.13.0
       protobufjs:
         specifier: 7.6.5
         version: 7.6.5
@@ -336,7 +336,7 @@ packages:
     resolution: {integrity: sha512-UPUVSyXbOh627KiCIGQSgwWzGeBKLkaJ9PJEdrngIwMSzxLR4jS4+f1f1jb7VzBbg8nFLaYotvVPFCTqdrmTAg==}
     engines: {node: '>=6.9.0'}
     peerDependencies:
-      '@babel/core': 7.29.7
+      '@babel/core': ^7.29.7
 
   '@babel/helper-plugin-utils@7.29.7':
     resolution: {integrity: sha512-G7sHYigPY17oO5SYWnfD/0MTBwVR781S/JI643e/JhUYgVgWE/61SoW3NH9KWUKyKq5LVh3npif99Wkt6j86Jw==}
@@ -367,13 +367,13 @@ packages:
     resolution: {integrity: sha512-TL0hMc9xzy86VD31nUiwzd5otRAcyEPcsegCxolO0PvcXuH1v0kECe/UIznYFihpkvU5wg/jk4v0TTEFfm53fw==}
     engines: {node: '>=6.9.0'}
     peerDependencies:
-      '@babel/core': 7.29.7
+      '@babel/core': ^7.29.7
 
   '@babel/plugin-transform-react-jsx-source@7.29.7':
     resolution: {integrity: sha512-06IyK09H3wi4cGbhDBwp5gUGo0IKtnYa8tyTiephirPCK6fbobVGiXMMI5zLQ4aKEYP3wZ3ArU44o+8KMrSG/Q==}
     engines: {node: '>=6.9.0'}
     peerDependencies:
-      '@babel/core': 7.29.7
+      '@babel/core': ^7.29.7
 
   '@babel/runtime@7.29.2':
     resolution: {integrity: sha512-JiDShH45zKHWyGe4ZNVRrCjBz8Nh9TMmZG1kh4QTK8hCBTWBi8Da+i7s1fJw7/lYpM4ccepSNfqzZ/QvABBi5g==}
@@ -950,14 +950,14 @@ packages:
     resolution: {integrity: sha512-bjD221KPLoJTWUwso1J6fGKiTXEUFedG/s0visavY4zakFPkeGURMRNly+FhBHs7T8Dz4qHaZIMX9ZoJHSJtKA==}
     engines: {node: '>=20'}
     peerDependencies:
-      hono: ^4
+      hono: ^4.12.34
 
   '@hono/trpc-server@0.4.2':
     resolution: {integrity: sha512-3TDrc42CZLgcTFkXQba+y7JlRWRiyw1AqhLqztWyNS2IFT+3bHld0lxKdGBttCtGKHYx0505dM67RMazjhdZqw==}
     engines: {node: '>=16.0.0'}
     peerDependencies:
       '@trpc/server': ^10.10.0 || >11.0.0-rc
-      hono: '>=4.0.0'
+      hono: ^4.12.34
 
   '@humanfs/core@0.19.1':
     resolution: {integrity: sha512-5DyQ4+1JEUzejeK1JGICcideyfUbGixgS9jNgex5nqkW+cY7WZhxBigmieN5Qnw9ZosSNVC9KQKyb+GUaGyKUA==}
@@ -1638,8 +1638,8 @@ packages:
   bl@4.1.0:
     resolution: {integrity: sha512-1W07cM9gS6DcLperZfFSj+bWLtaPGSOHWhPiGzXmvVJbRLdG82sH/Kn8EtW1VqWVA54AKf2h5k5BbnIbwF3h6w==}
 
-  brace-expansion@5.0.8:
-    resolution: {integrity: sha512-JZyDyq3D4AUifKTPOB7DELf6XsB3WdPuNxCtob1vFXPsSXhdAiHBWJ/tJ8HAc9aH84BK+5JFZLNkJKx3G9kzQg==}
+  brace-expansion@5.0.9:
+    resolution: {integrity: sha512-ScQ4IuvIEF1TMlP7Zt+vjJ//9zlPb2SDcxWxM3bk8s6t6GGdJ7KO1dCcTidOPJKePW30LE/2cT7wCyPho9/Wxg==}
     engines: {node: 20 || >=22}
 
   braces@3.0.3:
@@ -2062,8 +2062,8 @@ packages:
   headers-polyfill@4.0.3:
     resolution: {integrity: sha512-IScLbePpkvO846sIwOtOTDjutRMWdXdJmXdMvk6gCBHxFO8d+QKOQedyZSxFTTFYRSmlgSTDtXqqq4pcenBXLQ==}
 
-  hono@4.12.32:
-    resolution: {integrity: sha512-XcuyW9qE2kJn07PkecMOBd5Vq/hMy7mmGw+idz1yblbg9N17ijJODrvPkn7/dwL3Kulj8LcRJ69DLOWf91dRUg==}
+  hono@4.13.0:
+    resolution: {integrity: sha512-jhunvfHWxd7J5EFfSgH4xsYJzSe/lfqbUCxiyyeaQasUsXeEHXtzVid+7EOGByc5JnFa23SSFL3Y2RV/z1T+eQ==}
     engines: {node: '>=16.9.0'}
 
   html-encoding-sniffer@6.0.0:
@@ -2739,8 +2739,8 @@ packages:
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
-  undici@7.28.0:
-    resolution: {integrity: sha512-cRZYrTDwWznlnRiPjggAGxZXanty6M8RV1ff8Wm4LWXBp7/IG8v5DnOm74DtUBp9OONpK75YlPnIjQqX0dBDtA==}
+  undici@7.29.0:
+    resolution: {integrity: sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw==}
     engines: {node: '>=20.18.1'}
 
   universalify@2.0.1:
@@ -3599,14 +3599,14 @@ snapshots:
     dependencies:
       '@hapi/hoek': 11.0.7
 
-  '@hono/node-server@2.0.11(hono@4.12.32)':
+  '@hono/node-server@2.0.11(hono@4.13.0)':
     dependencies:
-      hono: 4.12.32
+      hono: 4.13.0
 
-  '@hono/trpc-server@0.4.2(@trpc/server@11.9.0(typescript@5.9.3))(hono@4.12.32)':
+  '@hono/trpc-server@0.4.2(@trpc/server@11.9.0(typescript@5.9.3))(hono@4.13.0)':
     dependencies:
       '@trpc/server': 11.9.0(typescript@5.9.3)
-      hono: 4.12.32
+      hono: 4.13.0
 
   '@humanfs/core@0.19.1': {}
 
@@ -4339,7 +4339,7 @@ snapshots:
       inherits: 2.0.4
       readable-stream: 3.6.2
 
-  brace-expansion@5.0.8:
+  brace-expansion@5.0.9:
     dependencies:
       balanced-match: 4.0.4
 
@@ -4827,7 +4827,7 @@ snapshots:
 
   headers-polyfill@4.0.3: {}
 
-  hono@4.12.32: {}
+  hono@4.13.0: {}
 
   html-encoding-sniffer@6.0.0:
     dependencies:
@@ -4940,7 +4940,7 @@ snapshots:
       saxes: 6.0.0
       symbol-tree: 3.2.4
       tough-cookie: 6.0.1
-      undici: 7.28.0
+      undici: 7.29.0
       w3c-xmlserializer: 5.0.0
       webidl-conversions: 8.0.1
       whatwg-mimetype: 5.0.0
@@ -5028,7 +5028,7 @@ snapshots:
 
   minimatch@10.2.5:
     dependencies:
-      brace-expansion: 5.0.8
+      brace-expansion: 5.0.9
 
   minimist@1.2.8: {}
 
@@ -5472,7 +5472,7 @@ snapshots:
 
   undici-types@6.21.0: {}
 
-  undici@7.28.0: {}
+  undici@7.29.0: {}
 
   universalify@2.0.1: {}
 

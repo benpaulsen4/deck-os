@@ -20,17 +20,19 @@ When DeckOS updates itself:
 6. it switches `/opt/deckos/current` to the new release
 7. it exits so `systemd` can restart it cleanly
 
+If any check fails the update stops there. Nothing is unpacked and the running release is left in place, so a rejected update is a no-op rather than a half-applied one.
+
 DeckOS keeps the last few releases so you can roll back if needed.
 
 ## Release Signing
 
 Every DeckOS release is signed, and each release publishes three assets:
 
-| Asset | What it is |
-| --- | --- |
-| `deckos-<version>-linux-<arch>.tar.gz` | the release itself |
-| `SHA256SUMS` | standard `sha256sum` output listing each artifact |
-| `SHA256SUMS.sig` | a raw 64-byte ed25519 signature over `SHA256SUMS` |
+| Asset                                  | What it is                                        |
+| -------------------------------------- | ------------------------------------------------- |
+| `deckos-<version>-linux-<arch>.tar.gz` | the release itself                                |
+| `SHA256SUMS`                           | standard `sha256sum` output listing each artifact |
+| `SHA256SUMS.sig`                       | a raw 64-byte ed25519 signature over `SHA256SUMS` |
 
 DeckOS refuses to install a release it cannot verify. **There is no way to skip verification**, and no setting downgrades a failed check to a warning. This is deliberate: the updater unpacks code that then runs as the `deckos` service user, which is in the `docker` group and can therefore reach root.
 
@@ -63,13 +65,13 @@ The fix is always to publish a signed release, never to bypass the check. If you
 
 ### Other Verification Failures
 
-| Message | What it means |
-| --- | --- |
-| `Release signature verification failed` | `SHA256SUMS` was not signed by the DeckOS release key. Treat the download as untrusted rather than retrying blindly. |
-| `Release checksum mismatch` | The tarball does not match the signed manifest. Usually a corrupt or truncated download, but it can also mean the artifact was tampered with. |
-| `Release asset ... is not named for version X` | The release's tag and its artifacts disagree. DeckOS refuses it rather than installing one version under another version's number. |
-| `Release archive contains deckos-X, not deckos-Y` | The archive is not the version the release claims. Same protection, checked against the archive itself. |
-| `Release signature verification is not configured` | The build you are running was compiled without a real signing key. Rebuild from a release that has one. |
+| Message                                            | What it means                                                                                                                                 |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Release signature verification failed`            | `SHA256SUMS` was not signed by the DeckOS release key. Treat the download as untrusted rather than retrying blindly.                          |
+| `Release checksum mismatch`                        | The tarball does not match the signed manifest. Usually a corrupt or truncated download, but it can also mean the artifact was tampered with. |
+| `Release asset ... is not named for version X`     | The release's tag and its artifacts disagree. DeckOS refuses it rather than installing one version under another version's number.            |
+| `Release archive contains deckos-X, not deckos-Y`  | The archive is not the version the release claims. Same protection, checked against the archive itself.                                       |
+| `Release signature verification is not configured` | The build you are running was compiled without a real signing key. Rebuild from a release that has one.                                       |
 
 ## When A Token Is Required
 
@@ -90,23 +92,40 @@ After rolling back, the `Updates` panel will offer the newer release again. Clic
 
 ## Uninstall
 
-1. Run the hosted uninstall script on the DeckOS host. Use the same custom paths or service name you used at install time if you changed them.
+1. Run the hosted uninstall script on the DeckOS host. It reads your install root and data directory back out of `/etc/deckos/deckos.env`, so you no longer have to remember what you passed at install time.
 
 ```bash
 curl -fsSL https://script.benpaulsen.tech/uninstall-deckos | sudo bash
 ```
 
-2. If you installed with custom values, pass them through `bash -s --`:
+2. The script prints exactly what it is about to delete and waits for confirmation. It reads your answer from `/dev/tty`, so it still prompts normally when piped from an interactive shell. Pass `--yes` to skip the prompt, which you will need in a script, a CI job, or anywhere else with no controlling terminal. Use `--dry-run` first if you want to see the plan without removing anything:
 
 ```bash
-curl -fsSL https://script.benpaulsen.tech/uninstall-deckos | sudo bash -s -- --install-root /opt/deckos --data-dir /var/lib/deckos --service-name deckos
+curl -fsSL https://script.benpaulsen.tech/uninstall-deckos | sudo bash -s -- --dry-run
 ```
 
-3. Expect the uninstall script to remove the DeckOS service, `/etc/deckos`, the install root, and the DeckOS data directory. It leaves Docker and Node.js installed.
+3. Override the detected values only if you need to. `--keep-data` preserves the data directory:
+
+```bash
+curl -fsSL https://script.benpaulsen.tech/uninstall-deckos | sudo bash -s -- \
+  --install-root /opt/deckos --data-dir /var/lib/deckos --service-name deckos --keep-data --yes
+```
+
+4. Expect the uninstall script to remove:
+
+- the DeckOS `systemd` unit (stopped, disabled, then deleted)
+- `/etc/sudoers.d/deckos-power`, the passwordless reboot and shutdown rule
+- `/usr/local/bin/deckos-node` and `/usr/local/bin/deckos-fix-cpu-power-perms`
+- `/etc/deckos`
+- the install root
+- the data directory, unless `--keep-data` was passed
+- the `deckos` user and group
+
+It leaves Docker and Node.js installed.
 
 ## Important Uninstall Note
 
-If you installed DeckOS with custom values such as `--install-root`, `--data-dir`, or `--service-name`, use the same values when running the uninstall command. Otherwise, you may remove the wrong service or leave part of the installation behind.
+The uninstall script defaults to the paths recorded in `/etc/deckos/deckos.env` and refuses paths that are not plausibly DeckOS directories, so a mistyped `--data-dir /var/lib` is rejected rather than acted on. Passing custom values is still only necessary when the env file is missing or you are removing an install whose paths have since changed.
 
 ## Before You Update Or Remove DeckOS
 

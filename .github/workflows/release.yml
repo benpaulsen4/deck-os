@@ -11,32 +11,42 @@ on:
         required: true
         type: string
 
+# Least privilege by default; the publishing job opts in to contents: write.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-and-release:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
+      # All actions are pinned to a full commit SHA. A floating tag is mutable,
+      # and this job holds contents: write over the exact artifact that every
+      # user's installer unpacks as root.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag || github.ref_name }}
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24"
           cache: "pnpm"
 
       - name: Verify tag matches package.json
         shell: bash
+        # TAG_NAME goes through env rather than ${{ }} interpolation into the
+        # script body: the v*.*.* trigger is a glob, so a tag containing shell
+        # metacharacters would otherwise be substituted before bash parses it.
+        env:
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          TAG_NAME="${{ inputs.tag || github.ref_name }}"
           TAG="${TAG_NAME#v}"
           if [ "$VERSION" != "$TAG" ]; then
             echo "package.json version ($VERSION) does not match tag ($TAG_NAME)"
@@ -78,9 +88,79 @@ jobs:
           grep -qE '^deckos-[0-9]+\.[0-9]+\.[0-9]+/packages/server/dist/index\.js$' dist/release/tar-contents.txt
           grep -qE '^deckos-[0-9]+\.[0-9]+\.[0-9]+/packages/server/node_modules/hono(/|$)' dist/release/tar-contents.txt
 
+      # Produces the two assets every DeckOS client verifies before unpacking:
+      #   SHA256SUMS      standard `sha256sum` output, one line per artifact
+      #   SHA256SUMS.sig  raw 64-byte ed25519 signature over SHA256SUMS
+      - name: Sign release artifacts
+        shell: bash
+        env:
+          DECKOS_RELEASE_SIGNING_KEY: ${{ secrets.DECKOS_RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DECKOS_RELEASE_SIGNING_KEY}" ]; then
+            echo "::error::DECKOS_RELEASE_SIGNING_KEY is not set."
+            echo "Refusing to publish an unsigned release: install.sh and the in-app"
+            echo "updater both verify SHA256SUMS.sig and abort when it is missing or"
+            echo "fails to validate, so an unsigned release would be rejected by every"
+            echo "updated client."
+            echo ""
+            echo "Generate the keypair and store the private half as a repository secret:"
+            echo "  openssl genpkey -algorithm ed25519 -out deckos-release.key"
+            echo "  gh secret set DECKOS_RELEASE_SIGNING_KEY < deckos-release.key"
+            exit 1
+          fi
+
+          KEY_FILE="${RUNNER_TEMP}/deckos-release.key"
+          PUB_FILE="${RUNNER_TEMP}/deckos-release.pub"
+          umask 077
+          printf '%s\n' "${DECKOS_RELEASE_SIGNING_KEY}" > "$KEY_FILE"
+
+          if ! openssl pkey -in "$KEY_FILE" -noout 2>/dev/null; then
+            echo "::error::DECKOS_RELEASE_SIGNING_KEY is not a readable PEM private key."
+            rm -f "$KEY_FILE"
+            exit 1
+          fi
+          if ! openssl pkey -in "$KEY_FILE" -text -noout 2>/dev/null | grep -qi 'ED25519'; then
+            echo "::error::DECKOS_RELEASE_SIGNING_KEY is not an ed25519 key."
+            rm -f "$KEY_FILE"
+            exit 1
+          fi
+          openssl pkey -in "$KEY_FILE" -pubout -out "$PUB_FILE"
+
+          cd dist/release
+          rm -f SHA256SUMS SHA256SUMS.sig
+          # Basenames only, so the manifest entries match the published asset names.
+          sha256sum -- *.tar.gz > SHA256SUMS
+          echo "SHA256SUMS:"
+          cat SHA256SUMS
+
+          openssl pkeyutl -sign -inkey "$KEY_FILE" -rawin \
+            -in SHA256SUMS -out SHA256SUMS.sig
+          rm -f "$KEY_FILE"
+
+          SIG_BYTES="$(stat -c%s SHA256SUMS.sig)"
+          if [ "$SIG_BYTES" -ne 64 ]; then
+            echo "::error::Expected a raw 64-byte ed25519 signature, produced ${SIG_BYTES} bytes."
+            exit 1
+          fi
+
+          # Self-check with the public half, exactly as install.sh will.
+          openssl pkeyutl -verify -pubin -inkey "$PUB_FILE" -rawin \
+            -sigfile SHA256SUMS.sig -in SHA256SUMS
+
+          echo ""
+          echo "Public key for this signature (must match install.sh and"
+          echo "packages/server/src/lib/releaseKey.ts byte for byte):"
+          cat "$PUB_FILE"
+          rm -f "$PUB_FILE"
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
           name: ${{ inputs.tag || github.ref_name }}
-          files: dist/release/*.tar.gz
+          files: |
+            dist/release/*.tar.gz
+            dist/release/SHA256SUMS
+            dist/release/SHA256SUMS.sig
