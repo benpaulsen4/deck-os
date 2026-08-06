@@ -166,8 +166,10 @@ export async function startPullJob(appId: string): Promise<PullJobSnapshot> {
       controller.signal
     )
     .then(() => {
+      // A job cancelled or timed out while the pull was in flight has already
+      // reached a terminal state; never overwrite it with success.
       const j = jobs.get(jobId);
-      if (!j) return;
+      if (!j || j.status !== "running") return;
       j.status = "done";
       j.finishedAt = Date.now();
       j.progress = {
@@ -182,7 +184,7 @@ export async function startPullJob(appId: string): Promise<PullJobSnapshot> {
     })
     .catch((err: unknown) => {
       const j = jobs.get(jobId);
-      if (!j) return;
+      if (!j || j.status !== "running") return;
       j.status = "error";
       j.finishedAt = Date.now();
       j.error = err instanceof Error ? err.message : "Pull failed";
@@ -195,9 +197,23 @@ export async function startPullJob(appId: string): Promise<PullJobSnapshot> {
   return { jobId, appId, status: "running", progress: initialProgress };
 }
 
+/**
+ * Marks the job as cancelled up front rather than waiting for the pull to
+ * unwind: aborting only destroys the progress stream, and docker-modem reports
+ * a destroyed stream as a completed pull.
+ */
 export function cancelPullJob(jobId: string): boolean {
   const job = jobs.get(jobId);
   if (!job) return false;
+  if (job.status !== "running") return false;
+
   job.controller.abort();
+  job.status = "error";
+  job.error = "Pull cancelled";
+  job.finishedAt = Date.now();
+  notifyPullJobUpdate(jobId);
+  if (runningByAppId.get(job.appId) === jobId) {
+    runningByAppId.delete(job.appId);
+  }
   return true;
 }

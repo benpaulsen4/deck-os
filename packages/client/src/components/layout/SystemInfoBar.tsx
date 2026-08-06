@@ -8,8 +8,16 @@ export function SystemInfoBar() {
   const { data: apps } = useQuery(trpc.apps.list.queryOptions());
   const appIds = apps?.map((app) => app.id) ?? [];
   const { data: batchStatuses } = useQuery({
-    queryKey: ["systemInfoBarStackStatusBatch", appIds],
+    // Same key as `useAppStatus` on purpose: a private key ran the identical
+    // 5s `docker.getStatuses` poll a second time and, because the two
+    // `invalidateStatusQueries` call sites only target this key, left the
+    // CONTAINERS counter stale after a start/stop.
+    queryKey: ["stackStatusBatch", appIds],
     queryFn: async () => await trpcClient.docker.getStatuses.query({ appIds }),
+    // NOTE: `useAppStatus` additionally gates this key on the auth state. React
+    // Query runs a query if *any* observer is enabled, so that gate now survives
+    // only because this bar renders inside the unlocked shell. Keep it that way,
+    // or pass the auth state in.
     enabled: appIds.length > 0,
     refetchInterval: 5000,
   });

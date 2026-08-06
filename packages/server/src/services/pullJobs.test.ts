@@ -91,20 +91,25 @@ describe("pullJobs service", () => {
     expect(updates.some((entry) => entry.status === "done")).toBe(true);
   });
 
-  test("cancelPullJob aborts running job and error state is observable", async () => {
+  test("cancelPullJob reports an error even when the aborted pull resolves", async () => {
     const { pullJobs, getAppMock, pullImagesWithProgressMock } = await loadPullJobsModule();
     getAppMock.mockResolvedValue(createMockApp());
 
+    // The mock must RESOLVE on abort, not reject: docker-modem's followProgress
+    // treats a destroyed stream as a completed download. A mock that rejects is
+    // what previously hid a cancelled pull being reported as a successful one.
     let capturedSignal: AbortSignal | undefined;
+    let resolvePull: () => void = () => undefined;
     pullImagesWithProgressMock.mockImplementation(
       (
         _images: string[],
         _onProgress: (progress: PullOverallProgress) => void,
         signal?: AbortSignal
       ) =>
-        new Promise<void>((_resolve, reject) => {
+        new Promise<void>((resolve) => {
           capturedSignal = signal;
-          signal?.addEventListener("abort", () => reject(new Error("Pull aborted")));
+          resolvePull = resolve;
+          signal?.addEventListener("abort", () => resolve());
         })
     );
 
@@ -113,9 +118,21 @@ describe("pullJobs service", () => {
     expect(cancelled).toBe(true);
     expect(capturedSignal?.aborted).toBe(true);
 
+    resolvePull();
     await new Promise((resolve) => setTimeout(resolve, 0));
+
     const snapshot = pullJobs.getPullJob(job.jobId);
     expect(snapshot?.status).toBe("error");
-    expect(snapshot?.error).toBe("Pull aborted");
+    expect(snapshot?.error).toBe("Pull cancelled");
+    expect(snapshot?.progress.percent).not.toBe(100);
+
+    // The per-app lock must be released, otherwise the app stays pinned until
+    // the 2 hour running TTL expires.
+    const next = await pullJobs.startPullJob("my-app");
+    expect(next.jobId).not.toBe(job.jobId);
+    expect(next.status).toBe("running");
+
+    // Cancelling an already-finished job is a no-op.
+    expect(pullJobs.cancelPullJob(job.jobId)).toBe(false);
   });
 });

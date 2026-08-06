@@ -12,15 +12,66 @@ DeckOS supports in-app update checks and host-level rollback. The goal is to mak
 
 When DeckOS updates itself:
 
-1. it downloads the selected release tarball, plus the `SHA256SUMS` manifest and its `SHA256SUMS.sig` signature
-2. it verifies the `ed25519` signature over the manifest, then checks the tarball against its entry in that manifest
-3. it unpacks the verified tarball into a new release directory
-4. it switches `/opt/deckos/current` to the new release
-5. it exits so `systemd` can restart it cleanly
+1. it downloads the release's `SHA256SUMS` manifest and the detached `SHA256SUMS.sig` signature
+2. it verifies that signature against the DeckOS release signing key, and stops if it does not match
+3. it downloads the selected release tarball and checks its SHA-256 against the signed manifest
+4. it confirms the archive really is the version being installed, and inspects every file in it
+5. it unpacks it into a new release directory
+6. it switches `/opt/deckos/current` to the new release
+7. it exits so `systemd` can restart it cleanly
 
-Verification is not optional. If a release does not publish all three assets, or the signature does not validate, the update stops before anything is unpacked and the running release is left untouched.
+If any check fails the update stops there. Nothing is unpacked and the running release is left in place, so a rejected update is a no-op rather than a half-applied one.
 
-DeckOS keeps the previous release so you can roll back if needed.
+DeckOS keeps the last few releases so you can roll back if needed.
+
+## Release Signing
+
+Every DeckOS release is signed, and each release publishes three assets:
+
+| Asset | What it is |
+| --- | --- |
+| `deckos-<version>-linux-<arch>.tar.gz` | the release itself |
+| `SHA256SUMS` | standard `sha256sum` output listing each artifact |
+| `SHA256SUMS.sig` | a raw 64-byte ed25519 signature over `SHA256SUMS` |
+
+DeckOS refuses to install a release it cannot verify. **There is no way to skip verification**, and no setting downgrades a failed check to a warning. This is deliberate: the updater unpacks code that then runs as the `deckos` service user, which is in the `docker` group and can therefore reach root.
+
+You can verify a release by hand using the same public key DeckOS uses, which is published inline in `install.sh`:
+
+```bash
+# in a directory holding the tarball, SHA256SUMS and SHA256SUMS.sig
+openssl pkeyutl -verify -pubin -inkey deckos-release-signing.pub \
+  -rawin -in SHA256SUMS -sigfile SHA256SUMS.sig
+sha256sum --check --ignore-missing SHA256SUMS
+```
+
+### If An Update Fails With A Missing Signature
+
+If `UPDATE NOW` fails with:
+
+```
+Release is missing the "SHA256SUMS" asset, so its integrity cannot be verified.
+```
+
+the release you are trying to install was published before release signing existed, or was published without the signing secret configured. DeckOS will not install it.
+
+This is expected during the changeover, and it is not something to configure around:
+
+- a release published **before** signing was introduced cannot be installed by a DeckOS version that requires signatures;
+- the **first signed release must be published** before a signing-aware host can update at all;
+- hosts still running a version that predates signing are unaffected until they move onto a signed release.
+
+The fix is always to publish a signed release, never to bypass the check. If you run your own fork, generate a signing keypair, set the `DECKOS_RELEASE_SIGNING_KEY` repository secret used by the release workflow, and publish the matching public key in `install.sh` and in `packages/server/src/lib/releaseKey.ts`.
+
+### Other Verification Failures
+
+| Message | What it means |
+| --- | --- |
+| `Release signature verification failed` | `SHA256SUMS` was not signed by the DeckOS release key. Treat the download as untrusted rather than retrying blindly. |
+| `Release checksum mismatch` | The tarball does not match the signed manifest. Usually a corrupt or truncated download, but it can also mean the artifact was tampered with. |
+| `Release asset ... is not named for version X` | The release's tag and its artifacts disagree. DeckOS refuses it rather than installing one version under another version's number. |
+| `Release archive contains deckos-X, not deckos-Y` | The archive is not the version the release claims. Same protection, checked against the archive itself. |
+| `Release signature verification is not configured` | The build you are running was compiled without a real signing key. Rebuild from a release that has one. |
 
 ## When A Token Is Required
 
@@ -28,13 +79,16 @@ DeckOS checks GitHub Releases using anonymous access first. If the release sourc
 
 ## Manual Rollback
 
-1. If an update causes trouble, point the live symlink back to the previous release. DeckOS keeps the prior release directory specifically so this is possible.
+1. If an update causes trouble, point the live symlink back to the previous release. DeckOS keeps recent release directories specifically so this is possible.
 2. Restart the service so `systemd` starts the older release again.
 
 ```bash
+ls /opt/deckos/releases            # see which versions are still on disk
 sudo ln -sfn /opt/deckos/releases/<old-version> /opt/deckos/current
 sudo systemctl restart deckos
 ```
+
+After rolling back, the `Updates` panel will offer the newer release again. Clicking `UPDATE NOW` re-links the already-downloaded release and restarts, rather than downloading it a second time.
 
 ## Uninstall
 

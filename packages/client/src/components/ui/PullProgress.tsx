@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { authFetch, emitUnauthorizedEvent, fetchAuthStatus } from "../../lib/auth";
 
 interface PullProgressProps {
@@ -45,12 +45,34 @@ async function safeJson(res: Response): Promise<unknown | null> {
   }
 }
 
+/**
+ * Deliberately says "stopped watching", not "stopped pulling".
+ *
+ * Cancel aborts the client's request and closes the SSE stream, but the server's
+ * pull job runs to completion: `cancelPullJob(jobId)` already exists in
+ * `packages/server/src/services/pullJobs.ts:198` (it holds a live
+ * `AbortController` per job) and simply has no HTTP route -- `runtimeRoutes.ts`
+ * exposes only `POST /api/apps/:appId/pull/start` and the `GET /api/pull/:jobId`
+ * stream. Until a `POST /api/pull/:jobId/cancel` exists and is called from
+ * `cancelPull` below, claiming the download stopped would be a lie.
+ */
+export const PULL_CANCELLED_MESSAGE =
+  "Stopped watching the pull. The download continues on the server until it finishes.";
+
 export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressProps) {
   const [error, setError] = useState<string | null>(null);
   const [isPulling, setIsPulling] = useState(false);
   const [progress, setProgress] = useState<PullOverallProgress | null>(null);
   const onCompleteRef = useRef(onComplete);
   const completeTimeoutRef = useRef<number | null>(null);
+  // Hoisted out of the effect so the Cancel button and the Escape handler can
+  // actually tear the pull down: previously nothing outside the SSE stream could
+  // close this full-screen `aria-modal` overlay, so a stalled pull left a page
+  // reload as the only exit -- which on the new-app route abandons an
+  // already-created app whose rollback never runs.
+  const abortRef = useRef<AbortController | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const finishedRef = useRef(false);
 
   useEffect(() => {
     onCompleteRef.current = onComplete;
@@ -67,18 +89,22 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
     setError(null);
     setProgress(null);
 
-    let finished = false;
+    finishedRef.current = false;
     const controller = new AbortController();
-    let eventSource: EventSource | null = null;
+    abortRef.current = controller;
+
+    const closeStream = () => {
+      controller.abort();
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+    };
 
     const completeOk = () => {
-      if (finished) return;
-      finished = true;
-      controller.abort();
-      if (eventSource) {
-        eventSource.close();
-        eventSource = null;
-      }
+      if (finishedRef.current) return;
+      finishedRef.current = true;
+      closeStream();
       setIsPulling(false);
       completeTimeoutRef.current = window.setTimeout(() => {
         onCompleteRef.current({ ok: true });
@@ -87,13 +113,9 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
     };
 
     const completeErr = (message: string) => {
-      if (finished) return;
-      finished = true;
-      controller.abort();
-      if (eventSource) {
-        eventSource.close();
-        eventSource = null;
-      }
+      if (finishedRef.current) return;
+      finishedRef.current = true;
+      closeStream();
       setIsPulling(false);
       setError(message);
       completeTimeoutRef.current = window.setTimeout(() => {
@@ -121,7 +143,8 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
           return;
         }
         const encodedJobId = encodeURIComponent(jobId);
-        eventSource = new EventSource(`/api/pull/${encodedJobId}`);
+        const eventSource = new EventSource(`/api/pull/${encodedJobId}`);
+        eventSourceRef.current = eventSource;
         let consecutiveFailures = 0;
 
         eventSource.onopen = () => {
@@ -129,7 +152,7 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
         };
 
         eventSource.addEventListener("pull", (event) => {
-          if (finished) return;
+          if (finishedRef.current) return;
           try {
             const message = event as MessageEvent;
             const job = JSON.parse(message.data) as {
@@ -153,7 +176,7 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
         eventSource.addEventListener("keepalive", () => {});
 
         eventSource.onerror = () => {
-          if (finished) return;
+          if (finishedRef.current) return;
           consecutiveFailures++;
           if (consecutiveFailures < 3) {
             return;
@@ -168,7 +191,7 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
           completeErr("Lost connection to pull job");
         };
       } catch (err: unknown) {
-        if (finished) return;
+        if (finishedRef.current) return;
         if (err instanceof DOMException && err.name === "AbortError") return;
         completeErr(err instanceof Error ? err.message : "Failed to start pull");
       }
@@ -177,17 +200,51 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
     start();
 
     return () => {
-      controller.abort();
-      if (eventSource) {
-        eventSource.close();
-        eventSource = null;
-      }
+      closeStream();
+      abortRef.current = null;
       if (completeTimeoutRef.current !== null) {
         window.clearTimeout(completeTimeoutRef.current);
         completeTimeoutRef.current = null;
       }
     };
   }, [isOpen, appId]);
+
+  /**
+   * Cancellation is reported through the existing `onComplete` contract
+   * (`{ ok: false, error }`) rather than a new shape, because the route files
+   * that consume it are outside this change. The routes already treat a
+   * `{ ok: false }` result as a failed pull and run their rollback.
+   */
+  const cancelPull = useCallback(() => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    if (completeTimeoutRef.current !== null) {
+      window.clearTimeout(completeTimeoutRef.current);
+      completeTimeoutRef.current = null;
+    }
+    setIsPulling(false);
+    setError(PULL_CANCELLED_MESSAGE);
+    onCompleteRef.current({ ok: false, error: PULL_CANCELLED_MESSAGE });
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      cancelPull();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, cancelPull]);
 
   if (!isOpen) return null;
 
@@ -243,6 +300,23 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
     border: "1px solid var(--border-primary)",
     height: "10px",
     overflow: "hidden",
+  };
+
+  const actionsStyle: React.CSSProperties = {
+    marginTop: "var(--space-3)",
+    display: "flex",
+    justifyContent: "flex-end",
+  };
+
+  const cancelButtonStyle: React.CSSProperties = {
+    background: "transparent",
+    border: "1px solid var(--border-primary)",
+    color: "var(--text-secondary)",
+    padding: "6px 12px",
+    fontSize: "var(--text-xs)",
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+    cursor: "pointer",
   };
 
   const progressFillStyle: React.CSSProperties = {
@@ -301,6 +375,13 @@ export function PullProgress({ isOpen, appId, title, onComplete }: PullProgressP
             </div>
           ) : null}
         </div>
+        {isPulling && (
+          <div style={actionsStyle}>
+            <button type="button" onClick={cancelPull} style={cancelButtonStyle}>
+              CANCEL
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

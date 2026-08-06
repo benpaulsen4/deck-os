@@ -14,6 +14,7 @@ async function loadMetricsModule(options?: {
   useLinuxRAPL?: boolean;
   useLinuxHwmon?: boolean;
   cpuTempThrows?: boolean;
+  raplEnergyValues?: string[];
 }) {
   vi.resetModules();
   const readFileMock = vi.fn<(path: string, encoding: string) => Promise<string>>(
@@ -25,7 +26,7 @@ async function loadMetricsModule(options?: {
 
   if (options?.useLinuxRAPL) {
     let energyIndex = 0;
-    const energyValues = ["1000000", "3000000"];
+    const energyValues = options.raplEnergyValues ?? ["1000000", "3000000"];
     readFileMock.mockImplementation(async (p: string) => {
       const normalized = p.replace(/\\/g, "/");
       if (normalized.endsWith("/sys/class/powercap/intel-rapl:0/energy_uj")) {
@@ -127,30 +128,281 @@ describe("metrics service", () => {
     vi.clearAllMocks();
   });
 
-  test("getOneShotMetrics populates cache/history and notifies subscribers", async () => {
+  test("getOneShotMetrics fills the cache without writing history or notifying subscribers", async () => {
     const { metrics } = await loadMetricsModule();
-    const received: string[] = [];
-    const unsubscribe = metrics.subscribeToMetrics((payload) => {
-      received.push(payload.timestamp);
-    });
 
+    // Nobody is subscribed, so nothing is polling: this is purely the query path.
     const snapshot = await metrics.getOneShotMetrics();
-    unsubscribe();
 
     expect(snapshot.cpu.usage).toBe(11);
     expect(snapshot.memory.usage).toBe(40);
     expect(snapshot.disk.fs).toHaveLength(1);
     expect(snapshot.network.interfaces.eth0.tx_sec).toBe(2);
-    expect(metrics.getCachedMetrics()).not.toBeNull();
-    expect(metrics.getMetricsHistory().length).toBe(1);
-    expect(received.length).toBe(1);
+    expect(metrics.getCachedMetrics()).toBe(snapshot);
+    // History and subscriber fan-out belong to the poller alone (UPD-11).
+    expect(metrics.getMetricsHistory().length).toBe(0);
+
+    const received: string[] = [];
+    const unsubscribe = metrics.subscribeToMetrics((payload) => {
+      received.push(payload.timestamp);
+    });
+    await vi.advanceTimersByTimeAsync(5);
+    const framesFromPoller = received.length;
+    const historyFromPoller = metrics.getMetricsHistory().length;
+    expect(framesFromPoller).toBeGreaterThan(0);
+
+    // A query alongside a running poller still adds no frame and no history entry.
+    await metrics.getOneShotMetrics();
+
+    expect(received.length).toBe(framesFromPoller);
+    expect(metrics.getMetricsHistory().length).toBe(historyFromPoller);
+    unsubscribe();
   });
 
-  test("startMetricsPolling collects repeatedly and stop halts polling", async () => {
+  test("subscribing starts the poller and an explicit start without subscribers does not", async () => {
+    const { metrics, siMock } = await loadMetricsModule();
+
+    // The SSE handler calls startMetricsPolling() before it subscribes, and can
+    // bail out in between; that must not leave a collector running forever.
+    metrics.startMetricsPolling();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(siMock.currentLoad.mock.calls.length).toBe(0);
+
+    const unsubscribe = metrics.subscribeToMetrics(() => undefined);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(siMock.currentLoad.mock.calls.length).toBeGreaterThan(0);
+
+    unsubscribe();
+    const callsAfterUnsubscribe = siMock.currentLoad.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(siMock.currentLoad.mock.calls.length).toBe(callsAfterUnsubscribe);
+  });
+
+  test("a collector that has never succeeded fails the collection instead of publishing zeros", async () => {
+    const { metrics, siMock } = await loadMetricsModule();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      siMock.mem.mockRejectedValue(new Error("no /proc/meminfo"));
+
+      await expect(metrics.getOneShotMetrics()).rejects.toThrow(
+        /no data has ever been collected for: memory/
+      );
+      expect(metrics.getCachedMetrics()).toBeNull();
+      expect(metrics.getMetricsHistory().length).toBe(0);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  test("concurrent collections share a single in-flight cycle", async () => {
+    const { metrics, siMock } = await loadMetricsModule();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    siMock.currentLoad.mockImplementationOnce(async () => {
+      await gate;
+      return {
+        currentLoad: 11,
+        currentLoadUser: 6,
+        currentLoadSystem: 5,
+        currentLoadIdle: 89,
+      };
+    });
+
+    const first = metrics.getOneShotMetrics();
+    const second = metrics.getOneShotMetrics();
+    release();
+    const [a, b] = await Promise.all([first, second]);
+
+    expect(a).toBe(b);
+    expect(siMock.currentLoad.mock.calls.length).toBe(1);
+    expect(siMock.networkStats.mock.calls.length).toBe(1);
+  });
+
+  test("overlapping collections cannot split a delta-based power reading", async () => {
+    Object.defineProperty(process, "platform", { value: "linux" });
+    const { metrics } = await loadMetricsModule({
+      useLinuxRAPL: true,
+      // Discovery consumes the first value, then one per collection.
+      raplEnergyValues: ["1000000", "2000000", "3000000", "4000000"],
+    });
+
+    const primed = await metrics.getOneShotMetrics();
+    expect(primed.cpu.powerWatts).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    const [a, b] = await Promise.all([
+      metrics.getOneShotMetrics(),
+      metrics.getOneShotMetrics(),
+    ]);
+
+    // One 1,000,000 uJ delta over one second: exactly 1W, reported once.
+    expect(a).toBe(b);
+    expect(a.cpu.powerWatts).toBe(1);
+    expect(b.cpu.powerWatts).toBe(1);
+  });
+
+  test("getMetricsSnapshot serves the poller cache and collects only when stale", async () => {
+    const { metrics, siMock } = await loadMetricsModule();
+    const unsubscribe = metrics.subscribeToMetrics(() => undefined);
+    await vi.advanceTimersByTimeAsync(5);
+
+    const historyLength = metrics.getMetricsHistory().length;
+    const callsBefore = siMock.currentLoad.mock.calls.length;
+    const cached = await metrics.getMetricsSnapshot();
+
+    expect(cached).toBe(metrics.getCachedMetrics());
+    expect(siMock.currentLoad.mock.calls.length).toBe(callsBefore);
+    expect(metrics.getMetricsHistory().length).toBe(historyLength);
+
+    // Polling stops with the last subscriber, so the cache eventually ages out
+    // and the query has to collect instead of serving something arbitrarily old.
+    unsubscribe();
+    await vi.advanceTimersByTimeAsync(5000);
+    const fresh = await metrics.getMetricsSnapshot();
+
+    expect(fresh).not.toBe(cached);
+    expect(siMock.currentLoad.mock.calls.length).toBeGreaterThan(callsBefore);
+    expect(metrics.getMetricsHistory().length).toBe(historyLength);
+  });
+
+  test("one failing collector degrades a single section instead of blanking the snapshot", async () => {
+    const { metrics, siMock } = await loadMetricsModule();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const healthy = await metrics.getOneShotMetrics();
+      expect(healthy.disk.fs).toHaveLength(1);
+
+      siMock.fsSize.mockRejectedValue(new Error("stale NFS mount"));
+      const degraded = await metrics.getOneShotMetrics();
+
+      expect(degraded).not.toBe(healthy);
+      expect(degraded.cpu.usage).toBe(11);
+      expect(degraded.memory.usage).toBe(40);
+      expect(degraded.network.interfaces.eth0.tx_sec).toBe(2);
+      expect(degraded.disk.fs).toEqual(healthy.disk.fs);
+      expect(metrics.getCachedMetrics()).toBe(degraded);
+
+      // A permanently broken collector must not log on every cycle.
+      await metrics.getOneShotMetrics();
+      await metrics.getOneShotMetrics();
+      const diskFailureLogs = errorSpy.mock.calls.filter((call) =>
+        String(call[0]).includes('collector "disk" failed')
+      );
+      expect(diskFailureLogs).toHaveLength(1);
+
+      siMock.fsSize.mockResolvedValue([
+        { fs: "/dev/sda1", mount: "/", size: 1000, used: 750, use: 75, type: "ext4" },
+      ]);
+      const recovered = await metrics.getOneShotMetrics();
+
+      expect(recovered.disk.fs[0].usePercent).toBe(75);
+      const recoveryLogs = warnSpy.mock.calls.filter((call) =>
+        String(call[0]).includes('collector "disk" recovered')
+      );
+      expect(recoveryLogs).toHaveLength(1);
+    } finally {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
+  test("a total collector failure keeps the previous cache and logs once per cycle set", async () => {
+    const { metrics, siMock } = await loadMetricsModule();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      const unsubscribe = metrics.subscribeToMetrics(() => undefined);
+      await vi.advanceTimersByTimeAsync(5);
+      expect(metrics.getCachedMetrics()).not.toBeNull();
+
+      const boom = new Error("collector down");
+      siMock.currentLoad.mockRejectedValue(boom);
+      siMock.mem.mockRejectedValue(boom);
+      siMock.processes.mockRejectedValue(boom);
+      siMock.fsSize.mockRejectedValue(boom);
+      siMock.networkStats.mockRejectedValue(boom);
+
+      // Process counts are served from the slower sub-interval sample, so every
+      // section only fails once that sample has expired too.
+      await vi.advanceTimersByTimeAsync(10_100);
+      const lastPublished = metrics.getCachedMetrics();
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(metrics.getCachedMetrics()).toBe(lastPublished);
+      expect(metrics.getMetricsHistory().at(-1)).toBe(lastPublished);
+      const pollFailureLogs = errorSpy.mock.calls.filter((call) =>
+        String(call[0]).includes("Metrics polling failed")
+      );
+      expect(pollFailureLogs).toHaveLength(1);
+
+      unsubscribe();
+      metrics.stopMetricsPolling();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  test("process counts are sampled on a slower sub-interval than the poll", async () => {
     const { metrics, siMock } = await loadMetricsModule();
     const unsubscribe = metrics.subscribeToMetrics(() => undefined);
 
-    metrics.startMetricsPolling();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(siMock.currentLoad.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(siMock.processes.mock.calls.length).toBe(1);
+    expect(metrics.getCachedMetrics()?.processes.all).toBe(100);
+
+    siMock.processes.mockResolvedValue({
+      all: 111,
+      running: 6,
+      blocked: 0,
+      sleeping: 105,
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(siMock.processes.mock.calls.length).toBe(2);
+    expect(metrics.getCachedMetrics()?.processes.all).toBe(111);
+
+    unsubscribe();
+    metrics.stopMetricsPolling();
+  });
+
+  test("polling stops when the last subscriber leaves and resumes for the next one", async () => {
+    const { metrics, siMock } = await loadMetricsModule();
+    const unsubscribeA = metrics.subscribeToMetrics(() => undefined);
+    const unsubscribeB = metrics.subscribeToMetrics(() => undefined);
+
+    await vi.advanceTimersByTimeAsync(50);
+
+    const callsWithTwoSubscribers = siMock.currentLoad.mock.calls.length;
+    unsubscribeA();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(siMock.currentLoad.mock.calls.length).toBeGreaterThan(
+      callsWithTwoSubscribers
+    );
+
+    unsubscribeB();
+    const callsAfterLastLeft = siMock.currentLoad.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(200);
+    expect(siMock.currentLoad.mock.calls.length).toBe(callsAfterLastLeft);
+
+    const unsubscribeC = metrics.subscribeToMetrics(() => undefined);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(siMock.currentLoad.mock.calls.length).toBeGreaterThan(callsAfterLastLeft);
+
+    unsubscribeC();
+    metrics.stopMetricsPolling();
+  });
+
+  test("the poller collects repeatedly and an explicit stop halts it", async () => {
+    const { metrics, siMock } = await loadMetricsModule();
+    const unsubscribe = metrics.subscribeToMetrics(() => undefined);
+
     await vi.advanceTimersByTimeAsync(5);
     expect(metrics.getMetricsHistory().length).toBe(1);
 
@@ -165,15 +417,26 @@ describe("metrics service", () => {
     unsubscribe();
   });
 
-  test("startMetricsPolling is idempotent for active interval", async () => {
+  test("extra subscribers and start calls do not stack a second interval", async () => {
     const { metrics, siMock } = await loadMetricsModule();
 
+    const unsubscribeA = metrics.subscribeToMetrics(() => undefined);
+    await vi.advanceTimersByTimeAsync(50);
+    const callsWithOneSubscriber = siMock.currentLoad.mock.calls.length;
+    expect(callsWithOneSubscriber).toBeGreaterThanOrEqual(2);
+
+    const unsubscribeB = metrics.subscribeToMetrics(() => undefined);
     metrics.startMetricsPolling();
     metrics.startMetricsPolling();
     await vi.advanceTimersByTimeAsync(50);
-    metrics.stopMetricsPolling();
 
-    expect(siMock.currentLoad.mock.calls.length).toBeGreaterThanOrEqual(2);
+    // A second interval would roughly double the collections over this window.
+    const callsAdded = siMock.currentLoad.mock.calls.length - callsWithOneSubscriber;
+    expect(callsAdded).toBeLessThanOrEqual(callsWithOneSubscriber + 1);
+
+    unsubscribeA();
+    unsubscribeB();
+    metrics.stopMetricsPolling();
   });
 
   test("linux RAPL path computes CPU power after second sample", async () => {
@@ -187,6 +450,24 @@ describe("metrics service", () => {
     expect(first.cpu.powerWatts).toBeNull();
     expect(second.cpu.powerWatts).not.toBeNull();
     expect((second.cpu.powerWatts as number) >= 0).toBe(true);
+  });
+
+  test("stopping the poller re-primes the RAPL baseline instead of spanning the gap", async () => {
+    Object.defineProperty(process, "platform", { value: "linux" });
+    const { metrics } = await loadMetricsModule({
+      useLinuxRAPL: true,
+      raplEnergyValues: ["1000000", "2000000", "3000000", "4000000"],
+    });
+
+    await metrics.getOneShotMetrics();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((await metrics.getOneShotMetrics()).cpu.powerWatts).toBe(1);
+
+    metrics.stopMetricsPolling();
+    await vi.advanceTimersByTimeAsync(600_000);
+
+    // No baseline to measure against after an unbounded idle gap.
+    expect((await metrics.getOneShotMetrics()).cpu.powerWatts).toBeNull();
   });
 
   test("linux hwmon fallback reports power when RAPL is unavailable", async () => {

@@ -3,18 +3,25 @@ import { useAppStatusStore } from "../../stores/appStatus";
 import { Button } from "../../components/ui/Button";
 import type { App } from "../../../../server/src/lib/schema.js";
 import { AppIcon } from "../ui/AppIcon";
+import { APP_BUSY_TITLE } from "../../hooks/useTRPCErrors";
 
 interface AppRowProps {
   app: App;
   onAction: (appId: string, action: string, e: React.MouseEvent) => void;
-  isActionPending: (appId: string, action: string) => boolean;
+  /**
+   * True while any lifecycle operation is in flight for this app. The server
+   * takes a per-app lock, so the whole action group is disabled together rather
+   * than only the button that was clicked.
+   */
+  isActionDisabled: (appId: string) => boolean;
 }
 
-export function AppRow({ app, onAction, isActionPending }: AppRowProps) {
+export function AppRow({ app, onAction, isActionDisabled }: AppRowProps) {
   const getResolvedStatus = useAppStatusStore((state) => state.getResolvedStatus);
   const getStackStatus = useAppStatusStore((state) => state.getStackStatus);
   const status = getResolvedStatus(app.id);
   const stackStatus = getStackStatus(app.id);
+  const isBusy = isActionDisabled(app.id);
 
   const getStatusLabel = (): string => {
     switch (status) {
@@ -155,36 +162,36 @@ export function AppRow({ app, onAction, isActionPending }: AppRowProps) {
           <Button
             variant="secondary"
             onClick={(e) => onAction(app.id, "start", e)}
-            disabled={isActionPending(app.id, "start")}
+            disabled={isBusy}
             style={actionButtonStyle}
-            title="Start"
+            title={isBusy ? APP_BUSY_TITLE : "Start"}
           >
             ▶
           </Button>
           <Button
             variant="danger"
             onClick={(e) => onAction(app.id, "stop", e)}
-            disabled={isActionPending(app.id, "stop")}
+            disabled={isBusy}
             style={actionButtonStyle}
-            title="Stop"
+            title={isBusy ? APP_BUSY_TITLE : "Stop"}
           >
             ■
           </Button>
           <Button
             variant="secondary"
             onClick={(e) => onAction(app.id, "restart", e)}
-            disabled={isActionPending(app.id, "restart")}
+            disabled={isBusy}
             style={actionButtonStyle}
-            title="Restart"
+            title={isBusy ? APP_BUSY_TITLE : "Restart"}
           >
             ↻
           </Button>
           <Button
             variant="danger"
             onClick={(e) => onAction(app.id, "delete", e)}
-            disabled={isActionPending(app.id, "delete")}
+            disabled={isBusy}
             style={actionButtonStyle}
-            title="Delete"
+            title={isBusy ? APP_BUSY_TITLE : "Delete"}
           >
             ✕
           </Button>

@@ -23,12 +23,44 @@ function PinEntryHost({
   );
 }
 
+/**
+ * The boxes are `type="password"` (masked), so they have no `textbox` role;
+ * they are addressed by their per-digit accessible name instead.
+ */
+function getPinBoxes(): HTMLInputElement[] {
+  return screen.getAllByLabelText(/^Passcode digit \d+ of \d+$/);
+}
+
 describe("PinEntry", () => {
+  it("masks every digit so the passcode is not readable over a shoulder", () => {
+    render(<PinEntryHost />);
+
+    const inputs = getPinBoxes();
+    expect(inputs).toHaveLength(4);
+    for (const input of inputs) {
+      expect(input).toHaveAttribute("type", "password");
+    }
+    expect(screen.queryAllByRole("textbox")).toHaveLength(0);
+  });
+
+  it("names the row and every box for screen readers", () => {
+    render(<PinEntryHost />);
+
+    expect(screen.getByRole("group", { name: "Passcode" })).toBeInTheDocument();
+    const inputs = getPinBoxes();
+    expect(inputs.map((input) => input.getAttribute("aria-label"))).toEqual([
+      "Passcode digit 1 of 4",
+      "Passcode digit 2 of 4",
+      "Passcode digit 3 of 4",
+      "Passcode digit 4 of 4",
+    ]);
+  });
+
   it("auto-focuses the first input and accepts only digits", async () => {
     const user = userEvent.setup();
     render(<PinEntryHost />);
 
-    const inputs = screen.getAllByRole("textbox");
+    const inputs = getPinBoxes();
     expect(inputs).toHaveLength(4);
     expect(inputs[0]).toHaveFocus();
 
@@ -39,7 +71,7 @@ describe("PinEntry", () => {
 
   it("fills subsequent inputs when pasting digits", () => {
     render(<PinEntryHost />);
-    const inputs = screen.getAllByRole("textbox");
+    const inputs = getPinBoxes();
 
     fireEvent.paste(inputs[1], {
       clipboardData: {
@@ -56,7 +88,7 @@ describe("PinEntry", () => {
   it("backspace clears previous digit and moves focus when current is empty", async () => {
     const user = userEvent.setup();
     render(<PinEntryHost initialValue="12" />);
-    const inputs = screen.getAllByRole("textbox");
+    const inputs = getPinBoxes();
 
     inputs[2].focus();
     await user.keyboard("{Backspace}");
@@ -70,7 +102,7 @@ describe("PinEntry", () => {
     const onSubmit = vi.fn();
     render(<PinEntryHost initialValue="1234" onSubmit={onSubmit} />);
 
-    const inputs = screen.getAllByRole("textbox");
+    const inputs = getPinBoxes();
     inputs[3].focus();
     await user.keyboard("{Enter}");
 

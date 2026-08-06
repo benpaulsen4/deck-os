@@ -7,6 +7,12 @@ type PinEntryProps = {
   length?: number;
   disabled?: boolean;
   autoFocus?: boolean;
+  /**
+   * Accessible name for the group of digit boxes. The gate screen's visible
+   * "Enter your passcode to continue" subtitle is not associated with the inputs
+   * (it lives in `AuthGateScreen`), so the group carries its own name.
+   */
+  label?: string;
 };
 
 function clampDigits(input: string, length: number) {
@@ -20,6 +26,7 @@ export function PinEntry({
   length = 10,
   disabled = false,
   autoFocus = false,
+  label = "Passcode",
 }: PinEntryProps) {
   const refs = useRef<Array<HTMLInputElement | null>>([]);
   const normalized = useMemo(() => clampDigits(value, length), [value, length]);
@@ -51,7 +58,7 @@ export function PinEntry({
   };
 
   return (
-    <div className="pin-entry">
+    <div className="pin-entry" role="group" aria-label={label}>
       {Array.from({ length }).map((_, index) => (
         <input
           key={index}
@@ -59,6 +66,11 @@ export function PinEntry({
             refs.current[index] = el;
           }}
           className="pin-entry-box"
+          // Masked: the Settings passcode fields already are, and a shared
+          // console is exactly the shoulder-surfing threat the passcode exists
+          // for.
+          type="password"
+          aria-label={`${label} digit ${index + 1} of ${length}`}
           inputMode="numeric"
           autoComplete="one-time-code"
           value={normalized[index] ?? ""}
