@@ -95,10 +95,10 @@ Run it only on systems you trust, and avoid exposing it directly to the public i
 If you are working on DeckOS itself:
 
 - Node.js `24+`
-- pnpm `9.15.4`, pinned by `packageManager`; `engines` currently requires the 9.x line
+- pnpm `11.20.0`, pinned by `packageManager`; `engines` currently requires the 11.x line
 - Docker if you want to exercise Docker-backed features locally
 
-Dependency overrides are declared in both `package.json` (`pnpm.overrides`, read by pnpm 9) and `pnpm-workspace.yaml` (`overrides`, read by pnpm 10+). Keep the two in sync: if they drift, an install on the other generation silently drops the pins and reintroduces the advisories they suppress.
+Dependency overrides are declared once, in `pnpm-workspace.yaml` (`overrides`). `pnpm audit` in CI is the backstop: if an override stops applying, the advisory it suppresses comes back and the build fails.
 
 Common commands:
 

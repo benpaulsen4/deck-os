@@ -10,12 +10,16 @@
 packages:
   - "packages/*"
 
-# pnpm 11 added a second, stricter gate on top of onlyBuiltDependencies
-# below: every package with a build script must get an explicit yes/no here
-# before install will proceed at all. Decided per package by checking what
-# the script actually does:
-#   esbuild        true  - postinstall fetches the platform binary; required
-#                           for vite/vitest to run at all.
+# pnpm 10 stopped running dependency lifecycle scripts by default; pnpm 11
+# then removed onlyBuiltDependencies / onlyBuiltDependenciesFile /
+# neverBuiltDependencies / ignoredBuiltDependencies / ignoreDepScripts
+# entirely, replacing all of them with this single map. Every package with a
+# build script needs an explicit yes/no here or install refuses to proceed at
+# all. Decided per package by checking what the script actually does:
+#   esbuild        true  - postinstall fetches the platform binary. Without
+#                           approval here, vite and vitest fail at run time
+#                           with a missing-binary error that does not look
+#                           like a dependency problem.
 #   cpu-features   false - optional native accel for ssh2's crypto; its own
 #                           install script is non-fatal on failure, and it
 #                           does not build cleanly against current Node/MSVC
@@ -35,13 +39,6 @@ allowBuilds:
   msw: false
   protobufjs: false
   ssh2: false
-
-# pnpm 10 stopped running dependency lifecycle scripts by default. esbuild's
-# postinstall is what fetches its platform binary, so without this entry vite
-# and vitest fail at run time with a missing-binary error that does not look
-# like a dependency problem.
-onlyBuiltDependencies:
-  - esbuild
 
 overrides:
   "@protobufjs/utf8@<=1.1.0": ">=1.1.1"
