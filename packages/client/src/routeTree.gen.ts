@@ -9,24 +9,19 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as FilesRouteImport } from './routes/files'
-import { Route as DiskAnalysisRouteImport } from './routes/disk-analysis'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DiskAnalysisRouteImport } from './routes/disk-analysis'
+import { Route as FilesRouteImport } from './routes/files'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as AppsIndexRouteImport } from './routes/apps/index'
-import { Route as AppsNewRouteImport } from './routes/apps/new'
 import { Route as AppsAppIdRouteImport } from './routes/apps/$appId'
+import { Route as AppsNewRouteImport } from './routes/apps/new'
 import { Route as AppsTemplatesIndexRouteImport } from './routes/apps/templates/index'
 import { Route as AppsTemplatesTemplateIdRouteImport } from './routes/apps/templates/$templateId'
 
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const FilesRoute = FilesRouteImport.update({
-  id: '/files',
-  path: '/files',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DiskAnalysisRoute = DiskAnalysisRouteImport.update({
@@ -34,9 +29,14 @@ const DiskAnalysisRoute = DiskAnalysisRouteImport.update({
   path: '/disk-analysis',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const FilesRoute = FilesRouteImport.update({
+  id: '/files',
+  path: '/files',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppsIndexRoute = AppsIndexRouteImport.update({
@@ -44,14 +44,14 @@ const AppsIndexRoute = AppsIndexRouteImport.update({
   path: '/apps/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppsNewRoute = AppsNewRouteImport.update({
-  id: '/apps/new',
-  path: '/apps/new',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AppsAppIdRoute = AppsAppIdRouteImport.update({
   id: '/apps/$appId',
   path: '/apps/$appId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppsNewRoute = AppsNewRouteImport.update({
+  id: '/apps/new',
+  path: '/apps/new',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppsTemplatesIndexRoute = AppsTemplatesIndexRouteImport.update({
@@ -149,18 +149,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/files': {
-      id: '/files'
-      path: '/files'
-      fullPath: '/files'
-      preLoaderRoute: typeof FilesRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/disk-analysis': {
@@ -170,11 +163,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DiskAnalysisRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/files': {
+      id: '/files'
+      path: '/files'
+      fullPath: '/files'
+      preLoaderRoute: typeof FilesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/apps/': {
@@ -184,18 +184,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/apps/new': {
-      id: '/apps/new'
-      path: '/apps/new'
-      fullPath: '/apps/new'
-      preLoaderRoute: typeof AppsNewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/apps/$appId': {
       id: '/apps/$appId'
       path: '/apps/$appId'
       fullPath: '/apps/$appId'
       preLoaderRoute: typeof AppsAppIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/apps/new': {
+      id: '/apps/new'
+      path: '/apps/new'
+      fullPath: '/apps/new'
+      preLoaderRoute: typeof AppsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/apps/templates/': {

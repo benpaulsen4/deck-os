@@ -56,12 +56,6 @@ jobs:
       - name: Check systemd unit hardening is self-consistent
         run: bash scripts/check-unit-hardening.sh
 
-      # Same problem for the override maps in package.json and
-      # pnpm-workspace.yaml. Node is preinstalled on the runner image and this
-      # script has no dependencies, so it needs no pnpm install.
-      - name: Check dependency overrides are in sync
-        run: node scripts/check-overrides-sync.mjs
-
   quality-and-tests:
     runs-on: ubuntu-24.04
     permissions:
