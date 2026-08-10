@@ -523,4 +523,34 @@ describe("diskAnalysis service", () => {
     await fs.remove(dataDir);
     await fs.remove(mountDir);
   });
+
+  test("a directory the scanner cannot read makes the scan partial, not completed", async () => {
+    if (process.platform === "win32") return; // chmod is a no-op on Windows
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const root = await createTempDir("deckos-disk-eacces-");
+    const readable = path.join(root, "readable");
+    const locked = path.join(root, "locked");
+    await fs.ensureDir(readable);
+    await fs.ensureDir(locked);
+    await fs.writeFile(path.join(readable, "a.bin"), Buffer.alloc(1024));
+    await fs.writeFile(path.join(locked, "hidden.bin"), Buffer.alloc(4096));
+    await fs.chmod(locked, 0o000);
+
+    try {
+      const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+      const mount = { mount: root, fs: "testfs" };
+      const start = await diskAnalysis.startScan(mount);
+      const finished = await waitForTerminalJob(diskAnalysis, start.jobId);
+
+      // The headline number is a lower bound, and the phase has to say so.
+      expect(finished?.phase).toBe("partial");
+      expect(finished?.issues.some((i) => i.code === "permission-denied")).toBe(true);
+
+      await diskAnalysis.__testing.clearState();
+      await fs.remove(dataDir);
+    } finally {
+      await fs.chmod(locked, 0o755);
+      await fs.remove(root);
+    }
+  });
 });

@@ -727,9 +727,25 @@ function isActivePhase(phase: JobPhase): boolean {
   return phase === "queued" || phase === "scanning";
 }
 
+/**
+ * Codes that mean the totals are a lower bound.
+ *
+ * `recoverable` defaults to true on every issue, so keying off it alone let
+ * permission-denied scans report "completed" with a confident total that could
+ * be a fraction of reality — and then cached that for 24 hours. The service
+ * runs unprivileged, so EACCES on /root, /var/lib/docker and other users' homes
+ * is the normal case on any real host, not an edge case.
+ */
+const PARTIAL_RESULT_CODES = new Set([
+  "partial-scan",
+  "permission-denied",
+  "path-inaccessible",
+  "path-not-found",
+]);
+
 function hasPartialResult(job: DiskAnalysisJobInternal): boolean {
   return job.issues.some(
-    (issue) => issue.code === "partial-scan" || issue.recoverable === false
+    (issue) => PARTIAL_RESULT_CODES.has(issue.code) || issue.recoverable === false
   );
 }
 
