@@ -18,7 +18,39 @@ const DEFAULT_ENV = {
   nodes: process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES,
   smallThreshold: process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES,
   cacheMaxBytes: process.env.DECKOS_DISK_ANALYSIS_CACHE_MAX_BYTES,
+  fsTimeout: process.env.DECKOS_DISK_ANALYSIS_FS_TIMEOUT_MS,
 };
+
+/**
+ * A promise the test can leave pending for as long as it likes, used to park a
+ * mocked `fs` call the way a stale NFS or SMB mount parks a real one.
+ *
+ * `enter()` is what the mock awaits; `entered` resolves the first time any
+ * mock reaches the gate. Tests that mean to act on a scan while a worker is
+ * genuinely parked must wait on `entered` rather than sleeping: cancelling
+ * before the walk has reached the gate settles the job immediately, which is
+ * correct behaviour but not the case those tests exist to cover.
+ */
+function createGate(): {
+  wait: Promise<void>;
+  open: () => void;
+  enter: () => Promise<void>;
+  entered: Promise<void>;
+} {
+  let open: () => void = () => undefined;
+  const wait = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  let markEntered: () => void = () => undefined;
+  const entered = new Promise<void>((resolve) => {
+    markEntered = resolve;
+  });
+  const enter = (): Promise<void> => {
+    markEntered();
+    return wait;
+  };
+  return { wait, open, enter, entered };
+}
 
 async function createTempDir(prefix: string): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -70,6 +102,7 @@ describe("diskAnalysis service", () => {
     process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = DEFAULT_ENV.nodes;
     process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES = DEFAULT_ENV.smallThreshold;
     process.env.DECKOS_DISK_ANALYSIS_CACHE_MAX_BYTES = DEFAULT_ENV.cacheMaxBytes;
+    process.env.DECKOS_DISK_ANALYSIS_FS_TIMEOUT_MS = DEFAULT_ENV.fsTimeout;
     vi.resetModules();
     vi.clearAllMocks();
   });
@@ -140,75 +173,12 @@ describe("diskAnalysis service", () => {
     await fs.remove(mountDir);
   });
 
-  test("stale cached snapshot is served immediately and triggers a background regeneration", async () => {
-    const dataDir = await createTempDir("deckos-disk-analysis-data-");
-    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
-    await fs.writeFile(path.join(mountDir, "notes.txt"), "cached", "utf8");
-
-    let diskAnalysis = await loadDiskAnalysisModule(dataDir);
-    const mount = { mount: mountDir, fs: "testfs" };
-    const start = await diskAnalysis.startScan(mount);
-    await waitForTerminalJob(diskAnalysis, start.jobId);
-
-    const cacheFile = path.join(
-      dataDir,
-      "disk-analysis",
-      `${getMountCacheHash(mount)}.json`
-    );
-    const persisted = (await fs.readJson(cacheFile)) as {
-      mount: DiskAnalysisMountIdentity;
-      snapshot: { generatedAt: string };
-    };
-    persisted.snapshot.generatedAt = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
-    await fs.writeJson(cacheFile, persisted, { spaces: 2 });
-
-    diskAnalysis.__testing.resetState();
-    diskAnalysis = await loadDiskAnalysisModule(dataDir);
-
-    const originalStat = fs.stat.bind(fs);
-    const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (target) => {
-      const targetPath = typeof target === "string" ? target : String(target);
-      if (path.resolve(targetPath) === path.resolve(mountDir)) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      return await originalStat(target);
-    });
-
-    try {
-      const snapshotBeforeRefresh = await diskAnalysis.getCachedSnapshot(mount);
-      expect(snapshotBeforeRefresh?.cache.state).toBe("stale");
-
-      const startedAt = Date.now();
-      const state = await diskAnalysis.getMountState(mount);
-      const elapsedMs = Date.now() - startedAt;
-      expect(state.cache.state).toBe("stale");
-      expect(elapsedMs).toBeLessThan(50);
-      expect(state.activeJob).toBeNull();
-
-      let refreshState = diskAnalysis.getJob(state.activeJob?.jobId ?? "");
-      for (let attempt = 0; attempt < 20 && refreshState === null; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        const nextState = await diskAnalysis.getMountState(mount);
-        refreshState = nextState.activeJob ? diskAnalysis.getJob(nextState.activeJob.jobId) : null;
-      }
-      expect(refreshState).not.toBeNull();
-      if (!refreshState) {
-        throw new Error("Expected background refresh job");
-      }
-
-      const refreshedJob = await waitForTerminalJob(diskAnalysis, refreshState.jobId);
-      expect(refreshedJob?.phase).toBe("completed");
-      const refreshedSnapshot = await diskAnalysis.getCachedSnapshot(mount);
-      expect(refreshedSnapshot?.cache.state).toBe("fresh");
-    } finally {
-      statSpy.mockRestore();
-    }
-
-    await diskAnalysis.__testing.clearState();
-    await fs.remove(dataDir);
-    await fs.remove(mountDir);
-  });
-
+  // The test "stale cached snapshot is served immediately and triggers a
+  // background regeneration" lived here. It was replaced, not dropped: see
+  // "a stale cache is reported as stale without a background rescan" in the
+  // DISK-3/6/12 block at the bottom of this file, which keeps its surviving
+  // half (a stale entry is served instantly and without touching the mount)
+  // and asserts the new policy in place of the regeneration half.
   test("legacy cached snapshots without persisted metadata remain readable", async () => {
     const dataDir = await createTempDir("deckos-disk-analysis-data-");
     const mountDir = await createTempDir("deckos-disk-analysis-mount-");
@@ -384,7 +354,11 @@ describe("diskAnalysis service", () => {
     const files = await fs.readdir(diskAnalysisDir);
 
     expect(mountState.cache.state).toBe("missing");
-    expect(mountState.activeJob).not.toBeNull();
+    // A quarantined cache reads as "missing", and missing no longer means
+    // "start scanning" (DISK-3). The subject of this test is the quarantine --
+    // that a malformed entry is moved aside rather than served -- and that is
+    // unchanged; only the auto-start that used to follow it is gone.
+    expect(mountState.activeJob).toBeNull();
     expect(snapshot).toBeNull();
     expect(files.some((file) => file.includes(".corrupt-"))).toBe(true);
 
@@ -393,8 +367,16 @@ describe("diskAnalysis service", () => {
     await fs.remove(mountDir);
   });
 
-  test("scan enforces traversal limits and reports a partial result", async () => {
-    process.env.DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES = "1";
+  test("scan enforces the indexed-node budget and reports a partial result", async () => {
+    // Was driven by DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES=1. That knob
+    // no longer truncates anything: it bounds how many directories may sit in
+    // the ready queue at once, and overflow now spills to a secondary FIFO
+    // instead of being dropped, precisely so that a scheduling knob stops
+    // deciding how much of the tree gets indexed. The assertions below are
+    // unchanged; they are simply pointed at `maxIndexedNodes`, which is the
+    // budget that genuinely does truncate a scan. The root counts as the first
+    // indexed node, so a budget of 2 admits one child directory of three.
+    process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = "2";
     const dataDir = await createTempDir("deckos-disk-analysis-data-");
     const mountDir = await createTempDir("deckos-disk-analysis-mount-");
     await Promise.all([
@@ -1373,5 +1355,497 @@ describe("diskAnalysis service", () => {
         await fs.remove(outsideDir);
       }
     );
+  });
+
+  describe("observe-only state, guarded scans, real cancellation (DISK-3, DISK-6, DISK-12)", () => {
+    test("getMountState never starts a scan", async () => {
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const root = await createTempDir("deckos-disk-observe-");
+      await fs.writeFile(path.join(root, "a.bin"), Buffer.alloc(512));
+
+      const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+      const mount = { mount: root, fs: "testfs" };
+
+      const state = await diskAnalysis.getMountState(mount);
+
+      // Reading the page must not kick off work. Scanning is an explicit action.
+      expect(state.activeJob).toBeNull();
+      expect(state.cache.state).toBe("missing");
+
+      // And not asynchronously either. Auto-start ran the walk from a
+      // microtask, so a state object that looked clean was followed a few
+      // milliseconds later by a finished scan and a cache file -- on this
+      // fixture, and by hours of I/O on a real mount.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(await diskAnalysis.getCachedSnapshot(mount)).toBeNull();
+      expect((await diskAnalysis.getMountState(mount)).activeJob).toBeNull();
+
+      await diskAnalysis.__testing.clearState();
+      await fs.remove(dataDir);
+      await fs.remove(root);
+    });
+
+    test("a stale cache is reported as stale without a background rescan", async () => {
+      // Replaces "stale cached snapshot is served immediately and triggers a
+      // background regeneration". The half of that test which still holds --
+      // a stale entry is served instantly and without touching the mount --
+      // is kept and, if anything, tightened. The regeneration half does not
+      // survive the DISK-3 decision: `getMountState` is the only caller that
+      // ever scheduled a refresh, so "refresh a stale cache in the
+      // background" and "start a full filesystem scan because someone opened
+      // the page" were the same code path under two names. Refreshing is now
+      // the explicit scan that the user asks for.
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+      await fs.writeFile(path.join(mountDir, "notes.txt"), "cached", "utf8");
+
+      let diskAnalysis = await loadDiskAnalysisModule(dataDir);
+      const mount = { mount: mountDir, fs: "testfs" };
+      const start = await diskAnalysis.startScan(mount);
+      await waitForTerminalJob(diskAnalysis, start.jobId);
+
+      const cacheFile = path.join(dataDir, "disk-analysis", `${getMountCacheHash(mount)}.json`);
+      const persisted = (await fs.readJson(cacheFile)) as {
+        mount: DiskAnalysisMountIdentity;
+        snapshot: { generatedAt: string };
+      };
+      persisted.snapshot.generatedAt = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+      await fs.writeJson(cacheFile, persisted, { spaces: 2 });
+
+      // resetState, not clearState: the latter deletes the cache directory,
+      // and the doctored entry is the whole fixture.
+      diskAnalysis.__testing.resetState();
+      diskAnalysis = await loadDiskAnalysisModule(dataDir);
+
+      // Any stat of the mount root costs 50ms, so the elapsed time below is a
+      // direct measurement of whether getMountState touched the filesystem.
+      const originalStat = fs.stat.bind(fs);
+      const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (target) => {
+        const targetPath = typeof target === "string" ? target : String(target);
+        if (path.resolve(targetPath) === path.resolve(mountDir)) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        return await originalStat(target);
+      });
+
+      try {
+        const snapshotBeforeRefresh = await diskAnalysis.getCachedSnapshot(mount);
+        expect(snapshotBeforeRefresh?.cache.state).toBe("stale");
+
+        const startedAt = Date.now();
+        const state = await diskAnalysis.getMountState(mount);
+        expect(Date.now() - startedAt).toBeLessThan(50);
+        expect(state.cache.state).toBe("stale");
+        expect(state.activeJob).toBeNull();
+
+        // Nothing appears later either: the stale entry stays stale until a
+        // scan is explicitly requested.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect((await diskAnalysis.getMountState(mount)).activeJob).toBeNull();
+        expect((await diskAnalysis.getCachedSnapshot(mount))?.cache.state).toBe("stale");
+
+        // ...and an explicit scan is what refreshes it.
+        const refresh = await diskAnalysis.startScan(mount);
+        const refreshed = await waitForTerminalJob(diskAnalysis, refresh.jobId);
+        expect(refreshed?.phase).toBe("completed");
+        expect((await diskAnalysis.getCachedSnapshot(mount))?.cache.state).toBe("fresh");
+      } finally {
+        statSpy.mockRestore();
+      }
+
+      await diskAnalysis.__testing.clearState();
+      await fs.remove(dataDir);
+      await fs.remove(mountDir);
+    });
+
+    test.skipIf(process.platform === "win32")("a scan refuses a denylisted root", async () => {
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+
+      // /proc/kcore stats at ~128 TB and poisons every total on the page.
+      await expect(diskAnalysis.startScan({ mount: "/proc", fs: "proc" })).rejects.toThrow(
+        /denied|protected/i
+      );
+
+      await diskAnalysis.__testing.clearState();
+      await fs.remove(dataDir);
+    });
+
+    test.runIf(process.platform === "win32")(
+      "a scan refuses a denylisted root on Windows",
+      async () => {
+        // The POSIX case above is the one DISK-6 names, but it cannot run
+        // here. The Windows arm of the same denylist keeps the guard covered
+        // on this platform rather than leaving it untested.
+        const dataDir = await createTempDir("deckos-disk-analysis-data-");
+        const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+        const denied = path.join(process.env.SystemDrive || "C:", "Windows");
+
+        await expect(diskAnalysis.startScan({ mount: denied, fs: "ntfs" })).rejects.toThrow(
+          /denied|protected/i
+        );
+
+        await diskAnalysis.__testing.clearState();
+        await fs.remove(dataDir);
+      }
+    );
+
+    test("the mount table refuses a pseudo-filesystem root and lets a real one through", async () => {
+      // The denylist in files.ts is a prefix comparison on the path and says
+      // so: it cannot see a bind mount of /proc at some other path (FILE-12).
+      // The mount table can. The second half matters as much as the first --
+      // a check that refuses everything would satisfy the first half alone.
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const pseudoRoot = await createTempDir("deckos-disk-pseudo-");
+      const realRoot = await createTempDir("deckos-disk-real-");
+      await fs.writeFile(path.join(realRoot, "keep.bin"), Buffer.alloc(128));
+
+      const escapeMountField = (value: string): string => value.replace(/ /g, "\\040");
+      const mountTable = [
+        "sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0",
+        "/dev/sda1 / ext4 rw,relatime 0 0",
+        `proc ${escapeMountField(path.resolve(pseudoRoot))} proc rw,nosuid,nodev,noexec 0 0`,
+        `/dev/sdb1 ${escapeMountField(path.resolve(realRoot))} ext4 rw,relatime 0 0`,
+        "",
+      ].join("\n");
+
+      const originalReadFile = fs.readFile.bind(fs);
+      const readFileSpy = vi
+        .spyOn(fs, "readFile")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .mockImplementation(async (target: any, options?: any): Promise<any> => {
+          const targetPath = path.resolve(typeof target === "string" ? target : String(target));
+          if (targetPath === path.resolve("/proc/self/mounts")) {
+            return mountTable;
+          }
+          return await originalReadFile(target, options);
+        });
+
+      try {
+        const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+
+        await expect(
+          diskAnalysis.startScan({ mount: pseudoRoot, fs: "proc" })
+        ).rejects.toThrow(/pseudo-filesystem/i);
+
+        const allowed = await diskAnalysis.startScan({ mount: realRoot, fs: "ext4" });
+        const finished = await waitForTerminalJob(diskAnalysis, allowed.jobId);
+        expect(finished?.phase).toBe("completed");
+
+        await diskAnalysis.__testing.clearState();
+      } finally {
+        readFileSpy.mockRestore();
+        await fs.remove(dataDir);
+        await fs.remove(pseudoRoot);
+        await fs.remove(realRoot);
+      }
+    });
+
+    test("a third concurrent scan is refused while two are already running", async () => {
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const rootA = await createTempDir("deckos-disk-conc-a-");
+      const rootB = await createTempDir("deckos-disk-conc-b-");
+      const rootC = await createTempDir("deckos-disk-conc-c-");
+      const roots = [rootA, rootB, rootC];
+      for (const root of roots) {
+        await fs.writeFile(path.join(root, "x.bin"), Buffer.alloc(64));
+      }
+
+      const gate = createGate();
+      const held = new Set([rootA, rootB].map((root) => path.resolve(root)));
+      const originalReaddir = fs.readdir.bind(fs);
+      const readdirSpy = vi
+        .spyOn(fs, "readdir")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .mockImplementation(async (target: any, options: any): Promise<any> => {
+          if (held.has(path.resolve(typeof target === "string" ? target : String(target)))) {
+            await gate.wait;
+          }
+          return await originalReaddir(target, options);
+        });
+
+      try {
+        const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+        const first = await diskAnalysis.startScan({ mount: rootA, fs: "testfs" });
+        const second = await diskAnalysis.startScan({ mount: rootB, fs: "testfs" });
+        expect(second.jobId).not.toBe(first.jobId);
+
+        // Two full-disk walks is already more than a homelab box wants to be
+        // doing at once; a third would just make all three slower.
+        await expect(diskAnalysis.startScan({ mount: rootC, fs: "testfs" })).rejects.toThrow(
+          /already running/i
+        );
+
+        gate.open();
+        await diskAnalysis.__testing.waitForJobSettled(first.jobId);
+        await diskAnalysis.__testing.waitForJobSettled(second.jobId);
+
+        // And the slot is genuinely released, not leaked.
+        const third = await diskAnalysis.startScan({ mount: rootC, fs: "testfs" });
+        expect((await waitForTerminalJob(diskAnalysis, third.jobId))?.phase).toBe("completed");
+
+        await diskAnalysis.__testing.clearState();
+      } finally {
+        gate.open();
+        readdirSpy.mockRestore();
+        await fs.remove(dataDir);
+        for (const root of roots) {
+          await fs.remove(root);
+        }
+      }
+    }, 30_000);
+
+    test("a mount is not re-scanned until its previous scan has wound down", async () => {
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const root = await createTempDir("deckos-disk-unsettled-");
+      await fs.writeFile(path.join(root, "x.bin"), Buffer.alloc(64));
+
+      const gate = createGate();
+      const resolvedRoot = path.resolve(root);
+      const originalReaddir = fs.readdir.bind(fs);
+      const readdirSpy = vi
+        .spyOn(fs, "readdir")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .mockImplementation(async (target: any, options: any): Promise<any> => {
+          if (path.resolve(typeof target === "string" ? target : String(target)) === resolvedRoot) {
+            await gate.enter();
+          }
+          return await originalReaddir(target, options);
+        });
+
+      try {
+        const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+        const mount = { mount: root, fs: "testfs" };
+        const first = await diskAnalysis.startScan(mount);
+
+        // Cancel only once a worker is actually inside readdir. Cancelling
+        // before the walk gets that far settles the run on the spot, so the
+        // window this test is about would not exist.
+        await gate.entered;
+        expect(diskAnalysis.cancelScan(mount, first.jobId)).toBe(true);
+
+        // The phase says cancelled straight away, but the worker is still
+        // parked inside readdir with the partial tree in hand. Starting a
+        // second walk of the same mount now means two walks of it.
+        expect(diskAnalysis.getJob(first.jobId)?.phase).toBe("cancelled");
+        await expect(diskAnalysis.startScan(mount)).rejects.toThrow(/wound down|winding down/i);
+
+        gate.open();
+        const settled = await diskAnalysis.__testing.waitForJobSettled(first.jobId);
+        expect(settled?.phase).toBe("cancelled");
+
+        const second = await diskAnalysis.startScan(mount);
+        expect(second.jobId).not.toBe(first.jobId);
+        expect((await waitForTerminalJob(diskAnalysis, second.jobId))?.phase).toBe("completed");
+
+        await diskAnalysis.__testing.clearState();
+      } finally {
+        gate.open();
+        readdirSpy.mockRestore();
+        await fs.remove(dataDir);
+        await fs.remove(root);
+      }
+    }, 30_000);
+
+    test("a cancelled scan settles instead of hanging forever", async () => {
+      // The existing suite only ever cancelled an already-finished job.
+      // Cancelling a *running* one whose fs calls all return promptly already
+      // settled before this task -- that was measured, not assumed. The case
+      // that actually leaks is a worker parked in an fs call that never
+      // returns, which is what a stale NFS or SMB mount does: no abort check
+      // is ever reached, the done promise stays pending forever, and its
+      // closure pins the whole partial tree in memory.
+      process.env.DECKOS_DISK_ANALYSIS_FS_TIMEOUT_MS = "1000";
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const root = await createTempDir("deckos-disk-cancel-");
+      // Sorts first, so the single worker parks on it almost immediately.
+      const stuckPath = path.join(root, "aaa-stuck.bin");
+      await fs.writeFile(stuckPath, Buffer.alloc(64));
+      for (let i = 0; i < 200; i += 1) {
+        await fs.writeFile(path.join(root, `f${i}.bin`), Buffer.alloc(64));
+      }
+
+      const gate = createGate();
+      const resolvedStuck = path.resolve(stuckPath);
+      const originalStat = fs.stat.bind(fs);
+      const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (target) => {
+        const targetPath = path.resolve(typeof target === "string" ? target : String(target));
+        if (targetPath === resolvedStuck) {
+          await gate.enter();
+        }
+        return await originalStat(target);
+      });
+
+      try {
+        const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+        const mount = { mount: root, fs: "testfs" };
+        const snapshotEvents: DiskAnalysisScanEvent[] = [];
+        const start = await diskAnalysis.startScan(mount);
+        diskAnalysis.subscribeToJob(start.jobId, (event) => {
+          if (event.event === "snapshot") {
+            snapshotEvents.push(event);
+          }
+        });
+
+        // Cancel with the worker demonstrably parked in the stat that will
+        // never return -- the case where no abort check is ever reached.
+        await gate.entered;
+        expect(diskAnalysis.cancelScan(mount, start.jobId)).toBe(true);
+
+        const finished = await Promise.race([
+          diskAnalysis.__testing.waitForJobSettled(start.jobId),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("never settled")), 10_000)
+          ),
+        ]);
+        expect((finished as { phase: string }).phase).toBe("cancelled");
+
+        // A cancelled scan must not publish the half-built tree it was
+        // holding: no snapshot event, no cache file.
+        expect(snapshotEvents).toHaveLength(0);
+        expect(await diskAnalysis.getCachedSnapshot(mount)).toBeNull();
+
+        await diskAnalysis.__testing.clearState();
+      } finally {
+        gate.open();
+        statSpy.mockRestore();
+        await fs.remove(dataDir);
+        await fs.remove(root);
+      }
+    }, 30_000);
+
+    test("a filesystem call that never returns degrades to an issue instead of stalling", async () => {
+      // Same stale-mount shape, no cancellation: the scan itself has to make
+      // progress past a parked call rather than sitting on it forever.
+      process.env.DECKOS_DISK_ANALYSIS_FS_TIMEOUT_MS = "250";
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const root = await createTempDir("deckos-disk-fstimeout-");
+      const stuckPath = path.join(root, "aaa-stuck.bin");
+      await fs.writeFile(stuckPath, Buffer.alloc(64));
+      await fs.writeFile(path.join(root, "keep.bin"), Buffer.alloc(1024));
+
+      const gate = createGate();
+      const resolvedStuck = path.resolve(stuckPath);
+      const originalStat = fs.stat.bind(fs);
+      const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (target) => {
+        const targetPath = path.resolve(typeof target === "string" ? target : String(target));
+        if (targetPath === resolvedStuck) {
+          await gate.wait;
+        }
+        return await originalStat(target);
+      });
+
+      try {
+        const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+        const mount = { mount: root, fs: "testfs" };
+        const start = await diskAnalysis.startScan(mount);
+        const finished = await waitForTerminalJob(diskAnalysis, start.jobId);
+
+        // A timed-out entry is data the scan did not see, so the totals are a
+        // lower bound and the phase has to say so.
+        expect(finished?.phase).toBe("partial");
+        expect(finished?.issues.some((issue) => issue.code === "path-inaccessible")).toBe(true);
+
+        // The rest of the directory still lands.
+        const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+        expect(snapshot?.snapshot.totals.totalBytes).toBe(1024);
+
+        await diskAnalysis.__testing.clearState();
+      } finally {
+        gate.open();
+        statSpy.mockRestore();
+        await fs.remove(dataDir);
+        await fs.remove(root);
+      }
+    }, 30_000);
+
+    test("the pending-directory cap spills instead of dropping directories", async () => {
+      process.env.DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES = "2";
+      process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = "5000";
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const root = await createTempDir("deckos-disk-spill-");
+      const width = 40;
+      for (let i = 0; i < width; i += 1) {
+        const directory = path.join(root, `d${i}`);
+        await fs.ensureDir(directory);
+        await fs.writeFile(path.join(directory, "f.bin"), Buffer.alloc(64));
+      }
+
+      const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+      const mount = { mount: root, fs: "testfs" };
+      const start = await diskAnalysis.startScan(mount);
+      const finished = await waitForTerminalJob(diskAnalysis, start.jobId);
+      const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+
+      // The queue length is a scheduling knob, not a work budget. Overflow
+      // waits its turn in a secondary FIFO; only `maxIndexedNodes` truncates.
+      expect(finished?.phase).toBe("completed");
+      expect(snapshot?.snapshot.totals.totalDirectories).toBe(width + 1);
+      expect(snapshot?.snapshot.totals.totalFiles).toBe(width);
+      expect(snapshot?.snapshot.totals.totalBytes).toBe(width * 64);
+      expect(snapshot?.snapshot.root.truncated).toBe(false);
+      expect(snapshot?.snapshot.issues.some((issue) => issue.code === "partial-scan")).toBe(false);
+
+      await diskAnalysis.__testing.clearState();
+      await fs.remove(dataDir);
+      await fs.remove(root);
+    }, 30_000);
+
+    test("the same fixture scans to the same totals twice", async () => {
+      // With the old queue-length cap, whether a directory was indexed or
+      // dropped depended on how many siblings happened to be queued at the
+      // instant it was examined -- i.e. on how four concurrent readdirs
+      // interleaved. The same tree could therefore report two different sizes
+      // on two runs. Four workers and a queue far smaller than the fan-out is
+      // exactly that setup.
+      process.env.DECKOS_DISK_ANALYSIS_MAX_WORKERS = "4";
+      process.env.DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES = "3";
+      process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = "5000";
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const root = await createTempDir("deckos-disk-stable-");
+
+      const branches = 8;
+      const depth = 3;
+      const filesPerDirectory = 2;
+      for (let branch = 0; branch < branches; branch += 1) {
+        let cursor = root;
+        for (let level = 0; level < depth; level += 1) {
+          cursor = path.join(cursor, `b${branch}-l${level}`);
+          await fs.ensureDir(cursor);
+          for (let file = 0; file < filesPerDirectory; file += 1) {
+            await fs.writeFile(path.join(cursor, `f${file}.bin`), Buffer.alloc(64));
+          }
+        }
+      }
+
+      const expectedDirectories = branches * depth + 1;
+      const expectedFiles = branches * depth * filesPerDirectory;
+      const expectedBytes = expectedFiles * 64;
+
+      const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+      const mount = { mount: root, fs: "testfs" };
+
+      const runs: { totalBytes: number; totalFiles: number; totalDirectories: number }[] = [];
+      for (let run = 0; run < 2; run += 1) {
+        const start = await diskAnalysis.startScan(mount);
+        expect((await waitForTerminalJob(diskAnalysis, start.jobId))?.phase).toBe("completed");
+        const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+        if (!snapshot) {
+          throw new Error(`Expected a cached snapshot after run ${run}`);
+        }
+        runs.push(snapshot.snapshot.totals);
+      }
+
+      expect(runs[0]).toEqual(runs[1]);
+      expect(runs[0]).toEqual({
+        totalBytes: expectedBytes,
+        totalFiles: expectedFiles,
+        totalDirectories: expectedDirectories,
+      });
+
+      await diskAnalysis.__testing.clearState();
+      await fs.remove(dataDir);
+      await fs.remove(root);
+    }, 60_000);
   });
 });

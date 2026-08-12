@@ -17,6 +17,7 @@ import {
   type DiskAnalysisTreemapNode,
 } from "@deckos/contracts";
 import { DATA_DIR } from "../lib/config.js";
+import { assertNotDeniedPath } from "./files.js";
 
 type JobPhase = DiskAnalysisJobState["phase"];
 /** Read-only in the event it receives -- see `subscribeToJob`. */
@@ -64,6 +65,17 @@ type DiskAnalysisJobInternal = {
   jobId: string;
   mount: DiskAnalysisMountIdentity;
   phase: JobPhase;
+  /**
+   * Resolves when `runJob` has fully unwound -- every worker returned, the
+   * cache written (or not), the final status emitted.
+   *
+   * `phase` alone is not that signal: `cancelScan` flips the phase to
+   * `cancelled` the instant it is called, while the workers it aborted are
+   * still inside `fs.readdir`/`fs.stat` holding references to the partial
+   * tree. DISK-12 is precisely the gap between those two moments, so it needs
+   * an observable that closes only when the gap does.
+   */
+  runPromise: Promise<void>;
   startedAt: string;
   updatedAt: string;
   progress: DiskAnalysisProgress;
@@ -104,6 +116,29 @@ export class DiskAnalysisMountUnavailableError extends Error {
   }
 }
 
+/**
+ * DISK-6: the scan refuses this root on policy grounds -- it is not a mount
+ * worth walking, and walking it would poison the numbers.
+ */
+export class DiskAnalysisScanRefusedError extends Error {
+  constructor(mountPath: string, message: string) {
+    super(message || `Disk analysis refused to scan ${mountPath}`);
+    this.name = "DiskAnalysisScanRefusedError";
+  }
+}
+
+/**
+ * The scan is fine in principle but there is no capacity for it right now:
+ * either the concurrency cap is reached, or this mount's previous scan has not
+ * finished unwinding.
+ */
+export class DiskAnalysisScanBusyError extends Error {
+  constructor(mountPath: string, message: string) {
+    super(message || `Disk analysis is busy and cannot scan ${mountPath} yet`);
+    this.name = "DiskAnalysisScanBusyError";
+  }
+}
+
 const DISK_ANALYSIS_DIR = path.join(DATA_DIR, "disk-analysis");
 const CACHE_FRESH_MS = 24 * 60 * 60 * 1000;
 const FINISHED_JOB_TTL_MS = 10 * 60 * 1000;
@@ -111,6 +146,34 @@ const RUNNING_JOB_TTL_MS = 2 * 60 * 60 * 1000;
 const PROGRESS_EMIT_INTERVAL_MS = 500;
 const SMALL_FILE_BUCKET_SUFFIX = "__deckos_small_files__";
 const MAX_SMALL_FILE_THRESHOLD_BYTES = 64 * 1024 * 1024;
+/**
+ * How many scans may be unwinding at once, across every mount.
+ *
+ * Each scan runs `maxWorkers` (4 by default) concurrent fs operations, and
+ * libuv's threadpool is four threads wide by default, so two scans already
+ * saturate it. A homelab box has no use for more.
+ */
+const MAX_CONCURRENT_SCANS = 2;
+
+/**
+ * How long a single `readdir`/`stat` may take before the scan gives up on it.
+ *
+ * What this buys, precisely: the *scan* keeps moving and degrades the offending
+ * path to a `path-inaccessible` issue instead of parking on it forever. What it
+ * does not buy: the underlying call is not cancelled. `Promise.race` cannot
+ * cancel an fs operation; the syscall still occupies its libuv threadpool
+ * thread until the kernel returns, which on a dead NFS or SMB mount can be
+ * minutes (or never, for a hard mount). So this stops one bad path wedging a
+ * scan and wedging cancellation; it does not free the thread, and enough
+ * simultaneously-hung paths will still starve the pool. That is the reason for
+ * `MAX_CONCURRENT_SCANS` as well.
+ *
+ * Generous by default: a cold spinning disk under load can legitimately take
+ * many seconds to answer a `readdir` on a large directory, and turning that
+ * into a bogus issue would be worse than waiting.
+ */
+const DEFAULT_FS_OPERATION_TIMEOUT_MS = 30_000;
+
 const DEFAULT_LIMITS: DiskAnalysisResourceLimits = {
   maxWorkers: 4,
   maxPendingDirectories: 2048,
@@ -141,6 +204,14 @@ const DEFAULT_CACHE_PRUNE_SETTINGS = {
 
 const jobs = new Map<string, DiskAnalysisJobInternal>();
 const activeJobIdByMount = new Map<string, string>();
+/**
+ * Jobs whose `runPromise` has not settled yet, keyed by mount.
+ *
+ * Deliberately not the same thing as `activeJobIdByMount`, which is keyed off
+ * the job *phase*: see `startJobRun`. This map is what bounds concurrency and
+ * what stops a mount being re-scanned while its previous scan drains.
+ */
+const unsettledJobIdByMount = new Map<string, string>();
 const pendingJobStartByMount = new Map<string, Promise<DiskAnalysisJobInternal | null>>();
 const listenersByJobId = new Map<string, Set<JobListener>>();
 
@@ -189,6 +260,201 @@ function getCachePruneSettings(): {
       DEFAULT_CACHE_PRUNE_SETTINGS.maxDirectoryBytes
     ),
   };
+}
+
+function getFsOperationTimeoutMs(): number {
+  return getConfiguredPositiveInt(
+    "DECKOS_DISK_ANALYSIS_FS_TIMEOUT_MS",
+    DEFAULT_FS_OPERATION_TIMEOUT_MS
+  );
+}
+
+class DiskAnalysisFsTimeoutError extends Error {
+  readonly code = "ETIMEDOUT";
+
+  constructor(targetPath: string, timeoutMs: number) {
+    super(`Filesystem call for ${targetPath} did not return within ${timeoutMs}ms`);
+    this.name = "DiskAnalysisFsTimeoutError";
+  }
+}
+
+/**
+ * Race one fs call against a deadline. See `DEFAULT_FS_OPERATION_TIMEOUT_MS`
+ * for what this does and does not achieve.
+ *
+ * The timer is always cleared on the winning path -- a per-entry scan creates
+ * one of these per `stat`, so a leaked timer would be a leak per file -- and
+ * the losing promise gets a no-op catch so a late rejection from an operation
+ * we stopped waiting for cannot surface as an unhandled rejection.
+ */
+async function withFsTimeout<T>(
+  operation: Promise<T>,
+  targetPath: string,
+  timeoutMs: number
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new DiskAnalysisFsTimeoutError(targetPath, timeoutMs));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([operation, deadline]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+    void operation.catch(() => undefined);
+  }
+}
+
+/**
+ * Filesystem types that are never worth walking.
+ *
+ * DISK-6 is `/proc`: `/proc/kcore` stats at roughly 128 TB, so a single scan
+ * of it makes every total on the page nonsense. The rest are the same shape --
+ * kernel-synthesised trees whose "sizes" are not bytes on a disk.
+ */
+const PSEUDO_FILESYSTEM_TYPES = new Set([
+  "autofs",
+  "binfmt_misc",
+  "bpf",
+  "cgroup",
+  "cgroup2",
+  "configfs",
+  "debugfs",
+  "devpts",
+  "devtmpfs",
+  "efivarfs",
+  "fuse.gvfsd-fuse",
+  "fusectl",
+  "hugetlbfs",
+  "mqueue",
+  "nsfs",
+  "proc",
+  "procfs",
+  "pstore",
+  "ramfs",
+  "securityfs",
+  "sysfs",
+  "tracefs",
+]);
+
+/**
+ * Where the kernel publishes the mount table, best source first.
+ *
+ * Read on every scan start rather than cached: mounts come and go, and a scan
+ * is a rare, explicit action, so one small read is not worth the staleness.
+ */
+const MOUNT_TABLE_PATHS = ["/proc/self/mounts", "/etc/mtab"];
+
+/** `/proc/self/mounts` octal-escapes these four characters in mount points. */
+function unescapeMountField(value: string): string {
+  return value.replace(/\\(040|011|012|134)/g, (_, code: string) => {
+    switch (code) {
+      case "040":
+        return " ";
+      case "011":
+        return "\t";
+      case "012":
+        return "\n";
+      default:
+        return "\\";
+    }
+  });
+}
+
+function parseMountTable(contents: string): { mountPoint: string; fsType: string }[] {
+  const entries: { mountPoint: string; fsType: string }[] = [];
+  for (const line of contents.split("\n")) {
+    const fields = line.trim().split(/\s+/);
+    // device, mount point, fs type, options, dump, pass
+    if (fields.length < 3 || !fields[1] || !fields[2]) {
+      continue;
+    }
+    entries.push({
+      mountPoint: unescapeMountField(fields[1]),
+      fsType: fields[2].toLowerCase(),
+    });
+  }
+  return entries;
+}
+
+async function readMountTable(): Promise<{ mountPoint: string; fsType: string }[] | null> {
+  for (const tablePath of MOUNT_TABLE_PATHS) {
+    try {
+      const contents = await withFsTimeout(
+        fs.readFile(tablePath, "utf8"),
+        tablePath,
+        getFsOperationTimeoutMs()
+      );
+      const entries = parseMountTable(contents);
+      if (entries.length > 0) {
+        return entries;
+      }
+    } catch {
+      // Missing, unreadable, or hung -- try the next candidate.
+    }
+  }
+  return null;
+}
+
+/**
+ * Refuse a root that the kernel says lives on a pseudo-filesystem.
+ *
+ * This is the check `assertNotDeniedPath` cannot make. That denylist is a
+ * prefix comparison over a path string and documents its own blind spot
+ * (FILE-12): a container that bind-mounts the host's `/proc` at `/host/proc`
+ * produces a resolved path matching none of its prefixes. The mount table
+ * knows the filesystem *type* at that path, so it catches the bind mount that
+ * the string comparison cannot.
+ *
+ * Degradation, per platform:
+ *  - **Linux:** `/proc/self/mounts` (falling back to `/etc/mtab`) is read and
+ *    the longest mount point that contains the resolved root decides.
+ *  - **Windows, macOS, and any Linux where neither file can be read:** there
+ *    is no equivalent table here, the read fails, and the scan is *allowed*.
+ *    A check that is unavailable must not become a check that refuses
+ *    everything; `assertNotDeniedPath` still applies on every platform.
+ *  - A path that matches no entry at all is likewise allowed: the absence of a
+ *    row is not evidence of a pseudo-filesystem.
+ */
+async function assertNotPseudoFilesystem(resolvedMount: string): Promise<void> {
+  const entries = await readMountTable();
+  if (!entries) {
+    return;
+  }
+
+  const normalizedMount = normalizeMountPathKey(resolvedMount);
+  let bestMatch: { mountPoint: string; fsType: string } | null = null;
+  for (const entry of entries) {
+    let normalizedEntry: string;
+    try {
+      normalizedEntry = normalizeMountPathKey(entry.mountPoint);
+    } catch {
+      continue; // A relative or malformed mount point is not a match for anything.
+    }
+    const contains =
+      normalizedMount === normalizedEntry ||
+      normalizedMount.startsWith(
+        normalizedEntry.endsWith(path.sep) ? normalizedEntry : `${normalizedEntry}${path.sep}`
+      );
+    if (!contains) {
+      continue;
+    }
+    // Longest mount point wins: `/` contains everything, so the nested mount
+    // is the one that actually describes this path.
+    if (!bestMatch || entry.mountPoint.length > bestMatch.mountPoint.length) {
+      bestMatch = entry;
+    }
+  }
+
+  if (bestMatch && PSEUDO_FILESYSTEM_TYPES.has(bestMatch.fsType)) {
+    throw new DiskAnalysisScanRefusedError(
+      resolvedMount,
+      `Refusing to scan ${resolvedMount}: ${bestMatch.mountPoint} is a ${bestMatch.fsType} pseudo-filesystem, whose reported sizes are not bytes on a disk`
+    );
+  }
 }
 
 function getSmallFileThresholdBytes(): number {
@@ -449,6 +715,11 @@ function getIssueForFsError(targetPath: string, error: unknown): DiskAnalysisIss
   }
   if (code === "ENOENT") {
     return createIssue("path-not-found", targetPath, `Path not found: ${targetPath}`);
+  }
+  if (error instanceof DiskAnalysisFsTimeoutError) {
+    // Distinct message, same code: from the treemap's point of view a path the
+    // scan gave up waiting for is a path it could not read.
+    return createIssue("path-inaccessible", targetPath, error.message);
   }
   return createIssue("path-inaccessible", targetPath, `Path inaccessible: ${targetPath}`);
 }
@@ -1081,7 +1352,14 @@ async function ensureMountAvailable(mount: DiskAnalysisMountIdentity): Promise<s
   const resolvedMount = resolveMountPath(mount.mount);
   let stat;
   try {
-    stat = await fs.stat(resolvedMount);
+    // Timed out like every other fs call in this file: a hard NFS mount that
+    // has gone away would otherwise leave `startScan` awaiting forever, with
+    // the job already registered and its concurrency slot taken.
+    stat = await withFsTimeout(
+      fs.stat(resolvedMount),
+      resolvedMount,
+      getFsOperationTimeoutMs()
+    );
   } catch (error) {
     throw new DiskAnalysisMountUnavailableError(
       resolvedMount,
@@ -1116,20 +1394,87 @@ function pruneJobs(now: number = Date.now()) {
   }
 }
 
+/** Rejection reason for a scan stopped by `cancelScan` (or the running-job TTL). */
+class DiskAnalysisScanAbortedError extends Error {
+  constructor() {
+    super("Disk analysis scan aborted");
+    this.name = "DiskAnalysisScanAbortedError";
+  }
+}
+
 async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSnapshot> {
+  const fsTimeoutMs = getFsOperationTimeoutMs();
   const rootPath = await ensureMountAvailable(job.mount);
-  const rootStat = await fs.stat(rootPath);
+  const rootStat = await withFsTimeout(fs.stat(rootPath), rootPath, fsTimeoutMs);
   const rootDeviceId = getComparableDeviceId(rootStat);
   const smallFileThresholdBytes = getSmallFileThresholdBytes();
   const rootNode = createDirectoryNode(rootPath, null);
   const nodesByPath = new Map<string, MutableDirectoryNode>([[rootPath, rootNode]]);
-  const pending: DirectoryTask[] = [{ directoryPath: rootPath, node: rootNode }];
   const extensionCounts = new Map<string, { count: number; totalBytes: number }>();
   let totalFiles = 0;
   let totalDirectories = 1;
   let indexedNodes = 1;
   let activeWorkers = 0;
   let settled = false;
+
+  /**
+   * The work queue, in two halves.
+   *
+   * `pending` is a bounded LIFO stack: taking the most recently discovered
+   * directory first keeps the walk depth-first, which is what keeps the number
+   * of half-finished directories (and therefore live `MutableDirectoryNode`s)
+   * small on a wide tree.
+   *
+   * `overflow` is the FIFO the stack spills into once it is full. It exists
+   * because `maxPendingDirectories` used to *drop* the directories that did
+   * not fit and mark the scan partial -- a queue-length bound masquerading as
+   * a work budget. Whether a given directory fit depended on how many siblings
+   * happened to be queued at that instant, i.e. on how the concurrent workers
+   * interleaved, so the same tree could scan to two different sizes on two
+   * runs. Nothing is dropped here; the only budget that truncates is
+   * `maxIndexedNodes`, which is checked before a directory is ever queued, so
+   * the two halves together still hold at most that many tasks.
+   */
+  const pending: DirectoryTask[] = [];
+  const overflow: (DirectoryTask | undefined)[] = [];
+  let overflowHead = 0;
+
+  const enqueueDirectory = (task: DirectoryTask) => {
+    if (pending.length < job.limits.maxPendingDirectories) {
+      pending.push(task);
+      return;
+    }
+    overflow.push(task);
+  };
+
+  const dequeueDirectory = (): DirectoryTask | undefined => {
+    const next = pending.pop();
+    if (next) {
+      return next;
+    }
+    if (overflowHead >= overflow.length) {
+      return undefined;
+    }
+    const task = overflow[overflowHead];
+    // Release the slot's reference as well as handing the task out, so a
+    // drained overflow array is not still pinning every node it ever held.
+    overflow[overflowHead] = undefined;
+    overflowHead += 1;
+    if (overflowHead >= overflow.length) {
+      overflow.length = 0;
+      overflowHead = 0;
+    } else if (overflowHead >= 1024 && overflowHead * 2 >= overflow.length) {
+      // Amortised O(1): compact only once the dead prefix is at least half the
+      // array, so the copying cost is paid at most once per element overall.
+      overflow.splice(0, overflowHead);
+      overflowHead = 0;
+    }
+    return task;
+  };
+
+  const hasQueuedWork = (): boolean => pending.length > 0 || overflowHead < overflow.length;
+
+  enqueueDirectory({ directoryPath: rootPath, node: rootNode });
 
   job.progress.directoriesDiscovered = 1;
 
@@ -1213,15 +1558,52 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
         return;
       }
       settled = true;
+      releasePartialTree();
       reject(error);
     };
 
-    const maybeAbort = () => {
-      if (job.controller.signal.aborted) {
-        failScan(new Error("Disk analysis scan aborted"));
-        return true;
+    /**
+     * Drop every reference the walk still holds to the half-built tree.
+     *
+     * DISK-12's second half: the done promise's executor closes over
+     * `nodesByPath`, the queues and `rootNode`, and a cancelled scan used to
+     * leave all of it reachable for as long as anything held the promise. It
+     * is only ever safe to call this once no worker can still be writing into
+     * the tree, which is why the abort path settles from `settleAbort` and
+     * nowhere else.
+     */
+    function releasePartialTree() {
+      nodesByPath.clear();
+      pending.length = 0;
+      overflow.length = 0;
+      overflowHead = 0;
+      rootNode.children = [];
+      rootNode.childIndexByPath.clear();
+    }
+
+    const isAborted = () => job.controller.signal.aborted;
+
+    /**
+     * Settle a cancelled scan -- but only once every worker has returned.
+     *
+     * The old code rejected from whichever call site noticed the abort first,
+     * while other workers were still mid-`readdir` holding
+     * `MutableDirectoryNode` references. That had two consequences. If nobody
+     * noticed (every worker parked in an fs call that never returns, i.e. a
+     * stale NFS or SMB mount) the promise simply never settled -- DISK-12.
+     * And if somebody did, the walk carried on mutating nodes after the
+     * promise had been handed back. Waiting for `activeWorkers === 0` fixes
+     * both, and is what makes `releasePartialTree` safe: at that point no
+     * worker holds a reference into the tree, so nothing can mutate a
+     * structure that has already been published (B4's invariant, which on the
+     * success path is enforced by dropping the root from `nodesByPath` before
+     * `resolve`).
+     */
+    const settleAbort = () => {
+      if (settled || activeWorkers > 0) {
+        return;
       }
-      return false;
+      failScan(new DiskAnalysisScanAbortedError());
     };
 
     const addNodeWithinLimit = () => {
@@ -1233,26 +1615,39 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
     };
 
     const schedule = () => {
-      if (settled || maybeAbort()) {
+      if (settled) {
+        return;
+      }
+      if (isAborted()) {
+        // No new work, and settle here if there is nobody left to settle from
+        // the worker `finally`.
+        settleAbort();
         return;
       }
 
-      while (activeWorkers < job.limits.maxWorkers && pending.length > 0) {
-        const task = pending.pop();
+      while (activeWorkers < job.limits.maxWorkers && hasQueuedWork()) {
+        const task = dequeueDirectory();
         if (!task) {
           break;
         }
         activeWorkers += 1;
         void (async () => {
           try {
-            if (maybeAbort()) {
+            if (isAborted()) {
               return;
             }
 
             let entries: fs.Dirent[];
             try {
-              entries = await fs.readdir(task.directoryPath, { withFileTypes: true });
+              entries = await withFsTimeout(
+                fs.readdir(task.directoryPath, { withFileTypes: true }),
+                task.directoryPath,
+                fsTimeoutMs
+              );
             } catch (error) {
+              if (isAborted()) {
+                return;
+              }
               const issue = getIssueForFsError(task.directoryPath, error);
               recordIssue(job, issue, { nodeIssues: task.node.issues });
               task.node.truncated = true;
@@ -1275,7 +1670,6 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
 
             let smallFileCount = 0;
             let smallFileBytes = 0;
-            let pendingLimitSkips = 0;
             let indexedNodeSkips = 0;
             let nestedMountSkips = 0;
             let symlinkSkips = 0;
@@ -1296,7 +1690,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
               totalFiles += 1;
             };
             for (const entry of entries) {
-              if (maybeAbort()) {
+              if (isAborted()) {
                 return;
               }
 
@@ -1312,8 +1706,11 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
 
               let stat;
               try {
-                stat = await fs.stat(entryPath);
+                stat = await withFsTimeout(fs.stat(entryPath), entryPath, fsTimeoutMs);
               } catch (error) {
+                if (isAborted()) {
+                  return;
+                }
                 const issue = getIssueForFsError(entryPath, error);
                 recordIssue(job, issue, { nodeIssues: task.node.issues });
                 task.node.truncated = true;
@@ -1332,16 +1729,13 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
 
               if (stat.isDirectory()) {
                 task.node.childCount += 1;
-                if (
-                  pending.length >= job.limits.maxPendingDirectories ||
-                  !addNodeWithinLimit()
-                ) {
+                // The node budget is the only reason a directory is dropped.
+                // A full `pending` stack is not: the directory spills into the
+                // overflow FIFO and is walked later -- see the queue comment
+                // at the top of this function.
+                if (!addNodeWithinLimit()) {
                   task.node.truncated = true;
-                  if (pending.length >= job.limits.maxPendingDirectories) {
-                    pendingLimitSkips += 1;
-                  } else {
-                    indexedNodeSkips += 1;
-                  }
+                  indexedNodeSkips += 1;
                   continue;
                 }
 
@@ -1351,7 +1745,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
                 task.node.pendingChildren += 1;
                 totalDirectories += 1;
                 job.progress.directoriesDiscovered += 1;
-                pending.push({ directoryPath: entryPath, node: childNode });
+                enqueueDirectory({ directoryPath: entryPath, node: childNode });
                 continue;
               }
 
@@ -1417,18 +1811,6 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
               });
             }
 
-            if (pendingLimitSkips > 0) {
-              const issue = createIssue(
-                "partial-scan",
-                task.directoryPath,
-                `Traversal limit reached while indexing ${pendingLimitSkips} child director${pendingLimitSkips === 1 ? "y" : "ies"} under ${task.directoryPath}`
-              );
-              recordIssue(job, issue, {
-                nodeIssues: task.node.issues,
-                occurrences: pendingLimitSkips,
-              });
-            }
-
             if (indexedNodeSkips > 0) {
               const issue = createIssue(
                 "partial-scan",
@@ -1465,7 +1847,23 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
           } finally {
             activeWorkers -= 1;
             if (!settled) {
-              if (pending.length > 0) {
+              if (isAborted()) {
+                // The abort path settles here, and only here. Every worker
+                // runs this on its way out, and `settleAbort` is a no-op
+                // until `activeWorkers` reaches zero, so the last worker to
+                // unwind is the one that rejects. That ordering is what makes
+                // `releasePartialTree` safe: by then nobody holds a reference
+                // into the tree, so nothing can mutate a structure that has
+                // already been handed out.
+                //
+                // Reaching this from the `finally` rather than from a check
+                // inside the walk is the actual DISK-12 fix. A worker parked
+                // in a hung `readdir`/`stat` never reaches an abort check; it
+                // leaves through the per-operation timeout, and it has to
+                // settle the scan on its way past even though the root was
+                // never scanned.
+                settleAbort();
+              } else if (hasQueuedWork()) {
                 schedule();
               } else if (
                 activeWorkers === 0 &&
@@ -1479,7 +1877,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
         })();
       }
 
-      if (!settled && activeWorkers === 0 && pending.length === 0 && rootNode.scanned) {
+      if (!settled && activeWorkers === 0 && !hasQueuedWork() && rootNode.scanned) {
         finalizeNode(rootNode);
       }
     };
@@ -1497,6 +1895,16 @@ async function runJob(job: DiskAnalysisJobInternal): Promise<void> {
 
   try {
     const snapshot = await executeScan(job);
+    if (job.controller.signal.aborted) {
+      // Cancelled in the narrow window between the last worker finishing and
+      // this line. The result is complete, but the client has already been
+      // told the job is `cancelled`, and writing the cache here would publish
+      // a snapshot nobody asked for under a phase that denies it exists.
+      clearLiveEmitTimer(job);
+      setJobFinalState(job, "cancelled");
+      emitStatus(job);
+      return;
+    }
     job.snapshot = snapshot;
     flushQueuedLiveEvents(job);
     await writePersistedCache(job.mount, snapshot);
@@ -1524,19 +1932,49 @@ async function runJob(job: DiskAnalysisJobInternal): Promise<void> {
   }
 }
 
+/**
+ * Hand a freshly created job to `runJob` on the microtask queue (so `startScan`
+ * returns before the walk begins) and record the run as unsettled for the
+ * mount until it has fully unwound.
+ *
+ * The entry in `unsettledJobIdByMount` outlives the job's terminal *phase* on
+ * purpose: a cancelled job is `cancelled` immediately but its workers keep
+ * running until they return from whatever fs call they were in. Until then the
+ * mount is still being walked, so a second scan of it must not start.
+ */
+function startJobRun(job: DiskAnalysisJobInternal, mountKey: string): Promise<void> {
+  unsettledJobIdByMount.set(mountKey, job.jobId);
+  return Promise.resolve()
+    .then(() => runJob(job))
+    .catch((error) => {
+      // runJob handles its own failures; anything reaching here came from a
+      // listener callback and must not become an unhandled rejection.
+      console.error("[deckos] Disk analysis job failed unexpectedly:", error);
+    })
+    .finally(() => {
+      if (unsettledJobIdByMount.get(mountKey) === job.jobId) {
+        unsettledJobIdByMount.delete(mountKey);
+      }
+    });
+}
+
+/**
+ * Create and launch a scan for `mount`, or join the one already running.
+ *
+ * No longer takes an `allowAutoStart` flag: `getMountState` was the only
+ * caller that ever passed one, and it no longer starts anything (DISK-3), so
+ * every remaining path through here is an explicit user request via
+ * `startScan`. The policy guards live in `startScan` rather than here, because
+ * joining an already-running job must not re-run them.
+ */
 async function ensureJob(
-  mount: DiskAnalysisMountIdentity,
-  options?: { allowAutoStart?: boolean }
+  mount: DiskAnalysisMountIdentity
 ): Promise<DiskAnalysisJobInternal | null> {
   pruneJobs();
   const mountKey = getMountKey(mount);
   const existing = getActiveJobForMount(mount);
   if (existing) {
     return existing;
-  }
-
-  if (options?.allowAutoStart === false) {
-    return null;
   }
 
   const pendingStart = pendingJobStartByMount.get(mountKey);
@@ -1564,6 +2002,8 @@ async function ensureJob(
         fs: mount.fs,
       },
       phase: "queued",
+      // Replaced immediately below, once the job object exists to hand to runJob.
+      runPromise: Promise.resolve(),
       startedAt: now,
       updatedAt: now,
       progress: {
@@ -1585,10 +2025,8 @@ async function ensureJob(
     };
     jobs.set(job.jobId, job);
     activeJobIdByMount.set(mountKey, job.jobId);
+    job.runPromise = startJobRun(job, mountKey);
     emitStatus(job);
-    queueMicrotask(() => {
-      void runJob(job);
-    });
     return job;
   })();
 
@@ -1602,51 +2040,27 @@ async function ensureJob(
   }
 }
 
-async function maybeStartRefreshJob(
-  mount: DiskAnalysisMountIdentity
-): Promise<DiskAnalysisJobInternal | null> {
-  const cached = await readPersistedCache(mount);
-  if (!cached || cached.cache.state === "fresh") {
-    return ensureJob(mount, { allowAutoStart: cached === null });
-  }
-
-  try {
-    return await ensureJob(mount);
-  } catch (error) {
-    if (error instanceof DiskAnalysisMountUnavailableError) {
-      return null;
-    }
-    throw error;
-  }
-}
-
-function scheduleRefreshJob(mount: DiskAnalysisMountIdentity): void {
-  const mountKey = getMountKey(mount);
-  if (getActiveJobForMount(mount) || pendingJobStartByMount.has(mountKey)) {
-    return;
-  }
-
-  queueMicrotask(() => {
-    void maybeStartRefreshJob(mount).catch((error) => {
-      if (error instanceof DiskAnalysisMountUnavailableError) {
-        return;
-      }
-      console.error("[deckos] Failed to start disk analysis refresh job:", error);
-    });
-  });
-}
-
+/**
+ * Report what is known about a mount without touching it. Observe-only.
+ *
+ * DISK-3: this used to start a full filesystem walk when the cache was missing
+ * (`ensureJob(mount, { allowAutoStart: true })`) and schedule a background one
+ * when it was stale (`scheduleRefreshJob`). Both were reached by merely
+ * *looking* at the disk-analysis page, so opening it committed the box to
+ * potentially hours of I/O that nobody asked for -- and, since a GET is
+ * retried freely, re-committed it on every navigation.
+ *
+ * Scanning is now an explicit action: this function reads the cache metadata
+ * and reports any job that is already running. It starts nothing, and it does
+ * not stat the mount -- an unavailable mount is a fact for `startScan` to
+ * discover, not a reason for the page to hang.
+ */
 export async function getMountState(
   mount: DiskAnalysisMountIdentity
 ): Promise<DiskAnalysisMountState> {
   pruneJobs();
   const cache = await readPersistedCacheMetadata(mount);
-  let activeJob = getActiveJobForMount(mount);
-  if (!cache) {
-    activeJob = activeJob ?? (await ensureJob(mount, { allowAutoStart: true }));
-  } else if (cache.state === "stale" && !activeJob) {
-    scheduleRefreshJob(mount);
-  }
+  const activeJob = getActiveJobForMount(mount);
   return DiskAnalysisMountStateSchema.parse({
     mount,
     cache: cache ?? {
@@ -1663,9 +2077,66 @@ export async function getCachedSnapshot(
   return await readPersistedCache(mount);
 }
 
+/**
+ * Start an explicit scan of `mount`, or join the one already running on it.
+ *
+ * This is now the only way a scan begins, so it is where the guards live.
+ * In order:
+ *
+ *  1. **Denylisted roots** (DISK-6). `/proc/kcore` stats at roughly 128 TB, so
+ *     a single walk of `/proc` makes every total on the page nonsense. The
+ *     denylist is the one in `files.ts` rather than a second copy here, so the
+ *     file browser and the analyser cannot drift apart about what is off
+ *     limits.
+ *  2. **Pseudo-filesystems the denylist cannot see**, via the kernel mount
+ *     table -- see `assertNotPseudoFilesystem` for what that does per platform.
+ *  3. **An already-running scan of this mount** is joined rather than
+ *     duplicated, which keeps a double-clicked button harmless.
+ *  4. **A previous scan of this mount that has not wound down** is refused.
+ *     A cancelled job reports `cancelled` immediately while its workers are
+ *     still inside `readdir`/`stat`; starting again now would mean two walks
+ *     of the same mount.
+ *  5. **The global concurrency cap.** Each scan runs `maxWorkers` (4)
+ *     concurrent fs operations against a four-thread libuv pool, so two scans
+ *     already saturate it and a third would only make all three slower.
+ */
 export async function startScan(
   mount: DiskAnalysisMountIdentity
 ): Promise<DiskAnalysisStartScanResult> {
+  pruneJobs();
+  const resolvedMount = resolveMountPath(mount.mount);
+  assertNotDeniedPath(resolvedMount);
+  await assertNotPseudoFilesystem(resolvedMount);
+
+  const mountKey = getMountKey(mount);
+  const existing = getActiveJobForMount(mount);
+  if (existing) {
+    return toStartScanResult(existing);
+  }
+
+  if (unsettledJobIdByMount.has(mountKey)) {
+    throw new DiskAnalysisScanBusyError(
+      resolvedMount,
+      `A previous scan of ${resolvedMount} is still winding down; try again in a moment`
+    );
+  }
+
+  // `pendingJobStartByMount` is counted alongside the unsettled runs because a
+  // job does not claim its slot until `ensureMountAvailable` has resolved, and
+  // that await is long enough for two concurrent requests to both pass a check
+  // that only looked at `unsettledJobIdByMount`. `ensureJob` registers the
+  // pending entry synchronously, so counting both closes the window.
+  const scansInFlight = new Set([
+    ...unsettledJobIdByMount.keys(),
+    ...pendingJobStartByMount.keys(),
+  ]);
+  if (scansInFlight.size >= MAX_CONCURRENT_SCANS) {
+    throw new DiskAnalysisScanBusyError(
+      resolvedMount,
+      `${scansInFlight.size} disk analysis scans are already running; wait for one to finish before scanning ${resolvedMount}`
+    );
+  }
+
   const job = await ensureJob(mount);
   if (!job) {
     throw new DiskAnalysisMountUnavailableError(
@@ -1797,28 +2268,46 @@ export const __testing = {
     childLookupCandidates = 0;
     maxChildIndexSize = 0;
   },
+  /**
+   * Await a job's run to fully unwind and report the phase it landed on.
+   *
+   * `getJob(...).phase` is not this: `cancelScan` sets `cancelled`
+   * synchronously while the walk is still in flight. DISK-12 lives in that
+   * gap, so the test for it has to wait on the run itself.
+   */
+  async waitForJobSettled(jobId: string): Promise<DiskAnalysisJobState | null> {
+    const job = jobs.get(jobId);
+    if (!job) {
+      return null;
+    }
+    await job.runPromise;
+    return getJobState(job);
+  },
   resetState() {
     jobs.clear();
     activeJobIdByMount.clear();
+    unsettledJobIdByMount.clear();
     pendingJobStartByMount.clear();
     listenersByJobId.clear();
   },
   async clearState() {
+    const running: Promise<void>[] = [];
     for (const job of jobs.values()) {
       if (isActivePhase(job.phase)) {
         job.controller.abort();
       }
       clearLiveEmitTimer(job);
+      running.push(job.runPromise);
     }
 
-    await Promise.resolve();
-
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      if ([...jobs.values()].every((job) => !isActivePhase(job.phase))) {
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    // Wait on the runs themselves rather than polling the phase: a cancelled
+    // job reports a terminal phase long before its workers have unwound, and
+    // tearing the module state down underneath a live walk is how one test's
+    // scan ends up writing into the next test's data directory.
+    await Promise.race([
+      Promise.all(running),
+      new Promise((resolve) => setTimeout(resolve, 5_000)),
+    ]);
 
     this.resetState();
     await fs.remove(DISK_ANALYSIS_DIR).catch(() => undefined);
