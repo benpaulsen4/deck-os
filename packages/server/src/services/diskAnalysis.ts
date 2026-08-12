@@ -256,33 +256,76 @@ function getCachePath(mount: DiskAnalysisMountIdentity): string {
   return path.join(DISK_ANALYSIS_DIR, `${key}.json`);
 }
 
-function createIssue(
-  code: DiskAnalysisIssue["code"],
-  issuePath: string,
-  message: string,
-  recoverable: boolean = true
-): DiskAnalysisIssue {
+const MAX_ISSUE_MESSAGE_LENGTH = 2048;
+
+function truncateMessage(message: string): string {
+  if (message.length <= MAX_ISSUE_MESSAGE_LENGTH) return message;
+  // An issue that fails its own schema takes the whole scan down, and on the
+  // SSE path it wedges the browser's EventSource open with no more events.
+  // A clipped message is strictly better than that.
+  return `${message.slice(0, MAX_ISSUE_MESSAGE_LENGTH - 1)}…`;
+}
+
+export function createIssue(input: {
+  code: DiskAnalysisIssue["code"];
+  path: string;
+  message?: string;
+  recoverable?: boolean;
+}): DiskAnalysisIssue {
+  let message = input.message;
+
+  if (!message) {
+    switch (input.code) {
+      case "permission-denied":
+        message = `Permission denied: ${input.path}`;
+        break;
+      case "path-inaccessible":
+        message = `Path inaccessible: ${input.path}`;
+        break;
+      case "path-not-found":
+        message = `Path not found: ${input.path}`;
+        break;
+      case "symlink-skipped":
+        message = `Symlink skipped: ${input.path}`;
+        break;
+      case "nested-mount-skipped":
+        message = `Nested mount skipped: ${input.path}`;
+        break;
+      case "partial-scan":
+        message = `Partial scan: ${input.path}`;
+        break;
+      case "unknown":
+        message = `Unknown error: ${input.path}`;
+        break;
+    }
+  }
+
   return {
-    code,
-    path: issuePath,
-    message,
-    recoverable,
+    code: input.code,
+    path: input.path,
+    message: truncateMessage(message),
+    recoverable: input.recoverable ?? true,
   };
 }
 
 function getIssueForFsError(targetPath: string, error: unknown): DiskAnalysisIssue {
   const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
   if (code === "EACCES" || code === "EPERM") {
-    return createIssue(
-      "permission-denied",
-      targetPath,
-      `Permission denied: ${targetPath}`
-    );
+    return createIssue({
+      code: "permission-denied",
+      path: targetPath,
+    });
   }
   if (code === "ENOENT") {
-    return createIssue("path-not-found", targetPath, `Path not found: ${targetPath}`);
+    return createIssue({
+      code: "path-not-found",
+      path: targetPath,
+    });
   }
-  return createIssue("path-inaccessible", targetPath, `Path inaccessible: ${targetPath}`);
+  return createIssue({
+    code: "path-inaccessible",
+    path: targetPath,
+  });
 }
 
 function getComparableDeviceId(stat: fs.Stats): number | null {
@@ -962,11 +1005,10 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
 
               const entryPath = path.join(task.directoryPath, entry.name);
               if (entry.isSymbolicLink()) {
-                const issue = createIssue(
-                  "symlink-skipped",
-                  entryPath,
-                  `Symlink skipped: ${entryPath}`
-                );
+                const issue = createIssue({
+                  code: "symlink-skipped",
+                  path: entryPath,
+                });
                 task.node.issues.push(issue);
                 job.issues.push(issue);
                 task.node.truncated = true;
@@ -1070,31 +1112,31 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
             }
 
             if (pendingLimitSkips > 0) {
-              const issue = createIssue(
-                "partial-scan",
-                task.directoryPath,
-                `Traversal limit reached while indexing ${pendingLimitSkips} child director${pendingLimitSkips === 1 ? "y" : "ies"} under ${task.directoryPath}`
-              );
+              const issue = createIssue({
+                code: "partial-scan",
+                path: task.directoryPath,
+                message: `Traversal limit reached while indexing ${pendingLimitSkips} child director${pendingLimitSkips === 1 ? "y" : "ies"} under ${task.directoryPath}`,
+              });
               task.node.issues.push(issue);
               job.issues.push(issue);
             }
 
             if (indexedNodeSkips > 0) {
-              const issue = createIssue(
-                "partial-scan",
-                task.directoryPath,
-                `Node limit reached while indexing ${indexedNodeSkips} entr${indexedNodeSkips === 1 ? "y" : "ies"} under ${task.directoryPath}`
-              );
+              const issue = createIssue({
+                code: "partial-scan",
+                path: task.directoryPath,
+                message: `Node limit reached while indexing ${indexedNodeSkips} entr${indexedNodeSkips === 1 ? "y" : "ies"} under ${task.directoryPath}`,
+              });
               task.node.issues.push(issue);
               job.issues.push(issue);
             }
 
             if (nestedMountSkips > 0) {
-              const issue = createIssue(
-                "nested-mount-skipped",
-                task.directoryPath,
-                `Nested mount skipped for ${nestedMountSkips} entr${nestedMountSkips === 1 ? "y" : "ies"} under ${task.directoryPath}`
-              );
+              const issue = createIssue({
+                code: "nested-mount-skipped",
+                path: task.directoryPath,
+                message: `Nested mount skipped for ${nestedMountSkips} entr${nestedMountSkips === 1 ? "y" : "ies"} under ${task.directoryPath}`,
+              });
               task.node.issues.push(issue);
               job.issues.push(issue);
             }
@@ -1158,12 +1200,12 @@ async function runJob(job: DiskAnalysisJobInternal): Promise<void> {
     }
 
     clearLiveEmitTimer(job);
-    const issue = createIssue(
-      "unknown",
-      job.mount.mount,
-      error instanceof Error ? error.message : "Disk analysis failed",
-      false
-    );
+    const issue = createIssue({
+      code: "unknown",
+      path: job.mount.mount,
+      message: error instanceof Error ? error.message : "Disk analysis failed",
+      recoverable: false,
+    });
     job.issues.push(issue);
     setJobFinalState(job, "failed");
     emitStatus(job);

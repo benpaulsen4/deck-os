@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { DiskAnalysisScanEvent, DiskAnalysisMountIdentity } from "@deckos/contracts";
+import { DiskAnalysisIssueSchema } from "@deckos/contracts";
 
 type DiskAnalysisModule = typeof import("./diskAnalysis.js");
 
@@ -648,5 +649,28 @@ describe("diskAnalysis service", () => {
       await fs.chmod(locked, 0o755);
       await fs.remove(root);
     }
+  });
+
+  test("a path longer than the message cap still produces a valid issue", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const diskAnalysis = (await loadDiskAnalysisModule(dataDir)) as DiskAnalysisModule & {
+      createIssue: typeof import("./diskAnalysis.js").createIssue;
+    };
+
+    // The path schema allows 4096 chars; the message that embeds it allows 2048.
+    // Nested node_modules or a deep backup tree reaches this without trying.
+    const longPath = `/mnt/${"deep-directory-name/".repeat(120)}file.bin`;
+    expect(longPath.length).toBeGreaterThan(2048);
+
+    const issue = diskAnalysis.createIssue({
+      code: "path-inaccessible",
+      path: longPath,
+    });
+
+    expect(() => DiskAnalysisIssueSchema.parse(issue)).not.toThrow();
+    expect(issue.message.length).toBeLessThanOrEqual(2048);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
   });
 });
