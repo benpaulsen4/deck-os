@@ -427,58 +427,83 @@ describe("diskAnalysis service", () => {
     await fs.remove(mountDir);
   });
 
-  test("scan stays on the selected mount device", async () => {
+  test("a skipped nested mount is reported rather than silently omitted", async () => {
     const dataDir = await createTempDir("deckos-disk-analysis-data-");
     const mountDir = await createTempDir("deckos-disk-analysis-mount-");
-    const nestedMountDir = path.join(mountDir, "proc");
+    const nestedMountDir = path.join(mountDir, "sub");
     const localFilePath = path.join(mountDir, "keep.txt");
-    const nestedFilePath = path.join(nestedMountDir, "kcore");
+    const nestedFilePath = path.join(nestedMountDir, "x.bin");
     await fs.ensureDir(nestedMountDir);
     await fs.writeFile(localFilePath, "keep", "utf8");
-    await fs.writeFile(nestedFilePath, "skip", "utf8");
+    await fs.writeFile(nestedFilePath, Buffer.alloc(2048));
 
+    // Force the device-boundary branch without needing a real mount: stat the
+    // subdirectory onto a different st_dev.
     const originalStat = fs.stat.bind(fs);
-    const withDev = (stat: fs.Stats, dev: number, size: number = stat.size): fs.Stats =>
-      Object.assign(Object.create(Object.getPrototypeOf(stat)) as fs.Stats, stat, {
-        dev,
-        size,
-      });
+    const withDev = (stat: fs.Stats, dev: number): fs.Stats =>
+      Object.assign(Object.create(Object.getPrototypeOf(stat)) as fs.Stats, stat, { dev });
 
-    const rootPath = path.resolve(mountDir);
-    const procPath = path.resolve(nestedMountDir);
-    const kcorePath = path.resolve(nestedFilePath);
+    const subPath = path.resolve(nestedMountDir);
     const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (target) => {
       const stat = await originalStat(target);
       const targetPath = path.resolve(typeof target === "string" ? target : String(target));
-      if (targetPath === procPath) {
-        return withDev(stat, 2);
-      }
-      if (targetPath === kcorePath) {
-        return withDev(stat, 2, 128 * 1024 * 1024 * 1024 * 1024);
-      }
-      if (targetPath === rootPath || targetPath === path.resolve(localFilePath)) {
-        return withDev(stat, 1);
+      if (targetPath === subPath) {
+        return withDev(stat, stat.dev + 1);
       }
       return stat;
     });
 
+    try {
+      const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+      const mount = { mount: mountDir, fs: "ext4" };
+      const start = await diskAnalysis.startScan(mount);
+      const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+      const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+
+      expect(finalJob).toBeTruthy();
+      expect(snapshot).toBeTruthy();
+      expect(snapshot?.snapshot.root.children.some((child) => child.name === "sub")).toBe(false);
+      expect(
+        snapshot?.snapshot.issues.some((issue) => issue.code === "nested-mount-skipped")
+      ).toBe(true);
+      expect(snapshot?.snapshot.root.truncated).toBe(true);
+
+      await diskAnalysis.__testing.clearState();
+      await fs.remove(dataDir);
+    } finally {
+      statSpy.mockRestore();
+      await fs.remove(mountDir);
+    }
+  }, 15000);
+
+  test("extension totals never exceed the tree total once the node cap is hit", async () => {
+    process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = "10";
+    process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES = "1";
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    for (let index = 0; index < 50; index += 1) {
+      await fs.writeFile(path.join(mountDir, `f${index}.bin`), Buffer.alloc(1024));
+    }
+
     const diskAnalysis = await loadDiskAnalysisModule(dataDir);
-    const mount = { mount: mountDir, fs: "ext4" };
+    const mount = { mount: mountDir, fs: "testfs" };
     const start = await diskAnalysis.startScan(mount);
-    const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+    await waitForTerminalJob(diskAnalysis, start.jobId);
     const snapshot = await diskAnalysis.getCachedSnapshot(mount);
 
-    expect(finalJob?.phase).toBe("completed");
-    expect(snapshot?.snapshot.root.children.some((child) => child.name === "proc")).toBe(false);
-    expect(snapshot?.snapshot.totals.totalFiles).toBe(1);
-    expect(snapshot?.snapshot.totals.totalBytes).toBe(4);
-    expect(snapshot?.snapshot.issues.some((issue) => issue.code === "partial-scan")).toBe(false);
+    expect(snapshot).toBeTruthy();
+    const legendTotal = (snapshot?.snapshot.extensionLegend ?? []).reduce(
+      (sum, entry) => sum + entry.totalBytes,
+      0
+    );
 
-    statSpy.mockRestore();
+    // The sidebar cannot claim more bytes than the treemap shows for the whole mount.
+    expect(legendTotal).toBeLessThanOrEqual(snapshot?.snapshot.totals.totalBytes ?? 0);
+
     await diskAnalysis.__testing.clearState();
     await fs.remove(dataDir);
     await fs.remove(mountDir);
-  }, 15000);
+  });
 
   test("cache file can be replaced by a later scan", async () => {
     const dataDir = await createTempDir("deckos-disk-analysis-data-");

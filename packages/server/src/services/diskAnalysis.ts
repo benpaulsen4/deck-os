@@ -741,6 +741,10 @@ const PARTIAL_RESULT_CODES = new Set([
   "permission-denied",
   "path-inaccessible",
   "path-not-found",
+  // A skipped nested mount is a whole subtree the scan never counted — on a
+  // homelab box that's frequently the media drive, i.e. most of the data. The
+  // total is a lower bound in exactly the sense this set exists to flag.
+  "nested-mount-skipped",
 ]);
 
 function hasPartialResult(job: DiskAnalysisJobInternal): boolean {
@@ -934,6 +938,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
             let smallFileBytes = 0;
             let pendingLimitSkips = 0;
             let indexedNodeSkips = 0;
+            let nestedMountSkips = 0;
             for (const entry of entries) {
               if (maybeAbort()) {
                 return;
@@ -964,8 +969,12 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
               }
 
               // Stay on the selected mount instead of traversing into nested mounts like
-              // procfs, sysfs, tmpfs, removable drives, or bind-mounted trees.
+              // procfs, sysfs, tmpfs, removable drives, or bind-mounted trees. The subtree
+              // is real data the user has on disk, so record that it was skipped instead of
+              // letting it vanish from the totals with no trace.
               if (rootDeviceId !== null && getComparableDeviceId(stat) !== rootDeviceId) {
+                task.node.truncated = true;
+                nestedMountSkips += 1;
                 continue;
               }
 
@@ -999,18 +1008,20 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
               }
 
               const extension = getFileExtension(entryPath);
-              if (extension) {
-                const current = extensionCounts.get(extension) ?? {
-                  count: 0,
-                  totalBytes: 0,
-                };
-                current.count += 1;
-                current.totalBytes += stat.size;
-                extensionCounts.set(extension, current);
-              }
-              totalFiles += 1;
               task.node.childCount += 1;
               if (stat.size < adaptiveSmallFileThresholdBytes) {
+                // This file's bytes are entering the tree (via the small-files bucket
+                // below), so it is safe to count it in the totals and the legend now.
+                if (extension) {
+                  const current = extensionCounts.get(extension) ?? {
+                    count: 0,
+                    totalBytes: 0,
+                  };
+                  current.count += 1;
+                  current.totalBytes += stat.size;
+                  extensionCounts.set(extension, current);
+                }
+                totalFiles += 1;
                 smallFileCount += 1;
                 smallFileBytes += stat.size;
                 task.node.size += stat.size;
@@ -1023,6 +1034,19 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
                 indexedNodeSkips += 1;
                 continue;
               }
+              // Only count files whose bytes actually made it into the tree — a file
+              // skipped by the node-limit gate above must not inflate totalFiles or the
+              // extension legend beyond what the treemap shows.
+              if (extension) {
+                const current = extensionCounts.get(extension) ?? {
+                  count: 0,
+                  totalBytes: 0,
+                };
+                current.count += 1;
+                current.totalBytes += stat.size;
+                extensionCounts.set(extension, current);
+              }
+              totalFiles += 1;
               task.node.children.push({
                 path: entryPath,
                 name: entry.name,
@@ -1067,6 +1091,16 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
                 "partial-scan",
                 task.directoryPath,
                 `Node limit reached while indexing ${indexedNodeSkips} entr${indexedNodeSkips === 1 ? "y" : "ies"} under ${task.directoryPath}`
+              );
+              task.node.issues.push(issue);
+              job.issues.push(issue);
+            }
+
+            if (nestedMountSkips > 0) {
+              const issue = createIssue(
+                "nested-mount-skipped",
+                task.directoryPath,
+                `Nested mount skipped for ${nestedMountSkips} entr${nestedMountSkips === 1 ? "y" : "ies"} under ${task.directoryPath}`
               );
               task.node.issues.push(issue);
               job.issues.push(issue);

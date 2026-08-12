@@ -26,6 +26,7 @@ const DiskAnalysisIssueCodeSchema = z.enum([
   "path-not-found",
   "symlink-skipped",
   "partial-scan",
+  "nested-mount-skipped",
   "unknown",
 ]);
 
