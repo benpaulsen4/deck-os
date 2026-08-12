@@ -662,10 +662,11 @@ describe("diskAnalysis service", () => {
     const longPath = `/mnt/${"deep-directory-name/".repeat(120)}file.bin`;
     expect(longPath.length).toBeGreaterThan(2048);
 
-    const issue = diskAnalysis.createIssue({
-      code: "path-inaccessible",
-      path: longPath,
-    });
+    const issue = diskAnalysis.createIssue(
+      "path-inaccessible",
+      longPath,
+      `Path inaccessible: ${longPath}`
+    );
 
     expect(() => DiskAnalysisIssueSchema.parse(issue)).not.toThrow();
     expect(issue.message.length).toBeLessThanOrEqual(2048);
