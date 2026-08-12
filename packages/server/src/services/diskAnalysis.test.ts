@@ -438,17 +438,27 @@ describe("diskAnalysis service", () => {
     await fs.writeFile(nestedFilePath, Buffer.alloc(2048));
 
     // Force the device-boundary branch without needing a real mount: stat the
-    // subdirectory onto a different st_dev.
+    // subdirectory (and the file inside it) onto a different st_dev, and fake the
+    // file's reported size at terabyte scale so a leak into the totals would be
+    // unmistakable rather than lost in rounding.
     const originalStat = fs.stat.bind(fs);
-    const withDev = (stat: fs.Stats, dev: number): fs.Stats =>
-      Object.assign(Object.create(Object.getPrototypeOf(stat)) as fs.Stats, stat, { dev });
+    const withDev = (stat: fs.Stats, dev: number, size: number = stat.size): fs.Stats =>
+      Object.assign(Object.create(Object.getPrototypeOf(stat)) as fs.Stats, stat, {
+        dev,
+        size,
+      });
 
     const subPath = path.resolve(nestedMountDir);
+    const nestedFilePathResolved = path.resolve(nestedFilePath);
+    const HUGE_FAKE_BYTES = 128 * 1024 * 1024 * 1024 * 1024; // 128 TB
     const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (target) => {
       const stat = await originalStat(target);
       const targetPath = path.resolve(typeof target === "string" ? target : String(target));
       if (targetPath === subPath) {
         return withDev(stat, stat.dev + 1);
+      }
+      if (targetPath === nestedFilePathResolved) {
+        return withDev(stat, stat.dev + 1, HUGE_FAKE_BYTES);
       }
       return stat;
     });
@@ -467,6 +477,67 @@ describe("diskAnalysis service", () => {
         snapshot?.snapshot.issues.some((issue) => issue.code === "nested-mount-skipped")
       ).toBe(true);
       expect(snapshot?.snapshot.root.truncated).toBe(true);
+      // The 128 TB fabricated file lives entirely inside the skipped subtree. If it
+      // ever leaked into the totals this would be off by many orders of magnitude.
+      expect(snapshot?.snapshot.totals.totalFiles).toBe(1);
+      expect(snapshot?.snapshot.totals.totalBytes).toBe(4);
+
+      await diskAnalysis.__testing.clearState();
+      await fs.remove(dataDir);
+    } finally {
+      statSpy.mockRestore();
+      await fs.remove(mountDir);
+    }
+  }, 15000);
+
+  test("multiple nested mounts under one parent produce a single aggregated issue", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    const childNames = ["sub1", "sub2", "sub3", "sub4"];
+    for (const name of childNames) {
+      await fs.ensureDir(path.join(mountDir, name));
+      await fs.writeFile(path.join(mountDir, name, "x.bin"), Buffer.alloc(64));
+    }
+    await fs.writeFile(path.join(mountDir, "keep.txt"), "keep", "utf8");
+
+    // Force every child subdirectory onto a different st_dev than the root, so the
+    // walker hits the device-boundary branch once per child.
+    const originalStat = fs.stat.bind(fs);
+    const withDev = (stat: fs.Stats, dev: number): fs.Stats =>
+      Object.assign(Object.create(Object.getPrototypeOf(stat)) as fs.Stats, stat, { dev });
+
+    const childPaths = new Set(
+      childNames.map((name) => path.resolve(path.join(mountDir, name)))
+    );
+    const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (target) => {
+      const stat = await originalStat(target);
+      const targetPath = path.resolve(typeof target === "string" ? target : String(target));
+      if (childPaths.has(targetPath)) {
+        return withDev(stat, stat.dev + 1);
+      }
+      return stat;
+    });
+
+    try {
+      const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+      const mount = { mount: mountDir, fs: "ext4" };
+      const start = await diskAnalysis.startScan(mount);
+      await waitForTerminalJob(diskAnalysis, start.jobId);
+      const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+
+      const parentPath = path.resolve(mountDir);
+      const nestedMountIssues = (snapshot?.snapshot.issues ?? []).filter(
+        (issue) =>
+          issue.code === "nested-mount-skipped" && path.resolve(issue.path) === parentPath
+      );
+
+      // One issue per parent directory, not one per skipped child -- a host with many
+      // btrfs subvolumes or docker overlays under one directory must not fan out into
+      // hundreds of near-identical issues.
+      expect(nestedMountIssues).toHaveLength(1);
+      expect(nestedMountIssues[0]?.message).toMatch(
+        new RegExp(`for ${childNames.length} (entry|entries)`)
+      );
 
       await diskAnalysis.__testing.clearState();
       await fs.remove(dataDir);

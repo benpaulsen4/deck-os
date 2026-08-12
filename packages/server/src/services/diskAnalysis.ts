@@ -939,6 +939,22 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
             let pendingLimitSkips = 0;
             let indexedNodeSkips = 0;
             let nestedMountSkips = 0;
+            // Only call this once a file's bytes are actually entering the tree (the
+            // small-file bucket, or past the node-limit gate) — a file skipped by the
+            // gate must not inflate totalFiles or the extension legend beyond what the
+            // treemap shows.
+            const recordFileAccounting = (extension: string | null, size: number) => {
+              if (extension) {
+                const current = extensionCounts.get(extension) ?? {
+                  count: 0,
+                  totalBytes: 0,
+                };
+                current.count += 1;
+                current.totalBytes += size;
+                extensionCounts.set(extension, current);
+              }
+              totalFiles += 1;
+            };
             for (const entry of entries) {
               if (maybeAbort()) {
                 return;
@@ -1010,18 +1026,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
               const extension = getFileExtension(entryPath);
               task.node.childCount += 1;
               if (stat.size < adaptiveSmallFileThresholdBytes) {
-                // This file's bytes are entering the tree (via the small-files bucket
-                // below), so it is safe to count it in the totals and the legend now.
-                if (extension) {
-                  const current = extensionCounts.get(extension) ?? {
-                    count: 0,
-                    totalBytes: 0,
-                  };
-                  current.count += 1;
-                  current.totalBytes += stat.size;
-                  extensionCounts.set(extension, current);
-                }
-                totalFiles += 1;
+                recordFileAccounting(extension, stat.size);
                 smallFileCount += 1;
                 smallFileBytes += stat.size;
                 task.node.size += stat.size;
@@ -1034,19 +1039,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
                 indexedNodeSkips += 1;
                 continue;
               }
-              // Only count files whose bytes actually made it into the tree — a file
-              // skipped by the node-limit gate above must not inflate totalFiles or the
-              // extension legend beyond what the treemap shows.
-              if (extension) {
-                const current = extensionCounts.get(extension) ?? {
-                  count: 0,
-                  totalBytes: 0,
-                };
-                current.count += 1;
-                current.totalBytes += stat.size;
-                extensionCounts.set(extension, current);
-              }
-              totalFiles += 1;
+              recordFileAccounting(extension, stat.size);
               task.node.children.push({
                 path: entryPath,
                 name: entry.name,
