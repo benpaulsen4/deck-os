@@ -7,12 +7,14 @@ import {
   describeScanStartError,
   findNodeByPath,
   getEventMountIdentity,
+  getMountStatePollIntervalMs,
   integrateBranchIntoTree,
   resolveHoveredNode,
 } from "./diskAnalysisClient";
 import type {
   DiskAnalysisJobState,
   DiskAnalysisMountIdentity,
+  DiskAnalysisMountState,
   DiskAnalysisTreemapNode,
 } from "@deckos/contracts";
 
@@ -355,5 +357,30 @@ describe("diskAnalysisClient", () => {
         jobId: "11111111-1111-1111-1111-111111111111",
       })
     ).toBeNull();
+  });
+
+  it("polls the mount state only while a job is actually running", () => {
+    // B7 review round 2, finding 3. `mountStateQuery` has no refetch trigger
+    // of its own -- no `refetchInterval`, and `refetchOnWindowFocus` is off
+    // globally -- so once a job ends, "Watch Running Scan" keeps advertising
+    // it for as long as the tab stays open with nothing to correct the stale
+    // read. Polling only while a job is reported active fixes that without
+    // introducing a timer that outlives the thing it is watching.
+    const mount: DiskAnalysisMountIdentity = { mount: "C:\\", fs: "ntfs" };
+    const runningJob = { mount, phase: "scanning" } as DiskAnalysisJobState;
+    const running: DiskAnalysisMountState = {
+      mount,
+      cache: { state: "missing" },
+      activeJob: runningJob,
+    };
+    const idle: DiskAnalysisMountState = {
+      mount,
+      cache: { state: "missing" },
+      activeJob: null,
+    };
+
+    expect(getMountStatePollIntervalMs(running)).toBeGreaterThan(0);
+    expect(getMountStatePollIntervalMs(idle)).toBe(false);
+    expect(getMountStatePollIntervalMs(undefined)).toBe(false);
   });
 });

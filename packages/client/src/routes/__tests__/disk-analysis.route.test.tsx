@@ -968,6 +968,51 @@ describe("disk analysis route", () => {
     await waitFor(() => expect(addToastSpy).toHaveBeenCalledWith(notice, "info"));
   });
 
+  it("clears the mismatch notice once the stream it describes ends", async () => {
+    // B7 review round 2, finding 4. The notice was cleared only by
+    // `resetLiveState` or a `mountKey` change, so it persisted past the
+    // stream it described -- still telling the user "a new scan just
+    // started" long after that new scan had also finished.
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "missing",
+      },
+      activeJob: {
+        ...getActiveJob(),
+        phase: "scanning",
+      },
+    };
+    state.snapshotEnvelope = null;
+    const newJobId = "44444444-4444-4444-4444-444444444444";
+    startScanSpy.mockResolvedValueOnce({
+      jobId: newJobId,
+      phase: "queued",
+      streamPath: `/api/disk-analysis/jobs/${newJobId}/events?mount=C%3A%5C&fs=ntfs`,
+    });
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Watch Running Scan" }));
+
+    const notice =
+      "The scan you asked to watch had already finished - this is a new scan that just started.";
+    expect(await screen.findByText(notice)).toBeInTheDocument();
+
+    const eventSource = MockEventSource.latest();
+    eventSource.dispatchOpen();
+    eventSource.dispatchMessage("status", {
+      event: "status",
+      job: {
+        ...getActiveJob(),
+        jobId: newJobId,
+        phase: "completed",
+      },
+    });
+
+    await waitFor(() => expect(screen.queryByText(notice)).not.toBeInTheDocument());
+  });
+
   it("warns that a partial scan's totals are a lower bound", async () => {
     // Driven through the path that actually fires. `getMountState` filters
     // `activeJob` to queued/scanning jobs, so a job in the terminal "partial"
@@ -1099,35 +1144,46 @@ describe("disk analysis route", () => {
     // no branch matches the root, `buildAncestorChain` walks up to `/`, and
     // the whole tree is re-parented under a chain of phantom directories.
     //
+    // B7 review round 2, finding 1: the previous version of this fixture
+    // seeded `liveMount` from `mountState.activeJob.mount`, which was
+    // *already* the resolved path -- so `liveMount` was correct before any
+    // event arrived, and the test passed with or without the adoption line
+    // at the SSE handler's entry point. This version starts with no active
+    // job at all, the shape the adoption exists for: the seed is the raw,
+    // unresolved search param, and only the branch event's `mount` field can
+    // make the tree line up.
+    //
     // Asserted at the top-left corner of the canvas, where the outermost
     // drawable is: with the fix that is the real `/data/media/videos`; with
     // the phantom chain it is a synthetic `/` wrapping three more levels.
     const serverMount = { mount: "/data/media", fs: "ext4" };
     state.mountState = {
-      mount: serverMount,
+      mount: { mount: "/data//media", fs: "ext4" },
       cache: {
         state: "missing",
       },
-      activeJob: {
-        ...getActiveJob(),
-        mount: serverMount,
-        phase: "scanning",
-      },
+      activeJob: null,
     };
     state.snapshotEnvelope = null;
+    startScanSpy.mockResolvedValueOnce({
+      jobId: "33333333-3333-3333-3333-333333333333",
+      phase: "scanning",
+      streamPath:
+        "/api/disk-analysis/jobs/33333333-3333-3333-3333-333333333333/events?mount=%2Fdata%2F%2Fmedia&fs=ext4",
+    });
 
     renderWithAppRouter({
       initialEntries: ["/disk-analysis?mount=%2Fdata%2F%2Fmedia&fs=ext4"],
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Watch Running Scan" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Scan This Mount" }));
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
 
     const eventSource = MockEventSource.latest();
     eventSource.dispatchOpen();
     eventSource.dispatchMessage("branch", {
       event: "branch",
-      jobId: "11111111-1111-1111-1111-111111111111",
+      jobId: "33333333-3333-3333-3333-333333333333",
       mount: serverMount,
       branch: makeDirectory("/data/media/videos", [
         makeFile("/data/media/videos/clip.mp4", 512, "mp4"),

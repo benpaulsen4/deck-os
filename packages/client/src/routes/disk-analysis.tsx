@@ -24,6 +24,7 @@ import {
   formatCount,
   formatRelativeGeneratedAt,
   getMountLabel,
+  getMountStatePollIntervalMs,
   getNodeNavigationSearch,
   integrateBranchIntoTree,
   resolveHoveredNode,
@@ -139,6 +140,11 @@ function DiskAnalysisPage() {
   const mountStateQuery = useQuery(
     trpc.diskAnalysis.getMountState.queryOptions(mount ?? { mount: "", fs: "" }, {
       enabled: !!mount,
+      // See `getMountStatePollIntervalMs` -- keeps `canWatchRunningScan`
+      // truthful while a job is actually running, and stops polling the
+      // instant one isn't, so a page left open never grows a timer that
+      // outlives the scan it was watching for.
+      refetchInterval: (query) => getMountStatePollIntervalMs(query.state.data ?? null),
     })
   );
   const snapshotQuery = useQuery(
@@ -502,6 +508,12 @@ function DiskAnalysisPage() {
               });
             }
             setStreamPath(null);
+            // The mismatch notice describes *this* stream; it must not
+            // outlive it. Without this it persisted until `resetLiveState`
+            // or a `mountKey` change, so it was still showing "the scan you
+            // asked to watch had already finished" for a scan that had, by
+            // now, also finished.
+            setStreamNotice(null);
             return;
           }
           scheduleFlush();
@@ -843,7 +855,12 @@ function DiskAnalysisPage() {
               <SidebarStat label="Job" value={liveStatus} />
               <SidebarStat label="Generated" value={formatRelativeGeneratedAt(generatedAt)} />
               {streamError ? <SidebarStat label="Stream" value={streamError} tone="bad" /> : null}
-              {streamNotice ? <SidebarStat label="Scan" value={streamNotice} tone="bad" /> : null}
+              {/* Same tone as the toast this text is also shown in ("info", not
+                  an error) -- attaching to a different scan than expected is a
+                  fact worth surfacing, not a failure. `SidebarStat` has no
+                  "info" tone of its own, so this omits `tone` for the default,
+                  neutral styling rather than the alarming "bad" one. */}
+              {streamNotice ? <SidebarStat label="Scan" value={streamNotice} /> : null}
             </div>
 
             {isPartialResult ? (
@@ -925,8 +942,8 @@ function DiskAnalysisPage() {
               <div className="disk-analysis-empty">
                 <div className="disk-analysis-empty__title">A scan is already running</div>
                 <div className="disk-analysis-empty__body">
-                  This mount is being scanned right now. Watching it streams the directories as
-                  workers finish them; it does not queue a second scan.
+                  This mount is being scanned right now. Watching joins the scan already running
+                  and streams the directories as workers finish them.
                 </div>
                 <Button onClick={startManualScan} disabled={startScanMutation.isPending}>
                   <Play size={14} />

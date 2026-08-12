@@ -2,10 +2,12 @@ import { getPathParent, trimTrailingPathSeparators } from "@deckos/contracts";
 import type {
   DiskAnalysisIssue,
   DiskAnalysisMountIdentity,
+  DiskAnalysisMountState,
   DiskAnalysisScanEvent,
   DiskAnalysisSnapshot,
   DiskAnalysisTreemapNode,
 } from "@deckos/contracts";
+import { REFETCH_INTERVAL_MS } from "./constants.js";
 
 export type DiskAnalysisLegendItem = {
   extension: string;
@@ -730,6 +732,26 @@ export function describeScanStartError(error: unknown): string {
     default:
       return detail || GENERIC_SCAN_START_FAILURE;
   }
+}
+
+/**
+ * How often `getMountState` should be refetched while a job is running, and
+ * whether it should be refetched at all.
+ *
+ * B7 review round 2, finding 3: `mountStateQuery` has `refetchOnWindowFocus`
+ * off and a 5s `staleTime`, and nothing else ever refetches it while the page
+ * stays mounted. `canWatchRunningScan` reads straight off that query, so
+ * someone who opens the page mid-scan and comes back an hour later is
+ * offered a "Watch Running Scan" button backed by hour-old data -- clicking
+ * it can start a brand-new walk under a label that promised otherwise. This
+ * keeps the query self-correcting while a job is actually in flight and
+ * turns polling off the moment one isn't, so it never becomes a timer that
+ * outlives what it watches.
+ */
+export function getMountStatePollIntervalMs(
+  mountState: DiskAnalysisMountState | null | undefined
+): number | false {
+  return mountState?.activeJob ? REFETCH_INTERVAL_MS : false;
 }
 
 export function deriveLegendFromSnapshot(
