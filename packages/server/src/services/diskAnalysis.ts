@@ -780,6 +780,28 @@ function getComparableDeviceId(stat: fs.Stats): number | null {
   return Number.isSafeInteger(stat.dev) ? stat.dev : null;
 }
 
+/**
+ * DISK-8: bytes actually allocated on disk for this file, not its apparent
+ * length. A tool whose whole job is "where did my disk space go" should
+ * report what the filesystem consumed, not what `read()` would return --
+ * those differ for sparse files, and (via the hardlink dedup below) for
+ * hardlinks.
+ *
+ * `stat.blocks` is POSIX-only, in 512-byte units regardless of the
+ * filesystem's actual block size, and Node does not populate it meaningfully
+ * on every platform. On Windows/NTFS it is observed as `0` for small files
+ * resident inside the MFT record with no cluster allocated, and a genuine
+ * cluster count once a file is large enough to need one -- so it is neither
+ * "always populated" nor "always zero" there, and either fallback direction
+ * (trust it blindly, or ignore it outright) would be wrong for some file on
+ * this platform. The fallback to `stat.size` is deliberate: use the allocated
+ * figure only when it is a positive, finite measurement, and apparent size
+ * everywhere that measurement is absent (0, negative, NaN, or undefined).
+ */
+function getAllocatedSizeBytes(stat: fs.Stats): number {
+  return Number.isFinite(stat.blocks) && stat.blocks > 0 ? stat.blocks * 512 : stat.size;
+}
+
 function getCacheState(generatedAt: string): "fresh" | "stale" {
   return Date.now() - new Date(generatedAt).getTime() < CACHE_FRESH_MS
     ? "fresh"
@@ -1467,6 +1489,23 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
   const smallFileThresholdBytes = getSmallFileThresholdBytes();
   const rootNode = createDirectoryNode(rootPath, null);
   const nodesByPath = new Map<string, MutableDirectoryNode>([[rootPath, rootNode]]);
+  /**
+   * DISK-8: `dev:ino` pairs already counted for this job, so a second (or
+   * tenth) hardlink to the same inode contributes nothing further to the
+   * totals. Borg, rsnapshot and Time Machine backup trees are built almost
+   * entirely from hardlinks, so without this a 200 GB backup directory can
+   * report as several terabytes -- the same blocks summed once per link.
+   *
+   * Scoped to this job the same way `nodesByPath` is, and cleared alongside
+   * it in `releasePartialTree` so a cancelled or failed scan does not keep it
+   * (or the tree it references) alive past the job's own teardown.
+   *
+   * Only ever consulted when `stat.nlink > 1` at the call site below -- every
+   * file on a normal filesystem has `nlink === 1`, and hashing a `dev:ino`
+   * key for each one would be pure cost on the hot path of a million-node
+   * walk for a check that almost never applies.
+   */
+  const seenHardlinkInodes = new Set<string>();
   const extensionCounts = new Map<string, { count: number; totalBytes: number }>();
   let totalFiles = 0;
   let totalDirectories = 1;
@@ -1613,6 +1652,9 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
       // but that is an invariant of the scheduler, not of this function, so drop
       // the handle rather than depend on it.
       nodesByPath.delete(node.path);
+      // No further stat will be compared against this job's dev:ino set --
+      // the walk is over -- so release it alongside the tree handle above.
+      seenHardlinkInodes.clear();
 
       settled = true;
       resolve(snapshot);
@@ -1643,6 +1685,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
      */
     function releasePartialTree() {
       nodesByPath.clear();
+      seenHardlinkInodes.clear();
       pending.length = 0;
       overflow.length = 0;
       overflowHead = 0;
@@ -1864,15 +1907,39 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
                 continue;
               }
 
+              if (stat.nlink > 1) {
+                // A dev:ino pair identifies the physical inode; hardlinks to
+                // it share one. Only checked when nlink > 1 -- see the
+                // comment on `seenHardlinkInodes` -- so an ordinary file
+                // (nlink === 1, the overwhelming common case) never pays for
+                // the lookup. A link already seen has already had its bytes
+                // counted in full through the first path that reached it, so
+                // this one is skipped entirely: no size, no childCount, no
+                // extension-legend entry, no node in the tree. Counting it
+                // again would be counting the same disk blocks twice.
+                const inodeKey = `${stat.dev}:${stat.ino}`;
+                if (seenHardlinkInodes.has(inodeKey)) {
+                  continue;
+                }
+                seenHardlinkInodes.add(inodeKey);
+              }
+
+              // DISK-8: bytes this file actually occupies on disk, not its
+              // apparent length -- see `getAllocatedSizeBytes`. Flows into the
+              // treemap node, the small-file bucket, `job.progress`, and (via
+              // `recordFileAccounting`) the extension legend uniformly, so the
+              // legend never disagrees with what the treemap shows for the
+              // same file.
+              const allocatedSize = getAllocatedSizeBytes(stat);
               const extension = getFileExtension(entryPath);
               task.node.childCount += 1;
-              if (stat.size < adaptiveSmallFileThresholdBytes) {
-                recordFileAccounting(extension, stat.size);
+              if (allocatedSize < adaptiveSmallFileThresholdBytes) {
+                recordFileAccounting(extension, allocatedSize);
                 smallFileCount += 1;
-                smallFileBytes += stat.size;
-                task.node.size += stat.size;
+                smallFileBytes += allocatedSize;
+                task.node.size += allocatedSize;
                 job.progress.filesDiscovered += 1;
-                job.progress.bytesProcessed += stat.size;
+                job.progress.bytesProcessed += allocatedSize;
                 continue;
               }
               if (!addNodeWithinLimit()) {
@@ -1880,13 +1947,13 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
                 indexedNodeSkips += 1;
                 continue;
               }
-              recordFileAccounting(extension, stat.size);
+              recordFileAccounting(extension, allocatedSize);
               task.node.children.push({
                 path: entryPath,
                 name: entry.name,
                 type: "file",
-                size: stat.size,
-                recursiveSize: stat.size,
+                size: allocatedSize,
+                recursiveSize: allocatedSize,
                 extension,
                 childCount: 0,
                 descendantsScanned: 0,
@@ -1894,9 +1961,9 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
                 issues: [],
                 children: [],
               });
-              task.node.size += stat.size;
+              task.node.size += allocatedSize;
               job.progress.filesDiscovered += 1;
-              job.progress.bytesProcessed += stat.size;
+              job.progress.bytesProcessed += allocatedSize;
             }
 
             if (smallFileCount > 0) {

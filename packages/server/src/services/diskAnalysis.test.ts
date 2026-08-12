@@ -2025,7 +2025,17 @@ describe("diskAnalysis service", () => {
       const root = await createTempDir("deckos-disk-fstimeout-");
       const stuckPath = path.join(root, "aaa-stuck.bin");
       await fs.writeFile(stuckPath, Buffer.alloc(64));
-      await fs.writeFile(path.join(root, "keep.bin"), Buffer.alloc(1024));
+      const keepPath = path.join(root, "keep.bin");
+      await fs.writeFile(keepPath, Buffer.alloc(1024));
+      // DISK-8: totals report bytes allocated on disk, not the file's
+      // apparent length -- a 1024-byte write can occupy a full filesystem
+      // block. Read the real allocation back from the fixture itself rather
+      // than hard-coding a block size no two filesystems agree on.
+      const keepStat = await fs.stat(keepPath);
+      const expectedKeepBytes =
+        Number.isFinite(keepStat.blocks) && keepStat.blocks > 0
+          ? keepStat.blocks * 512
+          : keepStat.size;
 
       const gate = createGate();
       const resolvedStuck = path.resolve(stuckPath);
@@ -2051,7 +2061,7 @@ describe("diskAnalysis service", () => {
 
         // The rest of the directory still lands.
         const snapshot = await diskAnalysis.getCachedSnapshot(mount);
-        expect(snapshot?.snapshot.totals.totalBytes).toBe(1024);
+        expect(snapshot?.snapshot.totals.totalBytes).toBe(expectedKeepBytes);
 
         await diskAnalysis.__testing.clearState();
       } finally {
@@ -2150,5 +2160,43 @@ describe("diskAnalysis service", () => {
       await fs.remove(dataDir);
       await fs.remove(root);
     }, 60_000);
+  });
+
+  describe("hardlink and allocated-size accounting (DISK-8)", () => {
+    // fs.link behaves differently on Windows (junctions/reparse points, and
+    // nlink semantics that don't match POSIX), so the fixture this test
+    // builds would not mean what it says there.
+    test.skipIf(process.platform === "win32")(
+      "hardlinked files are counted once",
+      async () => {
+        const dataDir = await createTempDir("deckos-disk-analysis-data-");
+        const mountDir = await createTempDir("deckos-disk-hardlink-");
+        const original = path.join(mountDir, "original.bin");
+        await fs.writeFile(original, Buffer.alloc(1024 * 1024));
+        // Borg, rsnapshot and Time Machine backup trees are built almost
+        // entirely from hardlinks, so a 200 GB backup directory can
+        // currently report as several terabytes.
+        for (let i = 0; i < 9; i += 1) {
+          await fs.link(original, path.join(mountDir, `link${i}.bin`));
+        }
+
+        const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+        const mount = { mount: mountDir, fs: "testfs" };
+        const start = await diskAnalysis.startScan(mount);
+        const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+        const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+
+        expect(finalJob?.phase).toBe("completed");
+        // One megabyte on disk, not ten -- the other nine paths are the same
+        // inode and must not be summed as if they were distinct files.
+        expect(snapshot?.snapshot.root.size).toBeLessThan(2 * 1024 * 1024);
+        expect(snapshot?.snapshot.totals.totalBytes).toBeLessThan(2 * 1024 * 1024);
+
+        await diskAnalysis.__testing.clearState();
+        await fs.remove(dataDir);
+        await fs.remove(mountDir);
+      },
+      15000
+    );
   });
 });
