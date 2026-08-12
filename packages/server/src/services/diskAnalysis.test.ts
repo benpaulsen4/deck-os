@@ -746,16 +746,108 @@ describe("diskAnalysis service", () => {
     expect(snapshot?.snapshot.root.children).toHaveLength(width);
     expect(snapshot?.snapshot.totals.totalFiles).toBe(width);
 
-    // One lookup to insert each placeholder and one to replace it, so a fan-out
-    // of 500 is 1000 lookups. Under a linear scan the comparisons are ~250x that.
-    const { lookups, comparisons } = diskAnalysis.__testing.getChildLookupStats();
-    expect(lookups).toBeGreaterThanOrEqual(width);
-    expect(comparisons).toBeLessThanOrEqual(lookups * 2);
+    const { lookups, candidates, maxIndexSize } =
+      diskAnalysis.__testing.getChildLookupStats();
+
+    // One lookup to insert each placeholder and one to replace it with the
+    // finished branch, so a fan-out of 500 costs exactly 1000 lookups.
+    expect(lookups).toBe(width * 2);
+    // Exactly one candidate inspected per lookup. This is counted inside
+    // findChildSlot rather than next to the call, so replacing the probe with a
+    // scan of the sibling array takes it to 0 (call deleted) or to ~250000 (scan
+    // counted honestly). Equality fails either way.
+    expect(candidates).toBe(lookups);
+    // And the index really is a populated path map rather than a renamed scan:
+    // the widest directory holds one entry per directory child. Take the Map
+    // away and this is 0 whatever the counters happen to say.
+    expect(maxIndexSize).toBe(width);
 
     await diskAnalysis.__testing.clearState();
     await fs.remove(dataDir);
     await fs.remove(mountDir);
   }, 120_000);
+
+  test("an extension longer than the schema cap still round-trips through the cache", async () => {
+    // A 64+ character final dot-segment is ordinary: a content hash, a UUID, a
+    // timestamp suffix. The schema caps `extension` at 64 on both the node and
+    // the legend entry. With no parse left on the emit path to catch it, an
+    // unclamped extension would be served, written to cache, reported "fresh" by
+    // the shallow metadata check, then rejected and quarantined on every read --
+    // a full-disk rescan loop.
+    process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES = "1";
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-long-ext-");
+    const longExtension = "a1b2c3d4".repeat(12); // 96 chars
+    expect(longExtension.length).toBeGreaterThan(64);
+    await fs.writeFile(path.join(mountDir, `backup.${longExtension}`), Buffer.alloc(64));
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+
+    // The scan itself has to survive it.
+    expect(finalJob?.phase).toBe("completed");
+
+    // And so does the cache: getCachedSnapshot re-parses the file, so a snapshot
+    // that violates the schema comes back null with the file quarantined.
+    const cached = await diskAnalysis.getCachedSnapshot(mount);
+    expect(cached).not.toBeNull();
+    expect(cached?.cache.state).toBe("fresh");
+    expect(cached?.snapshot.totals.totalFiles).toBe(1);
+
+    const fileNode = cached?.snapshot.root.children.find((child) => child.type === "file");
+    expect(fileNode?.extension).toBe(longExtension.slice(0, 64));
+    expect(cached?.snapshot.extensionLegend[0]?.extension).toBe(longExtension.slice(0, 64));
+
+    const diskAnalysisDir = path.join(dataDir, "disk-analysis");
+    const files = await fs.readdir(diskAnalysisDir);
+    expect(files.some((file) => file.includes(".corrupt-"))).toBe(false);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("a cached snapshot that is shallow-valid but schema-invalid is still rejected", async () => {
+    // The emit-path parse is gone; this one is the last line of defence and the
+    // existing malformed-cache test does not reach it (that fixture trips the
+    // shallow metadata check first). A negative recursiveSize passes every
+    // shallow check -- root is an object with a path, a name, a type and a
+    // children array -- and fails only the real schema.
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.writeFile(path.join(mountDir, "notes.txt"), "cached", "utf8");
+
+    let diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    await waitForTerminalJob(diskAnalysis, start.jobId);
+
+    const cacheFile = path.join(dataDir, "disk-analysis", `${getMountCacheHash(mount)}.json`);
+    const persisted = (await fs.readJson(cacheFile)) as {
+      snapshot: { root: { recursiveSize: number; children: unknown[] } };
+    };
+    persisted.snapshot.root.recursiveSize = -1;
+    await fs.writeJson(cacheFile, persisted, { spaces: 2 });
+
+    diskAnalysis.__testing.resetState();
+    diskAnalysis = await loadDiskAnalysisModule(dataDir);
+
+    // The shallow check waves it through...
+    const mountState = await diskAnalysis.getMountState(mount);
+    expect(mountState.cache.state).toBe("fresh");
+
+    // ...and the schema parse is what actually catches it.
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+    expect(snapshot).toBeNull();
+    const files = await fs.readdir(path.join(dataDir, "disk-analysis"));
+    expect(files.some((file) => file.includes(".corrupt-"))).toBe(true);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
 
   test("a path longer than the message cap still produces a valid issue", async () => {
     const dataDir = await createTempDir("deckos-disk-analysis-data-");

@@ -19,6 +19,7 @@ import {
 import { DATA_DIR } from "../lib/config.js";
 
 type JobPhase = DiskAnalysisJobState["phase"];
+/** Read-only in the event it receives -- see `subscribeToJob`. */
 type JobListener = (event: DiskAnalysisScanEvent) => void;
 
 type MutableDirectoryNode = {
@@ -693,21 +694,35 @@ function createSmallFilesBucket(
  * invariant the suite asserts is that the total stays bounded by the number of
  * nodes in the finished tree: linear, not nodes x depth.
  *
- * `childLookups` / `childLookupComparisons` measure what it costs to find a
- * child's slot: one lookup per insertion, and the number of candidate entries
- * that lookup had to compare. A path-keyed index makes those two numbers equal;
- * a findIndex over the sibling array makes the second quadratic in the
- * directory's entry count. Both are incremented on the live production path, so
- * neither can quietly rot into a constant.
+ * `childLookups` counts insertions; `childLookupCandidates` counts the sibling
+ * entries those insertions had to inspect; `maxChildIndexSize` records the
+ * widest path index actually built. The three are incremented in three
+ * different places on purpose, so that no single edit can keep them consistent
+ * while changing the algorithm underneath them -- see `findChildSlot`.
  */
 let nodeCopyCount = 0;
 let childLookups = 0;
-let childLookupComparisons = 0;
+let childLookupCandidates = 0;
+let maxChildIndexSize = 0;
+
+/**
+ * The one place a child's slot is located.
+ *
+ * The body must increment `childLookupCandidates` once per candidate it
+ * actually inspects. A `Map` probe inspects exactly one, which is the whole
+ * point: `upsertChildBranch` used to run a `findIndex` over the sibling array,
+ * so building a directory with n entries cost O(n^2). If you replace this body,
+ * count honestly -- the suite asserts one candidate per lookup, and deleting
+ * the call to this function drops the count to zero and fails the same test.
+ */
+function findChildSlot(parent: MutableDirectoryNode, childPath: string): number | undefined {
+  childLookupCandidates += 1;
+  return parent.childIndexByPath.get(childPath);
+}
 
 function upsertChildBranch(parent: MutableDirectoryNode, child: DiskAnalysisTreemapNode) {
   childLookups += 1;
-  childLookupComparisons += 1;
-  const childIndex = parent.childIndexByPath.get(child.path);
+  const childIndex = findChildSlot(parent, child.path);
   if (childIndex !== undefined) {
     parent.children[childIndex] = child;
     return;
@@ -729,6 +744,7 @@ function upsertChildBranch(parent: MutableDirectoryNode, child: DiskAnalysisTree
  * `children` is sorted in place here, which leaves `childIndexByPath` stale.
  */
 function finalizeDirectoryNode(node: MutableDirectoryNode): DiskAnalysisTreemapNode {
+  maxChildIndexSize = Math.max(maxChildIndexSize, node.childIndexByPath.size);
   const children = node.children;
   children.sort((left, right) => right.recursiveSize - left.recursiveSize);
   let recursiveSize = 0;
@@ -760,8 +776,8 @@ function finalizeDirectoryNode(node: MutableDirectoryNode): DiskAnalysisTreemapN
  *
  * Directory children are copied with their own children stripped. File children
  * have no children to strip and are never mutated after the walker creates
- * them, so they travel by reference; the only consumer is the SSE route, which
- * re-parses and serialises the event before it leaves the process.
+ * them, so they travel by reference. Listeners must treat everything they
+ * receive as read-only -- see `subscribeToJob`.
  */
 function toShallowBranch(branch: DiskAnalysisTreemapNode): DiskAnalysisTreemapNode {
   nodeCopyCount += 1;
@@ -769,7 +785,7 @@ function toShallowBranch(branch: DiskAnalysisTreemapNode): DiskAnalysisTreemapNo
     ...branch,
     issues: [...branch.issues],
     children: branch.children.map((child) => {
-      if (child.children.length === 0) {
+      if (child.type === "file") {
         return child;
       }
       nodeCopyCount += 1;
@@ -782,9 +798,28 @@ function toShallowBranch(branch: DiskAnalysisTreemapNode): DiskAnalysisTreemapNo
   };
 }
 
+/**
+ * The schema caps `extension` at 64 characters, on the treemap node and on the
+ * legend entry alike, so anything longer has to be clipped here.
+ *
+ * A final dot-segment that long is ordinary -- a content hash, a UUID, a
+ * timestamp suffix. While the snapshot was re-parsed on the emit path an
+ * over-long extension failed the whole scan loudly; without that parse it would
+ * instead sail through, be written to the cache, be reported "fresh" by the
+ * shallow metadata check, and then be rejected and quarantined on every read.
+ * That is a full-disk rescan loop on exactly the hosts this file exists to
+ * protect, so the clamp belongs at the source.
+ */
+const MAX_EXTENSION_LENGTH = 64;
+
 function getFileExtension(filePath: string): string | null {
   const extension = path.extname(filePath).replace(/^\./, "").trim().toLowerCase();
-  return extension.length > 0 ? extension : null;
+  if (extension.length === 0) {
+    return null;
+  }
+  return extension.length > MAX_EXTENSION_LENGTH
+    ? extension.slice(0, MAX_EXTENSION_LENGTH)
+    : extension;
 }
 
 function isActivePhase(phase: JobPhase): boolean {
@@ -932,6 +967,16 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
         },
         issues: [...job.issues],
       };
+
+      // `snapshot.root.children` *is* `rootNode.children` now, not a deep copy of
+      // it. Leaving the root reachable through `nodesByPath` would leave a late
+      // `upsertChildBranch` able to mutate a snapshot that has already gone to
+      // the cache file and to every SSE subscriber. No such path exists today --
+      // both root-finalisation sites require `activeWorkers === 0`, and
+      // `pendingChildren === 0` means every descendant is already finalised --
+      // but that is an invariant of the scheduler, not of this function, so drop
+      // the handle rather than depend on it.
+      nodesByPath.delete(node.path);
 
       settled = true;
       resolve(snapshot);
@@ -1420,6 +1465,7 @@ export function getJobKeepaliveEvent(jobId: string): DiskAnalysisScanEvent {
   };
 }
 
+/** The returned event is read-only for the caller, as for `subscribeToJob`. */
 export function getJobStreamInitialEvent(
   jobId: string,
   mount: DiskAnalysisMountIdentity
@@ -1445,6 +1491,16 @@ export function getJobStreamInitialEvent(
   };
 }
 
+/**
+ * Subscribe to a job's scan events.
+ *
+ * **Listeners must treat the event and everything reachable from it as
+ * read-only.** Since the tree is assembled by reference, a `branch` event shares
+ * its file nodes with the live tree and a `snapshot` event *is* the live tree --
+ * the same objects held by `job.snapshot`, written to the cache file, and handed
+ * to every other subscriber. Mutating any of it corrupts all of them. Copy first
+ * if you need to change something.
+ */
 export function subscribeToJob(jobId: string, listener: JobListener): () => void {
   let listeners = listenersByJobId.get(jobId);
   if (!listeners) {
@@ -1468,13 +1524,18 @@ export const __testing = {
   getNodeCopyCount(): number {
     return nodeCopyCount;
   },
-  getChildLookupStats(): { lookups: number; comparisons: number } {
-    return { lookups: childLookups, comparisons: childLookupComparisons };
+  getChildLookupStats(): { lookups: number; candidates: number; maxIndexSize: number } {
+    return {
+      lookups: childLookups,
+      candidates: childLookupCandidates,
+      maxIndexSize: maxChildIndexSize,
+    };
   },
   resetInstrumentation() {
     nodeCopyCount = 0;
     childLookups = 0;
-    childLookupComparisons = 0;
+    childLookupCandidates = 0;
+    maxChildIndexSize = 0;
   },
   resetState() {
     jobs.clear();
