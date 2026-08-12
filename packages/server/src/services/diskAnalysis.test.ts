@@ -1512,6 +1512,11 @@ describe("diskAnalysis service", () => {
       const originalReadFile = fs.readFile.bind(fs);
       const readFileSpy = vi
         .spyOn(fs, "readFile")
+        // `Parameters<typeof fs.readFile>` does not help here: fs-extra
+        // declares readFile with callback overloads last, so the utility
+        // resolves to the callback form and the mock is then required to
+        // return void. `any` on the parameters is what lets one implementation
+        // satisfy every overload.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .mockImplementation(async (target: any, options?: any): Promise<any> => {
           const targetPath = path.resolve(typeof target === "string" ? target : String(target));
@@ -1600,33 +1605,47 @@ describe("diskAnalysis service", () => {
       const root = await createTempDir("deckos-disk-unsettled-");
       await fs.writeFile(path.join(root, "x.bin"), Buffer.alloc(64));
 
+      // Parked on the scan's *mount-availability* probe rather than on a
+      // worker's readdir, and that choice is the whole fixture.
+      //
+      // Every fs call inside the walk now races the job's abort signal, so
+      // cancelling one unwinds it on the spot -- deliberately, because
+      // otherwise a cancel on a stale mount waits out the full 30s timeout.
+      // That leaves the walk with no externally observable winding-down
+      // window. `ensureMountAvailable` is the exception: it runs before the
+      // walk and is reached from `ensureJob` as well, where no job controller
+      // exists yet, so it carries only its own timeout. Parking it holds the
+      // run genuinely unsettled after the phase has gone terminal, which is
+      // exactly the state guard 4 exists for.
       const gate = createGate();
       const resolvedRoot = path.resolve(root);
-      const originalReaddir = fs.readdir.bind(fs);
-      const readdirSpy = vi
-        .spyOn(fs, "readdir")
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .mockImplementation(async (target: any, options: any): Promise<any> => {
-          if (path.resolve(typeof target === "string" ? target : String(target)) === resolvedRoot) {
+      let rootStatCalls = 0;
+      const originalStat = fs.stat.bind(fs);
+      const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (target) => {
+        if (path.resolve(typeof target === "string" ? target : String(target)) === resolvedRoot) {
+          rootStatCalls += 1;
+          // The first probe belongs to `startScan` itself, which has to
+          // succeed for there to be a job at all; the second is the scan's.
+          if (rootStatCalls === 2) {
             await gate.enter();
           }
-          return await originalReaddir(target, options);
-        });
+        }
+        return await originalStat(target);
+      });
 
       try {
         const diskAnalysis = await loadDiskAnalysisModule(dataDir);
         const mount = { mount: root, fs: "testfs" };
         const first = await diskAnalysis.startScan(mount);
 
-        // Cancel only once a worker is actually inside readdir. Cancelling
-        // before the walk gets that far settles the run on the spot, so the
-        // window this test is about would not exist.
+        // Cancel only once the scan is actually parked. Cancelling before it
+        // gets that far settles the run on the spot, so the window this test
+        // is about would not exist.
         await gate.entered;
         expect(diskAnalysis.cancelScan(mount, first.jobId)).toBe(true);
 
-        // The phase says cancelled straight away, but the worker is still
-        // parked inside readdir with the partial tree in hand. Starting a
-        // second walk of the same mount now means two walks of it.
+        // The phase says cancelled straight away, but the run has not unwound.
+        // Starting a second walk of the same mount now means two walks of it.
         expect(diskAnalysis.getJob(first.jobId)?.phase).toBe("cancelled");
         await expect(diskAnalysis.startScan(mount)).rejects.toThrow(/wound down|winding down/i);
 
@@ -1641,20 +1660,23 @@ describe("diskAnalysis service", () => {
         await diskAnalysis.__testing.clearState();
       } finally {
         gate.open();
-        readdirSpy.mockRestore();
+        statSpy.mockRestore();
         await fs.remove(dataDir);
         await fs.remove(root);
       }
     }, 30_000);
 
-    test("a cancelled scan settles instead of hanging forever", async () => {
-      // The existing suite only ever cancelled an already-finished job.
-      // Cancelling a *running* one whose fs calls all return promptly already
-      // settled before this task -- that was measured, not assumed. The case
-      // that actually leaks is a worker parked in an fs call that never
-      // returns, which is what a stale NFS or SMB mount does: no abort check
-      // is ever reached, the done promise stays pending forever, and its
-      // closure pins the whole partial tree in memory.
+    test("a cancelled scan does not publish the tree it was holding", async () => {
+      // Scope, honestly: this parks a `stat` partway through a directory's
+      // entry loop, so once that call rejects the loop's *next* iteration
+      // reaches an abort check on its own. It therefore does not prove the
+      // `finally`-based settle -- it would pass under the old `maybeAbort()`
+      // architecture too. What it does cover is the publishing contract: a
+      // cancelled scan emits no snapshot event and writes no cache file.
+      //
+      // The test that actually pins the settle is the next one, which parks
+      // the `readdir` of the only in-flight directory so that no abort check
+      // is ever reached at all.
       process.env.DECKOS_DISK_ANALYSIS_FS_TIMEOUT_MS = "1000";
       const dataDir = await createTempDir("deckos-disk-analysis-data-");
       const root = await createTempDir("deckos-disk-cancel-");
@@ -1688,7 +1710,7 @@ describe("diskAnalysis service", () => {
         });
 
         // Cancel with the worker demonstrably parked in the stat that will
-        // never return -- the case where no abort check is ever reached.
+        // never return.
         await gate.entered;
         expect(diskAnalysis.cancelScan(mount, start.jobId)).toBe(true);
 
@@ -1709,6 +1731,211 @@ describe("diskAnalysis service", () => {
       } finally {
         gate.open();
         statSpy.mockRestore();
+        await fs.remove(dataDir);
+        await fs.remove(root);
+      }
+    }, 30_000);
+
+    test("a cancelled scan settles when its only worker is parked in readdir", async () => {
+      // This is the case DISK-12 is actually about, and the one that pins the
+      // `finally`-based settle.
+      //
+      // Park the `readdir` of the only in-flight directory. When that call
+      // eventually rejects -- on the abort now that the signal is in the race,
+      // on the timeout before it was -- the handler's first act is
+      // `if (isAborted()) return;`, an early return out of a loop that was
+      // never entered. There is no "next iteration" to notice the
+      // cancellation from, because the directory's entries are still unknown.
+      // The old architecture had nowhere left to settle, so the done promise
+      // stayed pending forever with the partial tree pinned in its closure.
+      // Settling from the worker's `finally` is what closes that.
+      process.env.DECKOS_DISK_ANALYSIS_FS_TIMEOUT_MS = "500";
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const root = await createTempDir("deckos-disk-cancel-readdir-");
+      await fs.writeFile(path.join(root, "a.bin"), Buffer.alloc(64));
+      await fs.writeFile(path.join(root, "b.bin"), Buffer.alloc(64));
+
+      const gate = createGate();
+      const resolvedRoot = path.resolve(root);
+      const originalReaddir = fs.readdir.bind(fs);
+      const readdirSpy = vi
+        .spyOn(fs, "readdir")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .mockImplementation(async (target: any, options: any): Promise<any> => {
+          if (path.resolve(typeof target === "string" ? target : String(target)) === resolvedRoot) {
+            // Never opened during the test: a hard mount that has gone away.
+            await gate.enter();
+          }
+          return await originalReaddir(target, options);
+        });
+
+      try {
+        const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+        const mount = { mount: root, fs: "testfs" };
+        const start = await diskAnalysis.startScan(mount);
+
+        await gate.entered;
+        expect(diskAnalysis.cancelScan(mount, start.jobId)).toBe(true);
+
+        const finished = await Promise.race([
+          diskAnalysis.__testing.waitForJobSettled(start.jobId),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("never settled")), 10_000)
+          ),
+        ]);
+        expect((finished as { phase: string }).phase).toBe("cancelled");
+        expect(await diskAnalysis.getCachedSnapshot(mount)).toBeNull();
+
+        await diskAnalysis.__testing.clearState();
+      } finally {
+        gate.open();
+        readdirSpy.mockRestore();
+        await fs.remove(dataDir);
+        await fs.remove(root);
+      }
+    }, 30_000);
+
+    test("a failure mid-walk stops the other workers before releasing the mount", async () => {
+      // This suite pins DECKOS_DISK_ANALYSIS_MAX_WORKERS to "1" in beforeEach
+      // for determinism elsewhere. Two live workers are the entire point here,
+      // so raise it: one walks the slow directory while the other fails.
+      process.env.DECKOS_DISK_ANALYSIS_MAX_WORKERS = "2";
+      // The generic failure path used to settle on the spot from the worker
+      // catch-all, which defeated what the cancellation rewrite added:
+      // `releasePartialTree` ran while other workers were still writing into
+      // the tree, the controller was never aborted so those workers kept
+      // walking with no way to stop them (`cancelScan` returns false once the
+      // phase is terminal), and `runJob` returned immediately -- releasing the
+      // mount's `unsettledJobIdByMount` entry and letting `startScan` admit a
+      // second walk of a mount that was still being walked.
+      //
+      // The realistic trigger is a throwing SSE listener: `notifyListeners`
+      // invokes subscriber callbacks unguarded, and `queueBranchEmit` reaches
+      // it synchronously from a worker once the emit interval has elapsed.
+      // Driving it that way is timing-dependent -- the emit is throttled to
+      // PROGRESS_EMIT_INTERVAL_MS and would otherwise fire from a timer, off
+      // the worker's stack -- so this provokes the identical code path
+      // deterministically instead: a `stat` whose `isDirectory()` throws is
+      // called outside the inner fs try/catch and lands in the same catch-all.
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const root = await createTempDir("deckos-disk-failpath-");
+      const badDir = path.join(root, "bad");
+      const slowDir = path.join(root, "slow");
+      await fs.ensureDir(badDir);
+      await fs.ensureDir(slowDir);
+      const boomPath = path.join(badDir, "boom.bin");
+      await fs.writeFile(boomPath, Buffer.alloc(64));
+      const slowFileCount = 60;
+      for (let i = 0; i < slowFileCount; i += 1) {
+        await fs.writeFile(path.join(slowDir, `f${i}.bin`), Buffer.alloc(64));
+      }
+      // 60 x 50ms of sequential statting: long enough that the walk is
+      // unambiguously still in progress when the failure fires, and long
+      // enough afterwards for "did it keep going?" to be an obvious yes or no.
+      const slowStatDelayMs = 50;
+
+      // The bad directory's `readdir` is held until the test opens it, so the
+      // failure fires at a moment of the test's choosing -- with the sibling
+      // walk demonstrably in progress -- rather than wherever the scheduler
+      // happened to put it.
+      const gate = createGate();
+      const resolvedBad = path.resolve(badDir);
+      const resolvedBoom = path.resolve(boomPath);
+      const resolvedSlow = path.resolve(slowDir);
+      // Scoped to the first scan: the follow-up scan that proves the slot was
+      // released must not re-trigger the failure, nor pay 60 x 50ms again.
+      let firstScan = true;
+      let slowStatCount = 0;
+
+      const originalReaddir = fs.readdir.bind(fs);
+      const readdirSpy = vi
+        .spyOn(fs, "readdir")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .mockImplementation(async (target: any, options: any): Promise<any> => {
+          if (
+            firstScan &&
+            path.resolve(typeof target === "string" ? target : String(target)) === resolvedBad
+          ) {
+            await gate.enter();
+          }
+          return await originalReaddir(target, options);
+        });
+
+      const originalStat = fs.stat.bind(fs);
+      const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (target) => {
+        const targetPath = path.resolve(typeof target === "string" ? target : String(target));
+        const realStat = await originalStat(target);
+        if (firstScan && path.dirname(targetPath) === resolvedSlow) {
+          slowStatCount += 1;
+          await new Promise((resolve) => setTimeout(resolve, slowStatDelayMs));
+          return realStat;
+        }
+        if (firstScan && targetPath === resolvedBoom) {
+          // Proxied rather than replaced so `dev` still matches the root and
+          // the entry is not skipped as a nested mount before it is reached.
+          return new Proxy(realStat, {
+            get(statTarget, property, receiver) {
+              if (property === "isDirectory") {
+                return () => {
+                  throw new Error("simulated emit failure inside a worker");
+                };
+              }
+              return Reflect.get(statTarget, property, receiver);
+            },
+          });
+        }
+        return realStat;
+      });
+
+      try {
+        const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+        const mount = { mount: root, fs: "testfs" };
+        const start = await diskAnalysis.startScan(mount);
+
+        // Release the failure only once the sibling walk is observably under
+        // way. Keying this off the walk's own progress rather than off a
+        // sleep or off the order the scheduler happened to start the two
+        // workers in is what keeps the test deterministic.
+        for (let attempt = 0; attempt < 200 && slowStatCount < 3; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        const statsBeforeFailure = slowStatCount;
+        expect(statsBeforeFailure).toBeGreaterThanOrEqual(3);
+        expect(statsBeforeFailure).toBeLessThan(slowFileCount);
+        gate.open();
+
+        const finished = await Promise.race([
+          diskAnalysis.__testing.waitForJobSettled(start.jobId),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("never settled")), 10_000)
+          ),
+        ]);
+
+        // A real error stays `failed`. Routing it through the abort machinery
+        // must not relabel it as a user cancellation.
+        expect((finished as { phase: string }).phase).toBe("failed");
+
+        // The discriminating assertion. The failure aborts the controller, so
+        // the sibling worker stops at its next abort check and the run settles
+        // only once it has. Under the old behaviour nothing aborted it: the
+        // run reported `failed` immediately and the walk carried on statting
+        // its way through the remaining files with no way to stop it.
+        const statsAtSettle = slowStatCount;
+        expect(statsAtSettle).toBeLessThan(slowFileCount);
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        expect(slowStatCount).toBe(statsAtSettle);
+
+        // And the slot is released once -- and only once -- that has happened.
+        firstScan = false;
+        const second = await diskAnalysis.startScan(mount);
+        expect(second.jobId).not.toBe(start.jobId);
+        expect((await waitForTerminalJob(diskAnalysis, second.jobId))?.phase).toBe("completed");
+
+        await diskAnalysis.__testing.clearState();
+      } finally {
+        gate.open();
+        statSpy.mockRestore();
+        readdirSpy.mockRestore();
         await fs.remove(dataDir);
         await fs.remove(root);
       }

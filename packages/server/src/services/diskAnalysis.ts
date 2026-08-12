@@ -76,6 +76,18 @@ type DiskAnalysisJobInternal = {
    * an observable that closes only when the gap does.
    */
   runPromise: Promise<void>;
+  /**
+   * Set when the walk is being torn down because of a genuine error rather
+   * than a user cancellation.
+   *
+   * The two tear-downs share one mechanism: a failure aborts the controller so
+   * that workers stop and the scan settles from the same place cancellation
+   * does (`settleAbort`, at `activeWorkers === 0`). That means
+   * `signal.aborted` on its own can no longer tell `runJob` which of the two
+   * happened, so this flag carries the distinction -- and the original error,
+   * which is what the `failed` phase reports.
+   */
+  internalFailure: { error: unknown } | null;
   startedAt: string;
   updatedAt: string;
   progress: DiskAnalysisProgress;
@@ -176,11 +188,24 @@ const DEFAULT_FS_OPERATION_TIMEOUT_MS = 30_000;
 
 const DEFAULT_LIMITS: DiskAnalysisResourceLimits = {
   maxWorkers: 4,
+  // Bounds the ready stack only, not the total work. Overflow spills to a
+  // secondary FIFO rather than being dropped -- see the queue comment in
+  // `executeScan` -- so this number no longer decides how much of the tree
+  // gets indexed, which is the whole point of it.
   maxPendingDirectories: 2048,
   // Was 1_000_000. The tree exists several times over during serialization, so
   // the cap is really a peak-memory setting, and no treemap renders anywhere
   // near this many rectangles. DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES raises it
   // for anyone who genuinely wants the old ceiling.
+  //
+  // Since the queue spill it is also the *only* bound on peak memory, and the
+  // trade is real: `maxPendingDirectories` caps the stack at 2048, but the
+  // overflow FIFO is bounded only by this number, and every spilled child
+  // keeps its parent's `pendingChildren > 0`, so the parent cannot finalize
+  // and release its own children either. More nodes are therefore live at once
+  // than before on a wide tree. That is the cost of making a scan's results
+  // depend on the tree instead of on how four concurrent readdirs interleaved,
+  // and it is bounded, which the old behaviour's silent truncation was not.
   maxIndexedNodes: 500_000,
 };
 
@@ -279,30 +304,53 @@ class DiskAnalysisFsTimeoutError extends Error {
 }
 
 /**
- * Race one fs call against a deadline. See `DEFAULT_FS_OPERATION_TIMEOUT_MS`
- * for what this does and does not achieve.
+ * Race one fs call against a deadline, and against the job's abort signal when
+ * one is supplied. See `DEFAULT_FS_OPERATION_TIMEOUT_MS` for what the deadline
+ * does and does not achieve.
+ *
+ * The abort arm matters for how quickly a cancel is *observed*. Without it, a
+ * worker parked on a stale mount keeps waiting for the full timeout -- 30s by
+ * default -- before it can notice the abort and unwind, so `cancelScan` takes
+ * up to that long to settle. With it, the wait ends the moment the signal
+ * fires. This changes nothing about the syscall itself: it still holds its
+ * libuv threadpool thread until the kernel returns. Only the promise settles
+ * early, which is free and is all the scan needs to wind down.
  *
  * The timer is always cleared on the winning path -- a per-entry scan creates
- * one of these per `stat`, so a leaked timer would be a leak per file -- and
- * the losing promise gets a no-op catch so a late rejection from an operation
- * we stopped waiting for cannot surface as an unhandled rejection.
+ * one of these per `stat`, so a leaked timer would be a leak per file -- the
+ * abort listener is always removed, and the losing promise gets a no-op catch
+ * so a late rejection from an operation we stopped waiting for cannot surface
+ * as an unhandled rejection.
  */
 async function withFsTimeout<T>(
   operation: Promise<T>,
   targetPath: string,
-  timeoutMs: number
+  timeoutMs: number,
+  signal?: AbortSignal
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       reject(new DiskAnalysisFsTimeoutError(targetPath, timeoutMs));
     }, timeoutMs);
+    if (signal) {
+      if (signal.aborted) {
+        reject(new DiskAnalysisScanAbortedError());
+        return;
+      }
+      onAbort = () => reject(new DiskAnalysisScanAbortedError());
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
   });
   try {
     return await Promise.race([operation, deadline]);
   } finally {
     if (timer !== undefined) {
       clearTimeout(timer);
+    }
+    if (signal && onAbort) {
+      signal.removeEventListener("abort", onAbort);
     }
     void operation.catch(() => undefined);
   }
@@ -426,7 +474,7 @@ async function assertNotPseudoFilesystem(resolvedMount: string): Promise<void> {
   }
 
   const normalizedMount = normalizeMountPathKey(resolvedMount);
-  let bestMatch: { mountPoint: string; fsType: string } | null = null;
+  let bestMatch: { mountPoint: string; fsType: string; normalizedLength: number } | null = null;
   for (const entry of entries) {
     let normalizedEntry: string;
     try {
@@ -443,9 +491,13 @@ async function assertNotPseudoFilesystem(resolvedMount: string): Promise<void> {
       continue;
     }
     // Longest mount point wins: `/` contains everything, so the nested mount
-    // is the one that actually describes this path.
-    if (!bestMatch || entry.mountPoint.length > bestMatch.mountPoint.length) {
-      bestMatch = entry;
+    // is the one that actually describes this path. Compared on the normalized
+    // form, which is what `contains` matched on -- ranking raw strings while
+    // matching normalized ones is the kind of mismatch that holds for every
+    // kernel-emitted table and then surprises someone feeding it a
+    // hand-written or relative mount point.
+    if (!bestMatch || normalizedEntry.length > bestMatch.normalizedLength) {
+      bestMatch = { ...entry, normalizedLength: normalizedEntry.length };
     }
   }
 
@@ -1405,7 +1457,12 @@ class DiskAnalysisScanAbortedError extends Error {
 async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSnapshot> {
   const fsTimeoutMs = getFsOperationTimeoutMs();
   const rootPath = await ensureMountAvailable(job.mount);
-  const rootStat = await withFsTimeout(fs.stat(rootPath), rootPath, fsTimeoutMs);
+  const rootStat = await withFsTimeout(
+    fs.stat(rootPath),
+    rootPath,
+    fsTimeoutMs,
+    job.controller.signal
+  );
   const rootDeviceId = getComparableDeviceId(rootStat);
   const smallFileThresholdBytes = getSmallFileThresholdBytes();
   const rootNode = createDirectoryNode(rootPath, null);
@@ -1567,10 +1624,14 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
      *
      * DISK-12's second half: the done promise's executor closes over
      * `nodesByPath`, the queues and `rootNode`, and a cancelled scan used to
-     * leave all of it reachable for as long as anything held the promise. It
-     * is only ever safe to call this once no worker can still be writing into
-     * the tree, which is why the abort path settles from `settleAbort` and
-     * nowhere else.
+     * leave all of it reachable for as long as anything held the promise.
+     *
+     * It is only ever safe to call this once no worker can still be writing
+     * into the tree, which is why `failScan` is reached from `settleAbort` and
+     * nowhere else, and why `settleAbort` is a no-op until
+     * `activeWorkers === 0`. Errors take the same route as cancellations
+     * (`abortWithFailure`) precisely so that this holds on every path rather
+     * than only on the cancellation one.
      */
     function releasePartialTree() {
       nodesByPath.clear();
@@ -1603,7 +1664,43 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
       if (settled || activeWorkers > 0) {
         return;
       }
-      failScan(new DiskAnalysisScanAbortedError());
+      failScan(job.internalFailure?.error ?? new DiskAnalysisScanAbortedError());
+    };
+
+    /**
+     * Tear the scan down because something threw, rather than because the user
+     * cancelled.
+     *
+     * This used to settle on the spot from the worker catch-all, which broke
+     * every guarantee the cancellation rewrite added. `failScan` ran
+     * `releasePartialTree()` while other workers were still writing into the
+     * tree (and `nodesByPath.set` promptly re-populated the map it had just
+     * cleared); the controller was never aborted, so those workers kept
+     * walking with no way to stop them -- `cancelScan` returns false once the
+     * phase is terminal; and `runJob` returned straight away, which released
+     * the mount's entry in `unsettledJobIdByMount` and let `startScan` admit a
+     * second walk of a mount that was still being walked. That is exactly the
+     * condition guard 4 exists to prevent, and a thrown SSE write was enough
+     * to defeat it: `notifyListeners` invokes subscriber callbacks unguarded,
+     * and `queueBranchEmit`/`queueProgressEmit` reach it synchronously once
+     * the emit interval has elapsed.
+     *
+     * So a failure now takes the cancellation route: record why, abort the
+     * controller so every worker stops and unwinds, and let the last one out
+     * settle through `settleAbort`. `runJob` reads `internalFailure` to decide
+     * `failed` versus `cancelled`.
+     */
+    const abortWithFailure = (error: unknown) => {
+      if (settled) {
+        return;
+      }
+      // A cancellation already in flight keeps its phase: the user asked for
+      // this to stop, and whatever threw on the way out is a consequence.
+      if (!job.internalFailure && !isAborted()) {
+        job.internalFailure = { error };
+      }
+      job.controller.abort();
+      settleAbort();
     };
 
     const addNodeWithinLimit = () => {
@@ -1642,7 +1739,8 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
               entries = await withFsTimeout(
                 fs.readdir(task.directoryPath, { withFileTypes: true }),
                 task.directoryPath,
-                fsTimeoutMs
+                fsTimeoutMs,
+                job.controller.signal
               );
             } catch (error) {
               if (isAborted()) {
@@ -1706,7 +1804,12 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
 
               let stat;
               try {
-                stat = await withFsTimeout(fs.stat(entryPath), entryPath, fsTimeoutMs);
+                stat = await withFsTimeout(
+                  fs.stat(entryPath),
+                  entryPath,
+                  fsTimeoutMs,
+                  job.controller.signal
+                );
               } catch (error) {
                 if (isAborted()) {
                   return;
@@ -1843,18 +1946,18 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
               finalizeNode(task.node);
             }
           } catch (error) {
-            failScan(error);
+            abortWithFailure(error);
           } finally {
             activeWorkers -= 1;
             if (!settled) {
               if (isAborted()) {
-                // The abort path settles here, and only here. Every worker
-                // runs this on its way out, and `settleAbort` is a no-op
-                // until `activeWorkers` reaches zero, so the last worker to
-                // unwind is the one that rejects. That ordering is what makes
-                // `releasePartialTree` safe: by then nobody holds a reference
-                // into the tree, so nothing can mutate a structure that has
-                // already been handed out.
+                // Both tear-downs -- cancellation and failure -- settle here,
+                // and only here. Every worker runs this on its way out, and
+                // `settleAbort` is a no-op until `activeWorkers` reaches zero,
+                // so the last worker to unwind is the one that rejects. That
+                // ordering is what makes `releasePartialTree` safe: by then
+                // nobody holds a reference into the tree, so nothing can
+                // mutate a structure that has already been handed out.
                 //
                 // Reaching this from the `finally` rather than from a check
                 // inside the walk is the actual DISK-12 fix. A worker parked
@@ -1912,7 +2015,10 @@ async function runJob(job: DiskAnalysisJobInternal): Promise<void> {
     emitSnapshot(job, snapshot);
     emitStatus(job);
   } catch (error) {
-    if (job.controller.signal.aborted) {
+    // `signal.aborted` alone no longer means "the user cancelled": a failure
+    // aborts the controller too, so that workers stop and the scan settles
+    // through the same wind-down. `internalFailure` is what separates them.
+    if (job.controller.signal.aborted && !job.internalFailure) {
       clearLiveEmitTimer(job);
       setJobFinalState(job, "cancelled");
       emitStatus(job);
@@ -2004,6 +2110,7 @@ async function ensureJob(
       phase: "queued",
       // Replaced immediately below, once the job object exists to hand to runJob.
       runPromise: Promise.resolve(),
+      internalFailure: null,
       startedAt: now,
       updatedAt: now,
       progress: {
