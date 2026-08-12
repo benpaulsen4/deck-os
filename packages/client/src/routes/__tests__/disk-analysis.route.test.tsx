@@ -859,6 +859,129 @@ describe("disk analysis route", () => {
     ).toBeInTheDocument();
   });
 
+  it("never starts a scan on its own when the cache is missing", async () => {
+    // DISK-3, client half. B6 removed the server-side auto-start that
+    // `getMountState` used to perform; this effect was the other half of it --
+    // merely opening the page with no cached snapshot committed the box to a
+    // full filesystem walk, and re-committed it on every navigation. Scanning
+    // is an explicit action now, so the empty state has to offer it.
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "missing",
+      },
+      activeJob: null,
+    };
+    state.snapshotEnvelope = null;
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    expect(await screen.findByText("No analysis data yet")).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(startScanSpy).not.toHaveBeenCalled();
+    expect(MockEventSource.instances).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Scan This Mount" }));
+
+    expect(startScanSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+  });
+
+  it("warns that a partial scan's totals are a lower bound", async () => {
+    const baseActiveJob = getActiveJob();
+    const baseMountState = state.mountState;
+    if (!baseMountState) {
+      throw new Error("Expected mount state from beforeEach");
+    }
+    state.mountState = {
+      ...baseMountState,
+      activeJob: {
+        ...baseActiveJob,
+        phase: "partial",
+        issueCount: 12,
+      },
+    };
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    expect(
+      await screen.findByText("12 directories were unreadable - totals are a lower bound.")
+    ).toBeInTheDocument();
+  });
+
+  it("still reads sensibly when a partial scan reports no issue count", async () => {
+    // `issueCount` carries `.default(0)` on both wire schemas so a snapshot
+    // cached before that field existed still loads -- and reports 0. "0
+    // directories were unreadable" next to a partial-result warning is a
+    // contradiction, so the count-free wording has to cover it.
+    const baseActiveJob = getActiveJob();
+    const baseMountState = state.mountState;
+    if (!baseMountState) {
+      throw new Error("Expected mount state from beforeEach");
+    }
+    state.mountState = {
+      ...baseMountState,
+      activeJob: {
+        ...baseActiveJob,
+        phase: "partial",
+        issueCount: 0,
+      },
+    };
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    expect(
+      await screen.findByText("Some directories were unreadable - totals are a lower bound.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/0 directories were unreadable/)).not.toBeInTheDocument();
+  });
+
+  it("separates a path that cannot be scanned from a scanner that is busy", async () => {
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "missing",
+      },
+      activeJob: null,
+    };
+    state.snapshotEnvelope = null;
+    startScanSpy.mockRejectedValueOnce({
+      message: "Disk analysis refuses to scan C:\\",
+      data: { code: "FORBIDDEN" },
+    });
+
+    const refused = renderWithAppRouter({
+      initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"],
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Scan This Mount" }));
+
+    await waitFor(() =>
+      expect(addToastSpy).toHaveBeenCalledWith(
+        "This path cannot be scanned: Disk analysis refuses to scan C:\\",
+        "error"
+      )
+    );
+    refused.unmount();
+
+    addToastSpy.mockClear();
+    startScanSpy.mockRejectedValueOnce({
+      message: "A previous scan of C:\\ is still winding down",
+      data: { code: "CONFLICT" },
+    });
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Scan This Mount" }));
+
+    await waitFor(() =>
+      expect(addToastSpy).toHaveBeenCalledWith(
+        "Something else is scanning right now - try again shortly. A previous scan of C:\\ is still winding down",
+        "error"
+      )
+    );
+  });
+
   it("does not blank the live issues panel on progress ticks", async () => {
     // B5 review round 1, finding 2: progress events carry an empty `issues`
     // array by design (see packages/server/src/services/diskAnalysis.ts --

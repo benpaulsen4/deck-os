@@ -275,6 +275,24 @@
   word-break: break-all;
 }
 
+.disk-analysis-partial {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: var(--space-2);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: rgba(255, 143, 61, 0.08);
+  border: 1px solid rgba(255, 143, 61, 0.3);
+}
+
+.disk-analysis-partial svg {
+  flex: none;
+  margin-top: 2px;
+  color: #ff8f3d;
+}
+
 .disk-analysis-empty {
   display: grid;
   place-items: center;

@@ -15,8 +15,10 @@ import {
 } from "@deckos/contracts";
 import {
   createPresentationTree,
+  createSnapshotPresentationTree,
   createSyntheticLiveRoot,
   deriveLegendFromSnapshot,
+  describeScanStartError,
   formatBytes,
   formatCount,
   formatRelativeGeneratedAt,
@@ -149,8 +151,9 @@ function DiskAnalysisPage() {
       setStreamError(null);
     },
     onError: (error: unknown) => {
-      const message =
-        error instanceof Error ? error.message : "Failed to start disk analysis scan";
+      // A refused path and a busy scanner are different answers -- see
+      // `describeScanStartError` and the router's `mapDiskAnalysisError`.
+      const message = describeScanStartError(error);
       setStreamError(message);
       addToast(message, "error");
     },
@@ -230,14 +233,34 @@ function DiskAnalysisPage() {
     liveJob?.phase === "failed" ||
     liveJob?.phase === "cancelled";
 
+  /**
+   * DISK-3, client half.
+   *
+   * This used to fire on `mountState.cache.state === "missing"` and call
+   * `requestLiveStream` -- so merely opening the page with nothing cached
+   * committed the box to a full filesystem walk, and did it again on every
+   * navigation back. B6 removed the server-side auto-start inside
+   * `getMountState`; deleting the condition here is the other half. Starting a
+   * scan is now something only a button does.
+   *
+   * What survives is attaching, and only attaching: if the server reports a
+   * job that is *already running* and there is nothing cached to show
+   * instead, the page joins that job's stream so the user can watch work that
+   * is happening anyway. `startScan` is how a client attaches (the service
+   * joins an existing job rather than duplicating it), which is why the
+   * mutation is still involved -- but the effect will not reach it unless
+   * `mountState.activeJob` is present, so it can never be the thing that
+   * begins a walk. With a cached snapshot on hand the page shows that instead
+   * and leaves attaching to the "Live" switch, as it always has.
+   */
   useEffect(() => {
-    if (!mount || !mountState) {
+    if (!mount || !mountState?.activeJob) {
       return;
     }
     if (!diskAnalysisQueriesSettled) {
       return;
     }
-    if (mountState.cache.state !== "missing") {
+    if (cachedSnapshot) {
       return;
     }
     if (hasRequestedLive) {
@@ -252,9 +275,9 @@ function DiskAnalysisPage() {
       resetLiveState: true,
     });
   }, [
+    cachedSnapshot,
     mount,
     mountState,
-    mountState?.cache.state,
     mountState?.activeJob?.jobId,
     mountKey,
     streamPath,
@@ -300,7 +323,7 @@ function DiskAnalysisPage() {
 
     liveRawRootRef.current = cachedSnapshot.root;
     setLiveSnapshot(cachedSnapshot);
-    setLiveRoot(createPresentationTree(cachedSnapshot.root, LIVE_PRESENTATION_OPTIONS));
+    setLiveRoot(createSnapshotPresentationTree(cachedSnapshot.root, LIVE_PRESENTATION_OPTIONS));
   }, [activeJob, cachedSnapshot, liveSnapshot, mountState]);
   const livePresentationOptions =
     activeJob?.phase === "queued" || activeJob?.phase === "scanning"
@@ -335,6 +358,22 @@ function DiskAnalysisPage() {
     // page loaded with.
     let lastKnownIssues: DiskAnalysisJobState["issues"] =
       liveJob?.issues ?? mountState?.activeJob?.issues ?? [];
+    // The mount identity the *server* is using, which is the only one the
+    // streamed paths agree with.
+    //
+    // Every path in the tree descends from `path.resolve(mount)`, while
+    // `mount` here is parsed straight out of the `?mount=` search param. When
+    // those two strings differ, no branch ever equals the root, so
+    // `buildAncestorChain` walks past it to `/` and hangs the whole live tree
+    // under a phantom node one level too deep. A trailing separator is the
+    // easiest way to see it, but `.`/`..` segments, doubled separators and
+    // Windows drive-letter case do it too -- and none of them can be undone
+    // client-side, because `path.resolve` needs a cwd and a platform the
+    // browser does not have. So rather than guess, take the identity the
+    // server puts on its own events: `job.mount`/`branch.mount` are
+    // `ensureJob`'s resolved mount. Seeded from the mount-state query for the
+    // window before the first event lands.
+    let liveMount: DiskAnalysisMountIdentity = mountState?.activeJob?.mount ?? mount;
     let mergeRoot = liveRawRootRef.current;
     let lastPublishedAtMs = 0;
     const source = new EventSource(streamPath);
@@ -364,13 +403,13 @@ function DiskAnalysisPage() {
         }
 
         const mergeStartedAt = performance.now();
-        let nextRoot = mergeRoot ?? createSyntheticLiveRoot(mount);
+        let nextRoot = mergeRoot ?? createSyntheticLiveRoot(liveMount);
         while (queuedBranches.length > 0) {
           const branch = queuedBranches.shift();
           if (!branch) {
             continue;
           }
-          nextRoot = integrateBranchIntoTree(nextRoot, mount, branch);
+          nextRoot = integrateBranchIntoTree(nextRoot, liveMount, branch);
           if (performance.now() - mergeStartedAt >= 12) {
             break;
           }
@@ -436,6 +475,7 @@ function DiskAnalysisPage() {
         const messageEvent = event as MessageEvent<string>;
         const parsed = DiskAnalysisScanEventSchema.parse(JSON.parse(messageEvent.data));
         if (parsed.event === "status" || parsed.event === "progress") {
+          liveMount = parsed.job.mount;
           if (parsed.event === "status") {
             lastKnownIssues = parsed.job.issues;
             pendingJob = parsed.job;
@@ -465,6 +505,7 @@ function DiskAnalysisPage() {
           return;
         }
         if (parsed.event === "branch") {
+          liveMount = parsed.mount;
           pendingBranches.set(parsed.branch.path, parsed.branch);
           scheduleFlush();
           return;
@@ -476,6 +517,7 @@ function DiskAnalysisPage() {
             mergeTimer = null;
           }
           queuedBranches.length = 0;
+          liveMount = parsed.job.mount;
           lastKnownIssues = parsed.job.issues;
           setLiveJob(parsed.job);
           setLiveSnapshot(parsed.snapshot);
@@ -545,11 +587,25 @@ function DiskAnalysisPage() {
         : cachedSnapshot
           ? "cached"
           : ("live" satisfies ViewMode);
+  // DISK-15: pruning used to reach only the in-progress tree, so a cached or
+  // just-completed snapshot went to the treemap whole. Both memos are keyed on
+  // the root object, which is also what the hover index caches against -- for
+  // a tree under the node budget `createSnapshotPresentationTree` returns that
+  // very object, so nothing downstream sees a new identity and nothing is
+  // re-indexed.
+  const cachedRootForView = useMemo(
+    () => createSnapshotPresentationTree(cachedSnapshot?.root ?? null, LIVE_PRESENTATION_OPTIONS),
+    [cachedSnapshot?.root]
+  );
+  const liveSnapshotRootForView = useMemo(
+    () => createSnapshotPresentationTree(liveSnapshot?.root ?? null, LIVE_PRESENTATION_OPTIONS),
+    [liveSnapshot?.root]
+  );
   const liveRootForView =
     activeJob?.phase === "queued" || activeJob?.phase === "scanning"
       ? liveRoot
-      : liveSnapshot?.root ?? liveRoot;
-  const currentRoot = activeView === "cached" ? cachedSnapshot?.root ?? null : liveRootForView;
+      : liveSnapshotRootForView ?? liveRoot;
+  const currentRoot = activeView === "cached" ? cachedRootForView : liveRootForView;
   const currentSnapshot = activeView === "cached" ? cachedSnapshot : liveSnapshot;
   const legend =
     activeView === "cached"
@@ -565,11 +621,16 @@ function DiskAnalysisPage() {
     () =>
       resolveHoveredNode(
         currentRoot,
-        activeView === "live" ? liveRawRootRef.current : currentRoot,
+        // The unpruned tree behind the view, so a hover that lands on
+        // something pruning dropped can still be resolved. Each of these is
+        // indexed lazily and only on a miss, which in practice means never:
+        // the treemap only ever emits paths it drew, and it draws
+        // `currentRoot`.
+        activeView === "live" ? liveRawRootRef.current : cachedSnapshot?.root ?? null,
         hoveredPath,
-        cachedSnapshot?.root ?? null
+        cachedRootForView
       ),
-    [activeView, cachedSnapshot?.root, currentRoot, hoveredPath]
+    [activeView, cachedRootForView, cachedSnapshot?.root, currentRoot, hoveredPath]
   );
   const issueList = useMemo(() => {
     if (activeView === "live" && activeJob) {
@@ -610,6 +671,19 @@ function DiskAnalysisPage() {
     !!mount && diskAnalysisQueriesSettled && !mountState?.activeJob;
   const manualScanLabel = cachedSnapshot ? "Start New Scan" : "Start Scan";
   const showToolbarActions = canStartManualScan || issueList.length > 0;
+  // B1/B5: a job reaches "partial" when anything made the totals a lower
+  // bound. `issueCount` counts occurrences rather than retained issue objects,
+  // so it is the honest number here -- but it carries `.default(0)` on the
+  // wire so a snapshot cached before the field existed still parses, and that
+  // combination ("partial", count 0) is reachable. "0 directories were
+  // unreadable" would contradict the warning it is attached to, so the
+  // count-free wording covers it.
+  const isPartialResult = activeJob?.phase === "partial";
+  const partialIssueCount = activeJob?.issueCount ?? 0;
+  const partialResultMessage =
+    partialIssueCount > 0
+      ? `${formatCount(partialIssueCount)} directories were unreadable - totals are a lower bound.`
+      : "Some directories were unreadable - totals are a lower bound.";
 
   const openInFiles = (node: DiskAnalysisTreemapNode) => {
     void navigate({
@@ -753,6 +827,13 @@ function DiskAnalysisPage() {
               {streamError ? <SidebarStat label="Stream" value={streamError} tone="bad" /> : null}
             </div>
 
+            {isPartialResult ? (
+              <div className="disk-analysis-partial" role="status">
+                <AlertTriangle size={14} aria-hidden="true" />
+                <span>{partialResultMessage}</span>
+              </div>
+            ) : null}
+
             {activeJob ? (
               <div className="disk-analysis-progress">
                 <div className="disk-analysis-progress__bar">
@@ -826,12 +907,23 @@ function DiskAnalysisPage() {
                 </div>
               </div>
             ) : (
+              // Nothing cached, nothing running. Since the page no longer
+              // starts a scan by itself, this is where the user is offered
+              // one -- the same action as the toolbar button, named
+              // differently so both remain unambiguous to anyone (or any test)
+              // resolving them by accessible name.
               <div className="disk-analysis-empty">
-                <div className="disk-analysis-empty__title">No analysis data available</div>
+                <div className="disk-analysis-empty__title">No analysis data yet</div>
                 <div className="disk-analysis-empty__body">
-                  Start a scan from Settings or refresh the page to request the latest mount
-                  status.
+                  Nothing has been scanned for this mount. Scanning walks the whole filesystem,
+                  so it only runs when you ask for it.
                 </div>
+                {canStartManualScan ? (
+                  <Button onClick={startManualScan} disabled={startScanMutation.isPending}>
+                    <Play size={14} />
+                    <span>{startScanMutation.isPending ? "STARTING..." : "Scan This Mount"}</span>
+                  </Button>
+                ) : null}
               </div>
             )}
           </section>
