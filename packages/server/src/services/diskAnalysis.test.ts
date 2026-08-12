@@ -651,6 +651,112 @@ describe("diskAnalysis service", () => {
     }
   });
 
+  test("assembling the tree materialises each node at most once, not once per ancestor", async () => {
+    // A deep chain, so that "nodes x depth" is roughly thirty times "nodes".
+    // Under per-ancestor deep copying every leaf is re-serialised once for each
+    // level between it and the root and the count runs into five figures; under
+    // reference attachment the only materialisations are the one node per
+    // directory that finalisation produces plus the shallow live-branch copies.
+    // The bound is therefore the node count itself, and it stays meaningful:
+    // any extra whole-tree pass on the emit path pushes straight through it.
+    process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = "5000";
+    process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES = "1";
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-copies-");
+
+    const depth = 60;
+    const filesPerDirectory = 10;
+    let cursor = mountDir;
+    for (let level = 0; level < depth; level += 1) {
+      cursor = path.join(cursor, `d${level}`);
+      await fs.ensureDir(cursor);
+      const directory = cursor;
+      await Promise.all(
+        Array.from({ length: filesPerDirectory }, (_, index) =>
+          fs.writeFile(path.join(directory, `f${index}.bin`), Buffer.alloc(64))
+        )
+      );
+    }
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    diskAnalysis.__testing.resetInstrumentation();
+
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+
+    expect(finalJob?.phase).toBe("completed");
+    expect(snapshot?.snapshot.totals.totalFiles).toBe(depth * filesPerDirectory);
+    expect(snapshot?.snapshot.totals.totalDirectories).toBe(depth + 1);
+
+    const totalNodes =
+      (snapshot?.snapshot.totals.totalFiles ?? 0) +
+      (snapshot?.snapshot.totals.totalDirectories ?? 0);
+    // Greater than zero first: a counter that nothing increments satisfies any
+    // upper bound, and the test would stop testing anything the moment it went
+    // green. This one is incremented on the live path, so it stays honest.
+    expect(diskAnalysis.__testing.getNodeCopyCount()).toBeGreaterThan(0);
+    expect(diskAnalysis.__testing.getNodeCopyCount()).toBeLessThanOrEqual(totalNodes);
+
+    // The deepest file still has to arrive intact at the top of the tree.
+    let deepest = snapshot?.snapshot.root;
+    for (let level = 0; level < depth; level += 1) {
+      deepest = deepest?.children.find((child) => child.name === `d${level}`);
+    }
+    expect(deepest?.children).toHaveLength(filesPerDirectory);
+    expect(snapshot?.snapshot.totals.totalBytes).toBe(depth * filesPerDirectory * 64);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  }, 120_000);
+
+  test("child insertion does not scan the sibling array", async () => {
+    // upsertChildBranch did a findIndex per insertion, so a directory with n
+    // entries cost O(n^2) to build -- once to insert the placeholder and once to
+    // replace it with the finished branch. A path-keyed index makes both O(1),
+    // and the invariant is per-insertion cost: the sibling entries a lookup has
+    // to compare must stay a small constant multiple of the number of lookups,
+    // rather than growing with the directory's fan-out.
+    process.env.DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES = "1024";
+    process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = "5000";
+    process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES = "1";
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-wide-dir-");
+
+    const width = 500;
+    await Promise.all(
+      Array.from({ length: width }, async (_, index) => {
+        const directory = path.join(mountDir, `d${index}`);
+        await fs.ensureDir(directory);
+        await fs.writeFile(path.join(directory, "f.bin"), Buffer.alloc(64));
+      })
+    );
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    diskAnalysis.__testing.resetInstrumentation();
+
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+
+    expect(finalJob?.phase).toBe("completed");
+    expect(snapshot?.snapshot.root.children).toHaveLength(width);
+    expect(snapshot?.snapshot.totals.totalFiles).toBe(width);
+
+    // One lookup to insert each placeholder and one to replace it, so a fan-out
+    // of 500 is 1000 lookups. Under a linear scan the comparisons are ~250x that.
+    const { lookups, comparisons } = diskAnalysis.__testing.getChildLookupStats();
+    expect(lookups).toBeGreaterThanOrEqual(width);
+    expect(comparisons).toBeLessThanOrEqual(lookups * 2);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  }, 120_000);
+
   test("a path longer than the message cap still produces a valid issue", async () => {
     const dataDir = await createTempDir("deckos-disk-analysis-data-");
     const diskAnalysis = (await loadDiskAnalysisModule(dataDir)) as DiskAnalysisModule & {

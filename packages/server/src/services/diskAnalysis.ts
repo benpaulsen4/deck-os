@@ -33,6 +33,12 @@ type MutableDirectoryNode = {
   truncated: boolean;
   issues: DiskAnalysisIssue[];
   children: DiskAnalysisTreemapNode[];
+  /**
+   * Slot of each directory child in `children`, keyed by path, so replacing a
+   * placeholder with its finished branch is O(1). A findIndex per insertion made
+   * building a wide directory quadratic in its entry count.
+   */
+  childIndexByPath: Map<string, number>;
   pendingChildren: number;
   scanned: boolean;
 };
@@ -96,7 +102,11 @@ const MAX_SMALL_FILE_THRESHOLD_BYTES = 64 * 1024 * 1024;
 const DEFAULT_LIMITS: DiskAnalysisResourceLimits = {
   maxWorkers: 4,
   maxPendingDirectories: 2048,
-  maxIndexedNodes: 1_000_000,
+  // Was 1_000_000. The tree exists several times over during serialization, so
+  // the cap is really a peak-memory setting, and no treemap renders anywhere
+  // near this many rectangles. DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES raises it
+  // for anyone who genuinely wants the old ceiling.
+  maxIndexedNodes: 500_000,
 };
 
 const jobs = new Map<string, DiskAnalysisJobInternal>();
@@ -627,6 +637,7 @@ function createDirectoryNode(
     truncated: false,
     issues: [],
     children: [],
+    childIndexByPath: new Map(),
     pendingChildren: 0,
     scanned: false,
   };
@@ -673,47 +684,62 @@ function createSmallFilesBucket(
   };
 }
 
+/**
+ * Test-only instrumentation for the tree-build and emit paths.
+ *
+ * `nodeCopyCount` counts treemap nodes materialised *from an existing node* —
+ * every serialisation or clone. It deliberately does not count the walker's
+ * original node creations, which are one per node by construction. The
+ * invariant the suite asserts is that the total stays bounded by the number of
+ * nodes in the finished tree: linear, not nodes x depth.
+ *
+ * `childLookups` / `childLookupComparisons` measure what it costs to find a
+ * child's slot: one lookup per insertion, and the number of candidate entries
+ * that lookup had to compare. A path-keyed index makes those two numbers equal;
+ * a findIndex over the sibling array makes the second quadratic in the
+ * directory's entry count. Both are incremented on the live production path, so
+ * neither can quietly rot into a constant.
+ */
+let nodeCopyCount = 0;
+let childLookups = 0;
+let childLookupComparisons = 0;
+
 function upsertChildBranch(parent: MutableDirectoryNode, child: DiskAnalysisTreemapNode) {
-  const childIndex = parent.children.findIndex((entry) => entry.path === child.path);
-  if (childIndex >= 0) {
+  childLookups += 1;
+  childLookupComparisons += 1;
+  const childIndex = parent.childIndexByPath.get(child.path);
+  if (childIndex !== undefined) {
     parent.children[childIndex] = child;
     return;
   }
+  parent.childIndexByPath.set(child.path, parent.children.length);
   parent.children.push(child);
 }
 
-function serializeChildNode(
-  node: DiskAnalysisTreemapNode,
-  mode: "deep" | "shallow"
-): DiskAnalysisTreemapNode {
-  if (node.type === "file") {
-    return {
-      ...node,
-      issues: [...node.issues],
-      children: [],
-    };
+/**
+ * Turn a finished directory into its treemap node.
+ *
+ * Children are already final treemap nodes and are attached **by reference**.
+ * The previous version deep copied the whole subtree at every level, so each
+ * node was re-serialised once per ancestor between it and the root -- ten to
+ * fifteen million throwaway allocations on a million-node tree, and the main
+ * source of out-of-memory kills.
+ *
+ * Only call this once the directory is scanned and has no pending children:
+ * `children` is sorted in place here, which leaves `childIndexByPath` stale.
+ */
+function finalizeDirectoryNode(node: MutableDirectoryNode): DiskAnalysisTreemapNode {
+  const children = node.children;
+  children.sort((left, right) => right.recursiveSize - left.recursiveSize);
+  let recursiveSize = 0;
+  let descendantsScanned = 0;
+  for (const child of children) {
+    recursiveSize += child.recursiveSize;
+    if (child.type === "directory") {
+      descendantsScanned += child.descendantsScanned + 1;
+    }
   }
-
-  const children =
-    mode === "deep" ? node.children.map((child) => serializeChildNode(child, mode)) : [];
-  return {
-    ...node,
-    issues: [...node.issues],
-    children,
-  };
-}
-
-function toTreemapNode(
-  node: MutableDirectoryNode,
-  mode: "deep" | "shallow" = "deep"
-): DiskAnalysisTreemapNode {
-  const children = [...node.children]
-    .map((child) => serializeChildNode(child, mode))
-    .sort((left, right) => right.recursiveSize - left.recursiveSize);
-  const recursiveSize = children.reduce((sum, child) => sum + child.recursiveSize, 0);
-  const descendantsScanned = children.reduce((sum, child) => {
-    return sum + (child.type === "directory" ? child.descendantsScanned + 1 : 0);
-  }, 0);
+  nodeCopyCount += 1;
   return {
     path: node.path,
     name: node.name,
@@ -725,6 +751,34 @@ function toTreemapNode(
     truncated: node.truncated,
     issues: node.issues,
     children,
+  };
+}
+
+/**
+ * The live branch event carries a directory and its direct children only --
+ * sending the subtree would be the whole tree again, once per emit.
+ *
+ * Directory children are copied with their own children stripped. File children
+ * have no children to strip and are never mutated after the walker creates
+ * them, so they travel by reference; the only consumer is the SSE route, which
+ * re-parses and serialises the event before it leaves the process.
+ */
+function toShallowBranch(branch: DiskAnalysisTreemapNode): DiskAnalysisTreemapNode {
+  nodeCopyCount += 1;
+  return {
+    ...branch,
+    issues: [...branch.issues],
+    children: branch.children.map((child) => {
+      if (child.children.length === 0) {
+        return child;
+      }
+      nodeCopyCount += 1;
+      return {
+        ...child,
+        issues: [...child.issues],
+        children: [],
+      };
+    }),
   };
 }
 
@@ -821,27 +875,27 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
 
   const done = new Promise<DiskAnalysisSnapshot>((resolve, reject) => {
     const finalizeNode = (node: MutableDirectoryNode) => {
-      const deepBranch = toTreemapNode(node, "deep");
+      const branch = finalizeDirectoryNode(node);
       if (
         node.parentPath === null ||
-        deepBranch.recursiveSize > 0 ||
-        deepBranch.truncated ||
-        deepBranch.issues.length > 0
+        branch.recursiveSize > 0 ||
+        branch.truncated ||
+        branch.issues.length > 0
       ) {
-        queueBranchEmit(job, toTreemapNode(node, "shallow"));
+        queueBranchEmit(job, toShallowBranch(branch));
       }
 
       if (node.parentPath) {
         const parent = nodesByPath.get(node.parentPath);
         if (parent) {
-          upsertChildBranch(parent, deepBranch);
+          upsertChildBranch(parent, branch);
           parent.pendingChildren = Math.max(0, parent.pendingChildren - 1);
           if (parent.scanned && parent.pendingChildren === 0) {
             finalizeNode(parent);
           }
         }
+        // The branch now owns `node.children`; the mutable node itself is done.
         nodesByPath.delete(node.path);
-        node.children = [];
         return;
       }
 
@@ -861,18 +915,23 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
           totalBytes: stats.totalBytes,
         }));
 
-      const snapshot = DiskAnalysisSnapshotSchema.parse({
+      // No schema parse here. This service authored every field a line above;
+      // nothing crossed a trust boundary, and z.lazy would walk and reallocate
+      // the entire tree a second time to tell us what we just wrote. The parse
+      // stays on the cache **read** path, where the file on disk could have been
+      // truncated, hand-edited, or written by an older version.
+      const snapshot: DiskAnalysisSnapshot = {
         mount: job.mount,
         generatedAt,
-        root: deepBranch,
+        root: branch,
         extensionLegend,
         totals: {
-          totalBytes: deepBranch.recursiveSize,
+          totalBytes: branch.recursiveSize,
           totalFiles,
           totalDirectories,
         },
-        issues: job.issues,
-      });
+        issues: [...job.issues],
+      };
 
       settled = true;
       resolve(snapshot);
@@ -1406,6 +1465,17 @@ export function subscribeToJob(jobId: string, listener: JobListener): () => void
 }
 
 export const __testing = {
+  getNodeCopyCount(): number {
+    return nodeCopyCount;
+  },
+  getChildLookupStats(): { lookups: number; comparisons: number } {
+    return { lookups: childLookups, comparisons: childLookupComparisons };
+  },
+  resetInstrumentation() {
+    nodeCopyCount = 0;
+    childLookups = 0;
+    childLookupComparisons = 0;
+  },
   resetState() {
     jobs.clear();
     activeJobIdByMount.clear();
