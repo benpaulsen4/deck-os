@@ -67,7 +67,10 @@ type DiskAnalysisJobInternal = {
   startedAt: string;
   updatedAt: string;
   progress: DiskAnalysisProgress;
+  /** Bounded to `MAX_RETAINED_ISSUES` -- see `recordIssue`. */
   issues: DiskAnalysisIssue[];
+  /** Total problems encountered, not issue objects retained -- see `recordIssue`. */
+  issueCount: number;
   limits: DiskAnalysisResourceLimits;
   controller: AbortController;
   createdAtMs: number;
@@ -110,6 +113,24 @@ const DEFAULT_LIMITS: DiskAnalysisResourceLimits = {
   maxIndexedNodes: 500_000,
 };
 
+/**
+ * DISK-11: the on-disk cache directory was never pruned, so stale entries
+ * and `.corrupt-*` quarantine files (see `moveCorruptCache`) accumulated
+ * indefinitely. These are deliberately more generous than `CACHE_FRESH_MS`
+ * (the "serve as fresh vs. trigger a background refresh" window): a mount
+ * that hasn't been viewed in a day still deserves its instant stale preview
+ * while a refresh runs, so entries are only evicted for being genuinely
+ * abandoned, not merely stale.
+ */
+const DEFAULT_CACHE_PRUNE_SETTINGS = {
+  /** A regular cache entry older than this (by mtime) is deleted outright. */
+  entryMaxAgeMs: 30 * 24 * 60 * 60 * 1000, // 30 days
+  /** `.corrupt-*` files are diagnostic-only; they don't need to live long. */
+  corruptMaxAgeMs: 7 * 24 * 60 * 60 * 1000, // 7 days
+  /** Once the surviving entries exceed this, the oldest are evicted first. */
+  maxDirectoryBytes: 256 * 1024 * 1024, // 256 MB
+};
+
 const jobs = new Map<string, DiskAnalysisJobInternal>();
 const activeJobIdByMount = new Map<string, string>();
 const pendingJobStartByMount = new Map<string, Promise<DiskAnalysisJobInternal | null>>();
@@ -137,6 +158,27 @@ function getLimits(): DiskAnalysisResourceLimits {
     maxIndexedNodes: getConfiguredPositiveInt(
       "DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES",
       DEFAULT_LIMITS.maxIndexedNodes
+    ),
+  };
+}
+
+function getCachePruneSettings(): {
+  entryMaxAgeMs: number;
+  corruptMaxAgeMs: number;
+  maxDirectoryBytes: number;
+} {
+  return {
+    entryMaxAgeMs: getConfiguredPositiveInt(
+      "DECKOS_DISK_ANALYSIS_CACHE_MAX_AGE_MS",
+      DEFAULT_CACHE_PRUNE_SETTINGS.entryMaxAgeMs
+    ),
+    corruptMaxAgeMs: getConfiguredPositiveInt(
+      "DECKOS_DISK_ANALYSIS_CACHE_CORRUPT_MAX_AGE_MS",
+      DEFAULT_CACHE_PRUNE_SETTINGS.corruptMaxAgeMs
+    ),
+    maxDirectoryBytes: getConfiguredPositiveInt(
+      "DECKOS_DISK_ANALYSIS_CACHE_MAX_BYTES",
+      DEFAULT_CACHE_PRUNE_SETTINGS.maxDirectoryBytes
     ),
   };
 }
@@ -227,8 +269,24 @@ function getJobState(job: DiskAnalysisJobInternal): DiskAnalysisJobState {
     updatedAt: job.updatedAt,
     progress: job.progress,
     issues: job.issues,
+    issueCount: job.issueCount,
     limits: job.limits,
   };
+}
+
+/**
+ * DISK-1: `issues` rode along inside every progress event, so a directory
+ * full of symlinks (or any host with many unreadable paths) grew an
+ * unbounded array that got re-sent to every connected browser on every tick.
+ * `job.issues` is bounded now (see `recordIssue`), but a progress event fires
+ * on a ~500ms cadence for the whole life of a scan -- resending even a
+ * capped 100-entry array on each tick is still wasted bandwidth for a value
+ * that mostly doesn't change between ticks. Progress events carry only the
+ * live count; the populated (bounded) array is for the final snapshot and
+ * status events.
+ */
+function getProgressJobState(job: DiskAnalysisJobInternal): DiskAnalysisJobState {
+  return { ...getJobState(job), issues: [] };
 }
 
 function touchJob(job: DiskAnalysisJobInternal, phase?: JobPhase) {
@@ -289,6 +347,36 @@ export function createIssue(
     message: truncateMessage(message),
     recoverable,
   };
+}
+
+/**
+ * DISK-1: retaining every issue object let the array grow without limit on a
+ * host with many unreadable paths. `MAX_RETAINED_ISSUES` caps what is kept
+ * for display; `job.issueCount` keeps counting past the cap so the total
+ * stays truthful even once the array stops growing.
+ */
+const MAX_RETAINED_ISSUES = 100;
+
+/**
+ * Record an issue against a job (and optionally the tree node it belongs to).
+ *
+ * `occurrences` lets an aggregated issue -- e.g. one "500 symlinks skipped
+ * under this directory" object -- count as 500 toward `issueCount` even
+ * though it is a single retained object. Callers that already aggregate
+ * per-directory (symlinks, traversal-limit skips, node-limit skips, nested
+ * mounts) pass their tally; everything else defaults to one occurrence per
+ * issue.
+ */
+function recordIssue(
+  job: DiskAnalysisJobInternal,
+  issue: DiskAnalysisIssue,
+  options?: { nodeIssues?: DiskAnalysisIssue[]; occurrences?: number }
+): void {
+  options?.nodeIssues?.push(issue);
+  job.issueCount += options?.occurrences ?? 1;
+  if (job.issues.length < MAX_RETAINED_ISSUES) {
+    job.issues.push(issue);
+  }
 }
 
 function getIssueForFsError(targetPath: string, error: unknown): DiskAnalysisIssue {
@@ -366,6 +454,106 @@ function buildSnapshotEnvelope(
 async function moveCorruptCache(cachePath: string): Promise<void> {
   const corruptPath = `${cachePath}.corrupt-${Date.now()}`;
   await fs.move(cachePath, corruptPath, { overwrite: true }).catch(() => undefined);
+}
+
+/** Where `readPersistedCacheFile`/`writePersistedCache` keep their files. */
+export function getDiskAnalysisCacheDir(): string {
+  return DISK_ANALYSIS_DIR;
+}
+
+/**
+ * Unlink a cache file, tolerating the case where it is already gone.
+ *
+ * Deletion is destructive, so this is the only place in pruning allowed to
+ * call `fs.unlink`. Anything other than ENOENT is logged rather than thrown
+ * -- a locked file on one platform, a permissions quirk, whatever -- pruning
+ * one bad entry must never take the rest of the run down with it.
+ */
+async function safeUnlinkCacheFile(filePath: string): Promise<void> {
+  try {
+    await fs.unlink(filePath);
+  } catch (error) {
+    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+    if (code === "ENOENT") {
+      return;
+    }
+    console.error("[deckos] Failed to prune disk analysis cache file:", filePath, error);
+  }
+}
+
+/**
+ * DISK-11: prune the on-disk analysis cache. Called once at process startup
+ * (see `index.ts`), not on every scan.
+ *
+ * Scope, precisely:
+ *  - Only ever touches regular files directly inside `getDiskAnalysisCacheDir()`.
+ *    Directories and symlinks are skipped outright -- `fs.readdir`'s Dirent
+ *    type is checked before anything is opened or removed, so a symlink
+ *    planted in the cache directory is neither followed nor deleted, and
+ *    whatever it points at is never touched.
+ *  - Deletes: regular cache entries older than `entryMaxAgeMs`, `.corrupt-*`
+ *    quarantine files older than `corruptMaxAgeMs`, and (if the directory is
+ *    still over `maxDirectoryBytes` after those two passes) the oldest
+ *    remaining entries by mtime until it is back under the cap.
+ *  - Never throws: a file that vanishes between listing and deletion (another
+ *    prune run, a manual cleanup) is treated as already-pruned, not an error.
+ */
+export async function pruneDiskAnalysisCache(): Promise<void> {
+  const cacheDir = getDiskAnalysisCacheDir();
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.readdir(cacheDir, { withFileTypes: true });
+  } catch (error) {
+    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+    if (code === "ENOENT") {
+      return;
+    }
+    console.error("[deckos] Failed to read disk analysis cache dir for pruning:", error);
+    return;
+  }
+
+  const settings = getCachePruneSettings();
+  const now = Date.now();
+  const survivors: { path: string; mtimeMs: number; size: number }[] = [];
+
+  for (const entry of entries) {
+    // Symlinks and directories are never candidates -- lstat (not stat) so a
+    // symlink's own type is what's inspected, not whatever it points to.
+    if (!entry.isFile()) {
+      continue;
+    }
+    const entryPath = path.join(cacheDir, entry.name);
+    let stat: fs.Stats;
+    try {
+      stat = await fs.lstat(entryPath);
+    } catch {
+      continue; // Vanished between readdir and lstat -- nothing to prune.
+    }
+    if (!stat.isFile()) {
+      continue;
+    }
+
+    const isCorrupt = entry.name.includes(".corrupt-");
+    const maxAgeMs = isCorrupt ? settings.corruptMaxAgeMs : settings.entryMaxAgeMs;
+    if (now - stat.mtimeMs > maxAgeMs) {
+      await safeUnlinkCacheFile(entryPath);
+      continue;
+    }
+
+    survivors.push({ path: entryPath, mtimeMs: stat.mtimeMs, size: stat.size });
+  }
+
+  let totalBytes = survivors.reduce((sum, survivor) => sum + survivor.size, 0);
+  if (totalBytes > settings.maxDirectoryBytes) {
+    survivors.sort((left, right) => left.mtimeMs - right.mtimeMs);
+    for (const survivor of survivors) {
+      if (totalBytes <= settings.maxDirectoryBytes) {
+        break;
+      }
+      await safeUnlinkCacheFile(survivor.path);
+      totalBytes -= survivor.size;
+    }
+  }
 }
 
 async function readPersistedCacheFile(
@@ -534,7 +722,7 @@ function emitStatus(job: DiskAnalysisJobInternal) {
 function emitProgress(job: DiskAnalysisJobInternal) {
   notifyListeners(job.jobId, {
     event: "progress",
-    job: getJobState(job),
+    job: getProgressJobState(job),
   });
 }
 
@@ -1028,8 +1216,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
               entries = await fs.readdir(task.directoryPath, { withFileTypes: true });
             } catch (error) {
               const issue = getIssueForFsError(task.directoryPath, error);
-              task.node.issues.push(issue);
-              job.issues.push(issue);
+              recordIssue(job, issue, { nodeIssues: task.node.issues });
               task.node.truncated = true;
               task.node.scanned = true;
               job.progress.directoriesCompleted += 1;
@@ -1053,6 +1240,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
             let pendingLimitSkips = 0;
             let indexedNodeSkips = 0;
             let nestedMountSkips = 0;
+            let symlinkSkips = 0;
             // Only call this once a file's bytes are actually entering the tree (the
             // small-file bucket, or past the node-limit gate) — a file skipped by the
             // gate must not inflate totalFiles or the extension legend beyond what the
@@ -1076,13 +1264,10 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
 
               const entryPath = path.join(task.directoryPath, entry.name);
               if (entry.isSymbolicLink()) {
-                const issue = createIssue(
-                  "symlink-skipped",
-                  entryPath,
-                  `Symlink skipped: ${entryPath}`
-                );
-                task.node.issues.push(issue);
-                job.issues.push(issue);
+                // Aggregated below, once per directory, rather than one issue
+                // per link -- a directory full of symlinks must not fan out
+                // into thousands of near-identical issue objects.
+                symlinkSkips += 1;
                 task.node.truncated = true;
                 continue;
               }
@@ -1092,8 +1277,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
                 stat = await fs.stat(entryPath);
               } catch (error) {
                 const issue = getIssueForFsError(entryPath, error);
-                task.node.issues.push(issue);
-                job.issues.push(issue);
+                recordIssue(job, issue, { nodeIssues: task.node.issues });
                 task.node.truncated = true;
                 continue;
               }
@@ -1183,14 +1367,28 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
               );
             }
 
+            if (symlinkSkips > 0) {
+              const issue = createIssue(
+                "symlink-skipped",
+                task.directoryPath,
+                `Symlink skipped for ${symlinkSkips} entr${symlinkSkips === 1 ? "y" : "ies"} under ${task.directoryPath}`
+              );
+              recordIssue(job, issue, {
+                nodeIssues: task.node.issues,
+                occurrences: symlinkSkips,
+              });
+            }
+
             if (pendingLimitSkips > 0) {
               const issue = createIssue(
                 "partial-scan",
                 task.directoryPath,
                 `Traversal limit reached while indexing ${pendingLimitSkips} child director${pendingLimitSkips === 1 ? "y" : "ies"} under ${task.directoryPath}`
               );
-              task.node.issues.push(issue);
-              job.issues.push(issue);
+              recordIssue(job, issue, {
+                nodeIssues: task.node.issues,
+                occurrences: pendingLimitSkips,
+              });
             }
 
             if (indexedNodeSkips > 0) {
@@ -1199,8 +1397,10 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
                 task.directoryPath,
                 `Node limit reached while indexing ${indexedNodeSkips} entr${indexedNodeSkips === 1 ? "y" : "ies"} under ${task.directoryPath}`
               );
-              task.node.issues.push(issue);
-              job.issues.push(issue);
+              recordIssue(job, issue, {
+                nodeIssues: task.node.issues,
+                occurrences: indexedNodeSkips,
+              });
             }
 
             if (nestedMountSkips > 0) {
@@ -1209,8 +1409,10 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
                 task.directoryPath,
                 `Nested mount skipped for ${nestedMountSkips} entr${nestedMountSkips === 1 ? "y" : "ies"} under ${task.directoryPath}`
               );
-              task.node.issues.push(issue);
-              job.issues.push(issue);
+              recordIssue(job, issue, {
+                nodeIssues: task.node.issues,
+                occurrences: nestedMountSkips,
+              });
             }
 
             task.node.scanned = true;
@@ -1278,7 +1480,7 @@ async function runJob(job: DiskAnalysisJobInternal): Promise<void> {
       error instanceof Error ? error.message : "Disk analysis failed",
       false
     );
-    job.issues.push(issue);
+    recordIssue(job, issue);
     setJobFinalState(job, "failed");
     emitStatus(job);
   }
@@ -1333,6 +1535,7 @@ async function ensureJob(
         bytesProcessed: 0,
       },
       issues: [],
+      issueCount: 0,
       limits: getLimits(),
       controller: new AbortController(),
       createdAtMs: Date.now(),

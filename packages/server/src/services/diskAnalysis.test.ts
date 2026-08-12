@@ -13,6 +13,7 @@ const DEFAULT_ENV = {
   pending: process.env.DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES,
   nodes: process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES,
   smallThreshold: process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES,
+  cacheMaxBytes: process.env.DECKOS_DISK_ANALYSIS_CACHE_MAX_BYTES,
 };
 
 async function createTempDir(prefix: string): Promise<string> {
@@ -64,6 +65,7 @@ describe("diskAnalysis service", () => {
     process.env.DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES = DEFAULT_ENV.pending;
     process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = DEFAULT_ENV.nodes;
     process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES = DEFAULT_ENV.smallThreshold;
+    process.env.DECKOS_DISK_ANALYSIS_CACHE_MAX_BYTES = DEFAULT_ENV.cacheMaxBytes;
     vi.resetModules();
     vi.clearAllMocks();
   });
@@ -871,5 +873,268 @@ describe("diskAnalysis service", () => {
 
     await diskAnalysis.__testing.clearState();
     await fs.remove(dataDir);
+  });
+
+  describe("issue array bound and counter (DISK-1)", () => {
+    test.skipIf(process.platform === "win32")(
+      "progress events carry an issue count, not an unbounded issue array",
+      async () => {
+        const dataDir = await createTempDir("deckos-disk-analysis-data-");
+        const mountDir = await createTempDir("deckos-disk-issue-cap-");
+        // 500 symlinks, each of which is skipped. Aggregated per parent
+        // directory this is one issue object, but 500 real problems.
+        await fs.ensureDir(path.join(mountDir, "target"));
+        for (let i = 0; i < 500; i += 1) {
+          await fs.symlink(path.join(mountDir, "target"), path.join(mountDir, `link${i}`));
+        }
+
+        const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+        const mount = { mount: mountDir, fs: "testfs" };
+        const start = await diskAnalysis.startScan(mount);
+
+        const progressEvents: Extract<DiskAnalysisScanEvent, { event: "progress" }>[] = [];
+        const unsubscribe = diskAnalysis.subscribeToJob(start.jobId, (event) => {
+          if (event.event === "progress") {
+            progressEvents.push(event);
+          }
+        });
+
+        const finished = await waitForTerminalJob(diskAnalysis, start.jobId);
+        unsubscribe();
+
+        expect(finished?.phase).toBe("completed");
+        // The counter is the truth: 500 skipped symlinks are 500 problems
+        // encountered, even though they aggregate into a single issue object.
+        expect(finished?.issueCount).toBeGreaterThanOrEqual(500);
+        // Bounded: the array is for display, the counter is for truth.
+        expect(finished?.issues.length).toBeLessThanOrEqual(100);
+
+        const symlinkIssues = (finished?.issues ?? []).filter(
+          (issue) => issue.code === "symlink-skipped"
+        );
+        expect(symlinkIssues).toHaveLength(1);
+        expect(symlinkIssues[0]?.message).toMatch(/500/);
+
+        // The finding: progress events must not carry the (growing) issues
+        // array on every tick -- only the count. The bounded array belongs on
+        // the final snapshot/status events, not on every live progress emit.
+        expect(progressEvents.length).toBeGreaterThan(0);
+        for (const event of progressEvents) {
+          expect(event.job.issues.length).toBe(0);
+        }
+        expect(progressEvents.some((event) => (event.job.issueCount ?? 0) > 0)).toBe(true);
+
+        await diskAnalysis.__testing.clearState();
+        await fs.remove(dataDir);
+        await fs.remove(mountDir);
+      }
+    );
+
+    test(
+      "caps the retained issue array at 100 while issueCount reflects the true total",
+      async () => {
+        // The symlink fixture above aggregates into a single issue object, so it
+        // cannot exercise the 100-entry cap. This fixture produces issues that do
+        // NOT aggregate together: one unreadable directory each, in 150 separate
+        // parent directories.
+        process.env.DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES = "1000";
+        const dataDir = await createTempDir("deckos-disk-analysis-data-");
+        const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+        const unreadableCount = 150;
+        const unreadableDirs = new Set<string>();
+        for (let i = 0; i < unreadableCount; i += 1) {
+          const dirPath = path.join(mountDir, `bad${i}`);
+          await fs.ensureDir(dirPath);
+          unreadableDirs.add(path.resolve(dirPath));
+        }
+        await fs.writeFile(path.join(mountDir, "keep.txt"), "keep", "utf8");
+
+        const originalReaddir = fs.readdir.bind(fs);
+        const readdirSpy = vi
+          .spyOn(fs, "readdir")
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .mockImplementation(async (target: any, options: any) => {
+            const targetPath = path.resolve(
+              typeof target === "string" ? target : String(target)
+            );
+            if (unreadableDirs.has(targetPath)) {
+              const error = new Error("Permission denied") as NodeJS.ErrnoException;
+              error.code = "EACCES";
+              throw error;
+            }
+            return await originalReaddir(target, options);
+          });
+
+        try {
+          const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+          const mount = { mount: mountDir, fs: "testfs" };
+          const start = await diskAnalysis.startScan(mount);
+          const finished = await waitForTerminalJob(diskAnalysis, start.jobId);
+
+          expect(finished?.phase).toBe("partial");
+          // 150 distinct, non-aggregating problems -- the counter has to say so.
+          expect(finished?.issueCount).toBeGreaterThanOrEqual(unreadableCount);
+          // But the retained array never exceeds the cap.
+          expect(finished?.issues.length).toBeLessThanOrEqual(100);
+
+          await diskAnalysis.__testing.clearState();
+          await fs.remove(dataDir);
+        } finally {
+          readdirSpy.mockRestore();
+          await fs.remove(mountDir);
+        }
+      },
+      20000
+    );
+  });
+
+  describe("analysis cache pruning (DISK-11)", () => {
+    test("drops cache entries past the freshness window and expired corrupt files", async () => {
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+      const cacheDir = diskAnalysis.getDiskAnalysisCacheDir();
+      await fs.ensureDir(cacheDir);
+
+      const stalePath = path.join(cacheDir, "stale-entry.json");
+      await fs.writeJson(stalePath, {
+        mount: { mount: "/mnt/old", fs: "ext4" },
+        snapshot: { generatedAt: new Date().toISOString() },
+      });
+      const corruptPath = path.join(cacheDir, `old.json.corrupt-${Date.now() - 1000}`);
+      await fs.writeFile(corruptPath, "{");
+
+      const veryOld = new Date("2000-01-01T00:00:00.000Z");
+      await fs.utimes(stalePath, veryOld, veryOld);
+      await fs.utimes(corruptPath, veryOld, veryOld);
+
+      await diskAnalysis.pruneDiskAnalysisCache();
+
+      expect(await fs.pathExists(stalePath)).toBe(false);
+      expect(await fs.pathExists(corruptPath)).toBe(false);
+
+      await diskAnalysis.__testing.clearState();
+      await fs.remove(dataDir);
+    });
+
+    test("a fresh, valid cache entry survives pruning", async () => {
+      // A prune that deletes everything would pass every other test in this
+      // file -- this is the one that catches it.
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+      await fs.writeFile(path.join(mountDir, "notes.txt"), "keep", "utf8");
+
+      const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+      const mount = { mount: mountDir, fs: "testfs" };
+      const start = await diskAnalysis.startScan(mount);
+      await waitForTerminalJob(diskAnalysis, start.jobId);
+
+      const cacheDir = diskAnalysis.getDiskAnalysisCacheDir();
+      const before = await fs.readdir(cacheDir);
+      expect(before.some((file) => file.endsWith(".json"))).toBe(true);
+
+      await diskAnalysis.pruneDiskAnalysisCache();
+
+      const after = await fs.readdir(cacheDir);
+      expect(after.sort()).toEqual(before.sort());
+
+      const cached = await diskAnalysis.getCachedSnapshot(mount);
+      expect(cached?.cache.state).toBe("fresh");
+
+      await diskAnalysis.__testing.clearState();
+      await fs.remove(dataDir);
+      await fs.remove(mountDir);
+    });
+
+    test("evicts the oldest entries once the cache directory exceeds its size cap", async () => {
+      process.env.DECKOS_DISK_ANALYSIS_CACHE_MAX_BYTES = "100";
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+      const cacheDir = diskAnalysis.getDiskAnalysisCacheDir();
+      await fs.ensureDir(cacheDir);
+
+      const olderPath = path.join(cacheDir, "older.json");
+      const newerPath = path.join(cacheDir, "newer.json");
+      await fs.writeFile(olderPath, Buffer.alloc(80, "a"));
+      await fs.writeFile(newerPath, Buffer.alloc(80, "b"));
+
+      const older = new Date(Date.now() - 60_000);
+      const newer = new Date();
+      await fs.utimes(olderPath, older, older);
+      await fs.utimes(newerPath, newer, newer);
+
+      await diskAnalysis.pruneDiskAnalysisCache();
+
+      expect(await fs.pathExists(olderPath)).toBe(false);
+      expect(await fs.pathExists(newerPath)).toBe(true);
+
+      await diskAnalysis.__testing.clearState();
+      await fs.remove(dataDir);
+    });
+
+    test("tolerates a cache file vanishing mid-run instead of throwing", async () => {
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+      const cacheDir = diskAnalysis.getDiskAnalysisCacheDir();
+      await fs.ensureDir(cacheDir);
+
+      const vanishingPath = path.join(cacheDir, "vanishing.json.corrupt-1");
+      await fs.writeFile(vanishingPath, "{");
+      const veryOld = new Date("2000-01-01T00:00:00.000Z");
+      await fs.utimes(vanishingPath, veryOld, veryOld);
+
+      const originalUnlink = fs.unlink.bind(fs);
+      const unlinkSpy = vi.spyOn(fs, "unlink").mockImplementation(async (target) => {
+        const targetPath = typeof target === "string" ? target : String(target);
+        if (path.resolve(targetPath) === path.resolve(vanishingPath)) {
+          const error = new Error("gone") as NodeJS.ErrnoException;
+          error.code = "ENOENT";
+          throw error;
+        }
+        return await originalUnlink(target);
+      });
+
+      await expect(diskAnalysis.pruneDiskAnalysisCache()).resolves.toBeUndefined();
+
+      unlinkSpy.mockRestore();
+      await diskAnalysis.__testing.clearState();
+      await fs.remove(dataDir);
+    });
+
+    test.skipIf(process.platform === "win32")(
+      "does not follow or delete a symlink inside the cache directory",
+      async () => {
+        const dataDir = await createTempDir("deckos-disk-analysis-data-");
+        const outsideDir = await createTempDir("deckos-disk-outside-");
+        const outsideFile = path.join(outsideDir, "sensitive.txt");
+        await fs.writeFile(outsideFile, "do not touch", "utf8");
+        // Make the *target* look old enough to prune. A buggy implementation
+        // that lists the cache directory without withFileTypes and then calls
+        // fs.stat (which follows links) on each entry would see this as a
+        // stale candidate and try to remove it -- unlink never follows a
+        // symlink, so it would delete the link itself, not the target. The
+        // correct implementation must never get that far: it has to recognise
+        // the directory entry as a symlink before ever stat-ing it.
+        const veryOld = new Date("2000-01-01T00:00:00.000Z");
+        await fs.utimes(outsideFile, veryOld, veryOld);
+
+        const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+        const cacheDir = diskAnalysis.getDiskAnalysisCacheDir();
+        await fs.ensureDir(cacheDir);
+
+        const linkPath = path.join(cacheDir, "escape.json");
+        await fs.symlink(outsideFile, linkPath);
+
+        await diskAnalysis.pruneDiskAnalysisCache();
+
+        // The link itself is skipped rather than followed and evaluated for
+        // staleness -- it survives untouched, and so does whatever it points at.
+        expect(await fs.pathExists(outsideFile)).toBe(true);
+        expect(await fs.lstat(linkPath).catch(() => null)).not.toBeNull();
+
+        await diskAnalysis.__testing.clearState();
+        await fs.remove(dataDir);
+        await fs.remove(outsideDir);
+      }
+    );
   });
 });
