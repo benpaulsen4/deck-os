@@ -308,6 +308,7 @@ describe("runtimeRoutes", () => {
           bytesProcessed: 0,
         },
         issues: [],
+        issueCount: 0,
         limits: {
           maxWorkers: 2,
           maxPendingDirectories: 10,
@@ -359,6 +360,7 @@ describe("runtimeRoutes", () => {
           bytesProcessed: 0,
         },
         issues: [],
+        issueCount: 0,
         limits: {
           maxWorkers: 2,
           maxPendingDirectories: 10,
@@ -384,6 +386,7 @@ describe("runtimeRoutes", () => {
               bytesProcessed: 128,
             },
             issues: [],
+            issueCount: 0,
             limits: {
               maxWorkers: 2,
               maxPendingDirectories: 10,

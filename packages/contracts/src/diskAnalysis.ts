@@ -117,14 +117,15 @@ const DiskAnalysisJobStateSchema = z.object({
   // Bounded to a display-sized cap by the service (currently 100 entries),
   // independent of how many problems the scan actually encountered -- see
   // `issueCount`. Progress events in particular carry this empty; the
-  // populated array belongs on status/snapshot events. Optional (rather than
-  // defaulted) so existing fixtures that predate this field keep compiling.
+  // populated array belongs on status/snapshot events.
   issues: z.array(DiskAnalysisIssueSchema).default([]),
   // Total problems encountered, not issue objects retained: many occurrences
   // (e.g. symlinks skipped under one directory) can aggregate into a single
   // issue object, so this can exceed `issues.length` once the array is
   // capped. This is the number the UI shows -- "how much did the scan miss".
-  issueCount: z.number().int().nonnegative().optional(),
+  // Required, not optional: the server always populates it, and an optional
+  // field only pushes the `?? 0` fallback onto every consumer instead.
+  issueCount: z.number().int().nonnegative(),
   limits: DiskAnalysisResourceLimitsSchema,
 });
 
@@ -146,6 +147,11 @@ const DiskAnalysisSnapshotSchema = z.object({
     totalDirectories: z.number().int().nonnegative(),
   }),
   issues: z.array(DiskAnalysisIssueSchema).default([]),
+  // Same cap-independent count as DiskAnalysisJobStateSchema.issueCount --
+  // once a job is pruned (FINISHED_JOB_TTL), the cached snapshot is the only
+  // surviving record of a scan, and `issues.length` alone under-reports a
+  // truncated array with no indication it was truncated.
+  issueCount: z.number().int().nonnegative(),
 });
 
 const DiskAnalysisSnapshotEnvelopeSchema = z.object({

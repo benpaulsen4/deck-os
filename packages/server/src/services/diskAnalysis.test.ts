@@ -3,7 +3,11 @@ import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { DiskAnalysisScanEvent, DiskAnalysisMountIdentity } from "@deckos/contracts";
+import type {
+  DiskAnalysisIssue,
+  DiskAnalysisScanEvent,
+  DiskAnalysisMountIdentity,
+} from "@deckos/contracts";
 import { DiskAnalysisIssueSchema } from "@deckos/contracts";
 
 type DiskAnalysisModule = typeof import("./diskAnalysis.js");
@@ -974,8 +978,11 @@ describe("diskAnalysis service", () => {
           expect(finished?.phase).toBe("partial");
           // 150 distinct, non-aggregating problems -- the counter has to say so.
           expect(finished?.issueCount).toBeGreaterThanOrEqual(unreadableCount);
-          // But the retained array never exceeds the cap.
-          expect(finished?.issues.length).toBeLessThanOrEqual(100);
+          // Exactly at the cap, not merely under it: 150 distinct issues means
+          // the array fills all 100 slots. `toBeLessThanOrEqual` alone would
+          // pass even if nothing were retained at all -- it stops testing the
+          // cap the moment a future regression retains zero issues.
+          expect(finished?.issues.length).toBe(100);
 
           await diskAnalysis.__testing.clearState();
           await fs.remove(dataDir);
@@ -986,6 +993,174 @@ describe("diskAnalysis service", () => {
       },
       20000
     );
+
+    test(
+      "a partial-result issue that loses the retention race still marks the scan partial",
+      async () => {
+        // B5 review round 1, finding 1 (CRITICAL): the partial-result signal
+        // used to be read back off the (capped) retained array. A directory
+        // full of symlink-skipped notices -- which do NOT signal partiality,
+        // by design, since a skipped symlink is a deliberate exclusion, not a
+        // dropped subtree -- can fill all 100 slots before a real
+        // permission-denied issue arrives. If that later issue simply isn't
+        // retained, a scan that silently missed data would report
+        // "completed" with a confident (wrong) total, and cache that for 24
+        // hours -- exactly the failure PARTIAL_RESULT_CODES exists to catch.
+        //
+        // 120 directories each contribute one synthetic (mocked, not a real
+        // OS symlink -- no elevation needed, cross-platform) symlink entry,
+        // aggregating to 120 distinct retained-issue attempts that fill the
+        // cap. A further directory is made unreadable and ordered to be
+        // processed dead last (see the LIFO/pending-stack note below), so by
+        // the time its permission-denied issue is recorded, the retained
+        // array is already full of unrelated, non-partial-signalling issues.
+        process.env.DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES = "1000";
+        const dataDir = await createTempDir("deckos-disk-analysis-data-");
+        const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+        const symlinkDirCount = 120;
+        const symlinkDirNames = Array.from(
+          { length: symlinkDirCount },
+          (_, index) => `bad${index}`
+        );
+        for (const name of symlinkDirNames) {
+          await fs.ensureDir(path.join(mountDir, name));
+        }
+        const deniedName = "denied";
+        await fs.ensureDir(path.join(mountDir, deniedName));
+
+        const mountDirResolved = path.resolve(mountDir);
+        const deniedResolved = path.resolve(path.join(mountDir, deniedName));
+        const symlinkDirResolved = new Set(
+          symlinkDirNames.map((name) => path.resolve(path.join(mountDir, name)))
+        );
+
+        type FakeDirent = {
+          name: string;
+          isSymbolicLink: () => boolean;
+          isDirectory: () => boolean;
+          isFile: () => boolean;
+          isBlockDevice: () => boolean;
+          isCharacterDevice: () => boolean;
+          isFIFO: () => boolean;
+          isSocket: () => boolean;
+        };
+        const fakeDirent = (name: string, kind: "dir" | "symlink"): FakeDirent => ({
+          name,
+          isSymbolicLink: () => kind === "symlink",
+          isDirectory: () => kind === "dir",
+          isFile: () => false,
+          isBlockDevice: () => false,
+          isCharacterDevice: () => false,
+          isFIFO: () => false,
+          isSocket: () => false,
+        });
+
+        const readdirSpy = vi
+          .spyOn(fs, "readdir")
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .mockImplementation(async (target: any): Promise<any> => {
+            const targetPath = path.resolve(
+              typeof target === "string" ? target : String(target)
+            );
+            if (targetPath === mountDirResolved) {
+              // `denied` listed first: the walker pushes discovered
+              // subdirectories onto a LIFO stack, so the first-listed entry
+              // is the last one popped and processed. With maxWorkers=1 this
+              // deterministically processes every symlink directory (filling
+              // the retained-issue cap) before `denied` is ever touched.
+              return [
+                fakeDirent(deniedName, "dir"),
+                ...symlinkDirNames.map((name) => fakeDirent(name, "dir")),
+              ];
+            }
+            if (symlinkDirResolved.has(targetPath)) {
+              // A synthetic symlink entry -- isSymbolicLink() is all the
+              // walker checks before skipping it, so this needs no real
+              // symlink (and therefore no Windows elevation) at all.
+              return [fakeDirent("link", "symlink")];
+            }
+            if (targetPath === deniedResolved) {
+              const error = new Error("Permission denied") as NodeJS.ErrnoException;
+              error.code = "EACCES";
+              throw error;
+            }
+            return [];
+          });
+
+        try {
+          const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+          const mount = { mount: mountDir, fs: "testfs" };
+          const start = await diskAnalysis.startScan(mount);
+          const finished = await waitForTerminalJob(diskAnalysis, start.jobId);
+
+          // The retained array is full of non-partial-signalling symlink
+          // issues by the time `denied` is processed -- confirms the setup
+          // actually exercises the retention race, not just the code path.
+          expect(finished?.issues.length).toBe(100);
+          expect(
+            finished?.issues.every((issue) => issue.code === "symlink-skipped")
+          ).toBe(true);
+
+          // The point of this test: partiality must not depend on retention.
+          expect(finished?.phase).toBe("partial");
+
+          await diskAnalysis.__testing.clearState();
+          await fs.remove(dataDir);
+        } finally {
+          readdirSpy.mockRestore();
+          await fs.remove(mountDir);
+        }
+      },
+      20000
+    );
+
+    test("a non-recoverable issue is never evicted by the retention cap", async () => {
+      // B5 review round 1, finding 4: the scan-failure issue (the only
+      // `recoverable: false` issue this file ever produces -- see the catch
+      // block in runJob) must never be the one a FIFO cap drops. Driving a
+      // genuine uncaught mid-scan failure through the public scan API isn't
+      // practical: every foreseeable fs error along that path is already
+      // caught and turned into a normal (recoverable) issue by design, so
+      // this exercises `recordIssue`'s eviction logic directly via the
+      // __testing hook added for exactly this purpose.
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const diskAnalysis = (await loadDiskAnalysisModule(dataDir)) as DiskAnalysisModule & {
+        createIssue: typeof import("./diskAnalysis.js").createIssue;
+      };
+
+      const job: {
+        issues: DiskAnalysisIssue[];
+        issueCount: number;
+        partialResultDetected: boolean;
+      } = { issues: [], issueCount: 0, partialResultDetected: false };
+      for (let i = 0; i < 150; i += 1) {
+        diskAnalysis.__testing.recordIssueForTesting(
+          job,
+          diskAnalysis.createIssue("path-inaccessible", `/mnt/x${i}`, `bad ${i}`)
+        );
+      }
+
+      // Fills the cap with ordinary recoverable issues -- confirms the setup
+      // actually exercises the "array is already full" scenario.
+      expect(job.issues.length).toBe(100);
+      expect(job.issues.some((issue) => issue.recoverable === false)).toBe(false);
+
+      diskAnalysis.__testing.recordIssueForTesting(
+        job,
+        diskAnalysis.createIssue("unknown", "/mnt", "scan failed", false)
+      );
+
+      // The point of this test: the array is still full (nothing grew past
+      // the cap), but the non-recoverable issue made it in anyway -- some
+      // recoverable issue was evicted to make room for it.
+      expect(job.issues.length).toBe(100);
+      expect(
+        job.issues.some((issue) => issue.code === "unknown" && issue.recoverable === false)
+      ).toBe(true);
+
+      await diskAnalysis.__testing.clearState();
+      await fs.remove(dataDir);
+    });
   });
 
   describe("analysis cache pruning (DISK-11)", () => {

@@ -71,6 +71,14 @@ type DiskAnalysisJobInternal = {
   issues: DiskAnalysisIssue[];
   /** Total problems encountered, not issue objects retained -- see `recordIssue`. */
   issueCount: number;
+  /**
+   * Whether a partial-result-signalling issue has ever been recorded, set
+   * unconditionally in `recordIssue` before the retention cap is applied.
+   * `hasPartialResult` reads this instead of scanning `issues` -- once an
+   * issue that does not survive the cap could still be the only one that
+   * mattered, the array itself can no longer be trusted to answer this.
+   */
+  partialResultDetected: boolean;
   limits: DiskAnalysisResourceLimits;
   controller: AbortController;
   createdAtMs: number;
@@ -358,6 +366,34 @@ export function createIssue(
 const MAX_RETAINED_ISSUES = 100;
 
 /**
+ * Codes that mean the totals are a lower bound.
+ *
+ * `recoverable` defaults to true on every issue, so keying off it alone let
+ * permission-denied scans report "completed" with a confident total that could
+ * be a fraction of reality — and then cached that for 24 hours. The service
+ * runs unprivileged, so EACCES on /root, /var/lib/docker and other users' homes
+ * is the normal case on any real host, not an edge case.
+ *
+ * Checked inside `recordIssue`, unconditionally and before the retention cap
+ * -- see `DiskAnalysisJobInternal.partialResultDetected`. A directory full of
+ * `symlink-skipped` notices (not partial-signalling; those are deliberately
+ * excluded, dropped subtrees) can fill the retained array before a real
+ * `permission-denied` arrives. If partiality were read back off `job.issues`,
+ * that later issue simply not being retained would make the whole scan look
+ * complete when it wasn't -- the exact failure this set exists to prevent.
+ */
+const PARTIAL_RESULT_CODES = new Set([
+  "partial-scan",
+  "permission-denied",
+  "path-inaccessible",
+  "path-not-found",
+  // A skipped nested mount is a whole subtree the scan never counted — on a
+  // homelab box that's frequently the media drive, i.e. most of the data. The
+  // total is a lower bound in exactly the sense this set exists to flag.
+  "nested-mount-skipped",
+]);
+
+/**
  * Record an issue against a job (and optionally the tree node it belongs to).
  *
  * `occurrences` lets an aggregated issue -- e.g. one "500 symlinks skipped
@@ -366,6 +402,15 @@ const MAX_RETAINED_ISSUES = 100;
  * per-directory (symlinks, traversal-limit skips, node-limit skips, nested
  * mounts) pass their tally; everything else defaults to one occurrence per
  * issue.
+ *
+ * Two things happen here that must not depend on whether the issue itself
+ * ends up retained in `job.issues`:
+ *  - `job.partialResultDetected` is set from the issue's own code/recoverable
+ *    flag, not from scanning the (capped) array afterward.
+ *  - A `recoverable: false` issue -- the reason a scan reports "failed" -- is
+ *    never silently dropped by the FIFO cap. If the array is already full
+ *    when one arrives, the most recently retained recoverable issue is
+ *    evicted to make room for it.
  */
 function recordIssue(
   job: DiskAnalysisJobInternal,
@@ -374,6 +419,20 @@ function recordIssue(
 ): void {
   options?.nodeIssues?.push(issue);
   job.issueCount += options?.occurrences ?? 1;
+
+  if (PARTIAL_RESULT_CODES.has(issue.code) || issue.recoverable === false) {
+    job.partialResultDetected = true;
+  }
+
+  if (issue.recoverable === false && job.issues.length >= MAX_RETAINED_ISSUES) {
+    for (let index = job.issues.length - 1; index >= 0; index -= 1) {
+      if (job.issues[index]?.recoverable !== false) {
+        job.issues.splice(index, 1);
+        break;
+      }
+    }
+  }
+
   if (job.issues.length < MAX_RETAINED_ISSUES) {
     job.issues.push(issue);
   }
@@ -1014,30 +1073,8 @@ function isActivePhase(phase: JobPhase): boolean {
   return phase === "queued" || phase === "scanning";
 }
 
-/**
- * Codes that mean the totals are a lower bound.
- *
- * `recoverable` defaults to true on every issue, so keying off it alone let
- * permission-denied scans report "completed" with a confident total that could
- * be a fraction of reality — and then cached that for 24 hours. The service
- * runs unprivileged, so EACCES on /root, /var/lib/docker and other users' homes
- * is the normal case on any real host, not an edge case.
- */
-const PARTIAL_RESULT_CODES = new Set([
-  "partial-scan",
-  "permission-denied",
-  "path-inaccessible",
-  "path-not-found",
-  // A skipped nested mount is a whole subtree the scan never counted — on a
-  // homelab box that's frequently the media drive, i.e. most of the data. The
-  // total is a lower bound in exactly the sense this set exists to flag.
-  "nested-mount-skipped",
-]);
-
 function hasPartialResult(job: DiskAnalysisJobInternal): boolean {
-  return job.issues.some(
-    (issue) => PARTIAL_RESULT_CODES.has(issue.code) || issue.recoverable === false
-  );
+  return job.partialResultDetected;
 }
 
 async function ensureMountAvailable(mount: DiskAnalysisMountIdentity): Promise<string> {
@@ -1154,6 +1191,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
           totalDirectories,
         },
         issues: [...job.issues],
+        issueCount: job.issueCount,
       };
 
       // `snapshot.root.children` *is* `rootNode.children` now, not a deep copy of
@@ -1536,6 +1574,7 @@ async function ensureJob(
       },
       issues: [],
       issueCount: 0,
+      partialResultDetected: false,
       limits: getLimits(),
       controller: new AbortController(),
       createdAtMs: Date.now(),
@@ -1724,6 +1763,24 @@ export function subscribeToJob(jobId: string, listener: JobListener): () => void
 }
 
 export const __testing = {
+  MAX_RETAINED_ISSUES,
+  /**
+   * Direct unit access to `recordIssue`'s retention/eviction behaviour
+   * (finding 4, B5 review round 1). Driving a genuine uncaught mid-scan
+   * failure through the public scan API to exercise this end-to-end isn't
+   * practical -- every foreseeable fs error along that path is already
+   * caught and turned into a normal (recoverable) issue by design, so a
+   * `recoverable: false` issue in practice only ever comes from the single
+   * scan-failure call site in `runJob`. The stub only needs the three fields
+   * `recordIssue` actually touches.
+   */
+  recordIssueForTesting(
+    job: Pick<DiskAnalysisJobInternal, "issues" | "issueCount" | "partialResultDetected">,
+    issue: DiskAnalysisIssue,
+    options?: { nodeIssues?: DiskAnalysisIssue[]; occurrences?: number }
+  ): void {
+    recordIssue(job as DiskAnalysisJobInternal, issue, options);
+  },
   getNodeCopyCount(): number {
     return nodeCopyCount;
   },

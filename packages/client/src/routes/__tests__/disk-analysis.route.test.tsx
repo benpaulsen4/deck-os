@@ -334,6 +334,7 @@ describe("disk analysis route", () => {
           bytesProcessed: 128,
         },
         issues: [],
+        issueCount: 0,
         limits: {
           maxWorkers: 4,
           maxPendingDirectories: 1024,
@@ -361,6 +362,7 @@ describe("disk analysis route", () => {
           totalDirectories: 2,
         },
         issues: [],
+        issueCount: 0,
       },
     };
     state.fileLists = {
@@ -480,6 +482,7 @@ describe("disk analysis route", () => {
           totalDirectories: 2,
         },
         issues: [],
+        issueCount: 0,
       },
     };
 
@@ -579,6 +582,7 @@ describe("disk analysis route", () => {
           bytesProcessed: 1024,
         },
         issues: [],
+        issueCount: 0,
         limits: {
           maxWorkers: 4,
           maxPendingDirectories: 1024,
@@ -613,6 +617,7 @@ describe("disk analysis route", () => {
           totalDirectories: 1,
         },
         issues: [],
+        issueCount: 0,
       },
     });
 
@@ -651,6 +656,7 @@ describe("disk analysis route", () => {
           totalDirectories: 2,
         },
         issues: [],
+        issueCount: 0,
       },
     };
 
@@ -697,6 +703,7 @@ describe("disk analysis route", () => {
           totalDirectories: 2,
         },
         issues: [],
+        issueCount: 0,
       },
     };
 
@@ -767,6 +774,7 @@ describe("disk analysis route", () => {
           totalDirectories: 2,
         },
         issues: [{ code: "permission-denied", path: "C:\\restricted", message: "Denied", recoverable: true }],
+        issueCount: 1,
       },
     };
 
@@ -824,6 +832,7 @@ describe("disk analysis route", () => {
           totalDirectories: 1,
         },
         issues: manyIssues,
+        issueCount: manyIssues.length,
       },
     };
 
@@ -848,5 +857,87 @@ describe("disk analysis route", () => {
     expect(
       screen.getByText("Permission denied: C:\\restricted\\folder-204")
     ).toBeInTheDocument();
+  });
+
+  it("does not blank the live issues panel on progress ticks", async () => {
+    // B5 review round 1, finding 2: progress events carry an empty `issues`
+    // array by design (see packages/server/src/services/diskAnalysis.ts --
+    // only issueCount travels on the live cadence). Treating status and
+    // progress events identically wiped the live issues list on every
+    // ~500ms tick, which (via the effect that closes the Scan Issues modal
+    // whenever the list is empty) force-closed it out from under a user
+    // reading it.
+    //
+    // The issue is seeded on the base mount state so it is showing the
+    // instant the live view renders (before any SSE event), then a single
+    // "progress" event is dispatched -- mirroring the "switches from stale
+    // cache to live mode" test's dispatch pattern above, which is the
+    // pattern proven not to trip the SSE connection effect's unrelated
+    // re-subscription behaviour.
+    const baseActiveJob = getActiveJob();
+    const baseMountState = state.mountState;
+    if (!baseMountState) {
+      throw new Error("Expected mount state from beforeEach");
+    }
+    state.mountState = {
+      ...baseMountState,
+      activeJob: {
+        ...baseActiveJob,
+        issues: [
+          {
+            code: "permission-denied",
+            path: "C:\\restricted",
+            message: "Permission denied: C:\\restricted",
+            recoverable: true,
+          },
+        ],
+        issueCount: 1,
+      },
+    };
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Live" }));
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    const eventSource = MockEventSource.latest();
+    eventSource.dispatchOpen();
+
+    await screen.findByRole("button", { name: /View Issues/i });
+
+    eventSource.dispatchMessage("progress", {
+      event: "progress",
+      job: {
+        ...baseActiveJob,
+        phase: "scanning",
+        issues: [],
+        issueCount: 7,
+        progress: {
+          ...baseActiveJob.progress,
+          directoriesCompleted: baseActiveJob.progress.directoriesCompleted + 1,
+        },
+      },
+    });
+
+    // Let the batched flush (a real setTimeout(0) inside the component, see
+    // scheduleFlush in disk-analysis.tsx) settle before asserting anything.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // A value that only the progress event carries, proving the flush above
+    // actually applied the new job state rather than this being a no-op --
+    // and, critically, that the issues button (and the count backing it)
+    // survived that same flush instead of being blanked by the progress
+    // event's empty `issues` array. The array being wiped is exactly what
+    // drives the "close the modal when there are no issues" effect, so a
+    // button that is still here is the same signal as a modal that would
+    // still be here.
+    //
+    // Queried via a raw aria-label match rather than a second getByRole
+    // accessible-name computation: re-computing the accessible name for this
+    // specific button a second time, after the progress-bar width and the
+    // directories-completed text have both changed underneath it, trips an
+    // unrelated jsdom internal bug in this dependency version (a crash deep
+    // in its CSS shorthand-property cloning code, unrelated to this fix).
+    expect(screen.getByText("2 / 4 directories")).toBeInTheDocument();
+    expect(document.querySelector('[aria-label^="View Issues"]')).not.toBeNull();
   });
 });

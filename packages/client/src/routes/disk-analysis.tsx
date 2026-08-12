@@ -318,6 +318,23 @@ function DiskAnalysisPage() {
     const pendingBranches = new Map<string, DiskAnalysisTreemapNode>();
     const queuedBranches: DiskAnalysisTreemapNode[] = [];
     let pendingJob: DiskAnalysisJobState | null = null;
+    // Progress events carry an empty `issues` array by design (see
+    // packages/server/src/services/diskAnalysis.ts -- only `issueCount`
+    // travels on the ~500ms progress cadence; the populated, capped array
+    // belongs to status/snapshot events). Overwriting the last known
+    // (populated) array with `[]` on every tick blanked the live issues
+    // panel for the whole scan and, combined with the modal-close effect
+    // below, force-closed an open Scan Issues modal out from under the user
+    // reading it. This tracks the last array a status/snapshot event
+    // actually populated, so progress events can keep showing it.
+    //
+    // Seeded from `mountState?.activeJob?.issues` as well as `liveJob?.issues`:
+    // attaching to a job that was already scanning before this connection
+    // opened has no prior "status" event to seed from -- the only source of
+    // truth for what's showing right now is the mount-state snapshot the
+    // page loaded with.
+    let lastKnownIssues: DiskAnalysisJobState["issues"] =
+      liveJob?.issues ?? mountState?.activeJob?.issues ?? [];
     let mergeRoot = liveRawRootRef.current;
     let lastPublishedAtMs = 0;
     const source = new EventSource(streamPath);
@@ -419,7 +436,12 @@ function DiskAnalysisPage() {
         const messageEvent = event as MessageEvent<string>;
         const parsed = DiskAnalysisScanEventSchema.parse(JSON.parse(messageEvent.data));
         if (parsed.event === "status" || parsed.event === "progress") {
-          pendingJob = parsed.job;
+          if (parsed.event === "status") {
+            lastKnownIssues = parsed.job.issues;
+            pendingJob = parsed.job;
+          } else {
+            pendingJob = { ...parsed.job, issues: lastKnownIssues };
+          }
           if (
             parsed.job.phase === "completed" ||
             parsed.job.phase === "partial" ||
@@ -454,6 +476,7 @@ function DiskAnalysisPage() {
             mergeTimer = null;
           }
           queuedBranches.length = 0;
+          lastKnownIssues = parsed.job.issues;
           setLiveJob(parsed.job);
           setLiveSnapshot(parsed.snapshot);
           mergeRoot = parsed.snapshot.root;
