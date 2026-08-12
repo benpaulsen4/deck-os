@@ -472,6 +472,16 @@ function DiskAnalysisPage() {
       flushTimer = window.setTimeout(flushPending, LIVE_EVENT_BATCH_MS);
     };
 
+    // Whatever ends this stream -- a terminal status/progress event or a
+    // snapshot event, the two places that call `setStreamPath(null)` below --
+    // must also retire the mismatch notice describing it. Without this it
+    // outlived the scan it was reporting on (B7 review round 2, finding 4;
+    // round 3 found the fix only covered one of the two endings).
+    const endStream = () => {
+      setStreamPath(null);
+      setStreamNotice(null);
+    };
+
     const handleEvent = (event: Event) => {
       if (disposed) {
         return;
@@ -507,13 +517,7 @@ function DiskAnalysisPage() {
                 queryKey: snapshotQueryKey,
               });
             }
-            setStreamPath(null);
-            // The mismatch notice describes *this* stream; it must not
-            // outlive it. Without this it persisted until `resetLiveState`
-            // or a `mountKey` change, so it was still showing "the scan you
-            // asked to watch had already finished" for a scan that had, by
-            // now, also finished.
-            setStreamNotice(null);
+            endStream();
             return;
           }
           scheduleFlush();
@@ -539,7 +543,7 @@ function DiskAnalysisPage() {
           lastPublishedAtMs = performance.now();
           publishPresentation(parsed.snapshot.root);
           requestedStreamKeyRef.current = null;
-          setStreamPath(null);
+          endStream();
           void queryClient.invalidateQueries({
             queryKey: mountStateQueryKey,
           });

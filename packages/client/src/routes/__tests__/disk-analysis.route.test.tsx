@@ -969,10 +969,28 @@ describe("disk analysis route", () => {
   });
 
   it("clears the mismatch notice once the stream it describes ends", async () => {
-    // B7 review round 2, finding 4. The notice was cleared only by
-    // `resetLiveState` or a `mountKey` change, so it persisted past the
-    // stream it described -- still telling the user "a new scan just
-    // started" long after that new scan had also finished.
+    // B7 review round 2, finding 4; round 3 found the round-2 fix incomplete.
+    // The server emits `snapshot` immediately before the terminal `status`,
+    // synchronously on the same connection, for a normally completing scan
+    // (`services/diskAnalysis.ts`). The client's `snapshot` handler calls
+    // `setStreamPath(null)`, which tears the SSE effect down --
+    // `removeEventListener` plus `source.close()` -- before the browser ever
+    // dispatches the already-queued `status` event (per the EventSource
+    // spec, a queued event only fires while `readyState !== CLOSED`, and
+    // `close()` sets that synchronously). So `snapshot` is the event that
+    // actually ends the stream for every completed or partial scan; a fix
+    // that only cleared the notice in the terminal status/progress branch
+    // never fired in that common case, and only cleared it for `cancelled`
+    // / `failed` jobs, which skip `snapshot` and go straight to a terminal
+    // `status`.
+    //
+    // `MockEventSource.dispatchMessage` calls listeners synchronously with
+    // no task-queue semantics, so dispatching `snapshot` immediately
+    // followed by `status` here would not reproduce that teardown
+    // faithfully -- both would run against the same closure before React
+    // ever gets to tear the effect down, which the mock would tolerate but
+    // a real browser would not. So this asserts on the state after
+    // `snapshot` alone, which is the event that genuinely ends the stream.
     state.mountState = {
       mount: { mount: "C:\\", fs: "ntfs" },
       cache: {
@@ -1001,12 +1019,28 @@ describe("disk analysis route", () => {
 
     const eventSource = MockEventSource.latest();
     eventSource.dispatchOpen();
-    eventSource.dispatchMessage("status", {
-      event: "status",
+    eventSource.dispatchMessage("snapshot", {
+      event: "snapshot",
       job: {
         ...getActiveJob(),
         jobId: newJobId,
         phase: "completed",
+      },
+      snapshot: {
+        mount: { mount: "C:\\", fs: "ntfs" },
+        generatedAt: "2026-04-27T02:00:00.000Z",
+        root: makeDirectory("C:\\", [makeFile("C:\\done.txt", 128, "txt")]),
+        extensionLegend: [
+          { extension: "txt", colorToken: "disk-ext-1", count: 1, totalBytes: 128 },
+        ],
+        totals: {
+          totalBytes: 128,
+          totalFiles: 1,
+          totalDirectories: 1,
+        },
+        issues: [],
+        issueCount: 0,
+        partial: false,
       },
     });
 
