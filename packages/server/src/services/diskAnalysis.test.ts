@@ -174,32 +174,35 @@ describe("diskAnalysis service", () => {
       return await originalStat(target);
     });
 
-    const snapshotBeforeRefresh = await diskAnalysis.getCachedSnapshot(mount);
-    expect(snapshotBeforeRefresh?.cache.state).toBe("stale");
+    try {
+      const snapshotBeforeRefresh = await diskAnalysis.getCachedSnapshot(mount);
+      expect(snapshotBeforeRefresh?.cache.state).toBe("stale");
 
-    const startedAt = Date.now();
-    const state = await diskAnalysis.getMountState(mount);
-    const elapsedMs = Date.now() - startedAt;
-    expect(state.cache.state).toBe("stale");
-    expect(elapsedMs).toBeLessThan(50);
-    expect(state.activeJob).toBeNull();
+      const startedAt = Date.now();
+      const state = await diskAnalysis.getMountState(mount);
+      const elapsedMs = Date.now() - startedAt;
+      expect(state.cache.state).toBe("stale");
+      expect(elapsedMs).toBeLessThan(50);
+      expect(state.activeJob).toBeNull();
 
-    let refreshState = diskAnalysis.getJob(state.activeJob?.jobId ?? "");
-    for (let attempt = 0; attempt < 20 && refreshState === null; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      const nextState = await diskAnalysis.getMountState(mount);
-      refreshState = nextState.activeJob ? diskAnalysis.getJob(nextState.activeJob.jobId) : null;
+      let refreshState = diskAnalysis.getJob(state.activeJob?.jobId ?? "");
+      for (let attempt = 0; attempt < 20 && refreshState === null; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        const nextState = await diskAnalysis.getMountState(mount);
+        refreshState = nextState.activeJob ? diskAnalysis.getJob(nextState.activeJob.jobId) : null;
+      }
+      expect(refreshState).not.toBeNull();
+      if (!refreshState) {
+        throw new Error("Expected background refresh job");
+      }
+
+      const refreshedJob = await waitForTerminalJob(diskAnalysis, refreshState.jobId);
+      expect(refreshedJob?.phase).toBe("completed");
+      const refreshedSnapshot = await diskAnalysis.getCachedSnapshot(mount);
+      expect(refreshedSnapshot?.cache.state).toBe("fresh");
+    } finally {
+      statSpy.mockRestore();
     }
-    expect(refreshState).not.toBeNull();
-    if (!refreshState) {
-      throw new Error("Expected background refresh job");
-    }
-
-    const refreshedJob = await waitForTerminalJob(diskAnalysis, refreshState.jobId);
-    expect(refreshedJob?.phase).toBe("completed");
-    const refreshedSnapshot = await diskAnalysis.getCachedSnapshot(mount);
-    expect(refreshedSnapshot?.cache.state).toBe("fresh");
-    statSpy.mockRestore();
 
     await diskAnalysis.__testing.clearState();
     await fs.remove(dataDir);
@@ -237,6 +240,59 @@ describe("diskAnalysis service", () => {
 
     expect(mountState.cache.state).toBe("fresh");
     expect(snapshot?.snapshot.totals.totalFiles).toBe(1);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("a cached snapshot written before issueCount existed is still readable, not quarantined", async () => {
+    // B5 review round 2, open item 1: DiskAnalysisSnapshotSchema.parse runs
+    // on the cache *read* path against a JSON file that may have been
+    // written by an older version of this service -- including this
+    // branch's own prior commit, before `issueCount` existed on the
+    // snapshot. A bare (non-defaulted) required field fails that parse, and
+    // the catch quarantines the file as `.corrupt-<epoch>`, discarding a
+    // perfectly good cache entry on every upgrade -- and worse, since
+    // `hasShallowSnapshotMetadata` does not check `issueCount`,
+    // `getMountState` would still report the file "fresh" while
+    // `getCachedSnapshot` returns null for it, so the user sees "fresh
+    // cache" and no treemap.
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.writeFile(path.join(mountDir, "notes.txt"), "cached", "utf8");
+
+    let diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    await waitForTerminalJob(diskAnalysis, start.jobId);
+
+    const cacheFile = path.join(
+      dataDir,
+      "disk-analysis",
+      `${getMountCacheHash(mount)}.json`
+    );
+    const persisted = (await fs.readJson(cacheFile)) as {
+      mount: DiskAnalysisMountIdentity;
+      snapshot: { issueCount?: number; totals: { totalFiles: number } };
+      cache?: unknown;
+    };
+    delete persisted.snapshot.issueCount;
+    await fs.writeJson(cacheFile, persisted, { spaces: 2 });
+
+    diskAnalysis.__testing.resetState();
+    diskAnalysis = await loadDiskAnalysisModule(dataDir);
+
+    const mountState = await diskAnalysis.getMountState(mount);
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+
+    expect(mountState.cache.state).toBe("fresh");
+    expect(snapshot).not.toBeNull();
+    expect(snapshot?.snapshot.totals.totalFiles).toBe(1);
+    expect(snapshot?.snapshot.issueCount).toBe(0);
+
+    const files = await fs.readdir(path.join(dataDir, "disk-analysis"));
+    expect(files.some((file) => file.includes(".corrupt-"))).toBe(false);
 
     await diskAnalysis.__testing.clearState();
     await fs.remove(dataDir);
@@ -911,7 +967,9 @@ describe("diskAnalysis service", () => {
         // encountered, even though they aggregate into a single issue object.
         expect(finished?.issueCount).toBeGreaterThanOrEqual(500);
         // Bounded: the array is for display, the counter is for truth.
-        expect(finished?.issues.length).toBeLessThanOrEqual(100);
+        expect(finished?.issues.length).toBeLessThanOrEqual(
+          diskAnalysis.__testing.MAX_RETAINED_ISSUES
+        );
 
         const symlinkIssues = (finished?.issues ?? []).filter(
           (issue) => issue.code === "symlink-skipped"
@@ -979,10 +1037,10 @@ describe("diskAnalysis service", () => {
           // 150 distinct, non-aggregating problems -- the counter has to say so.
           expect(finished?.issueCount).toBeGreaterThanOrEqual(unreadableCount);
           // Exactly at the cap, not merely under it: 150 distinct issues means
-          // the array fills all 100 slots. `toBeLessThanOrEqual` alone would
+          // the array fills all its slots. `toBeLessThanOrEqual` alone would
           // pass even if nothing were retained at all -- it stops testing the
           // cap the moment a future regression retains zero issues.
-          expect(finished?.issues.length).toBe(100);
+          expect(finished?.issues.length).toBe(diskAnalysis.__testing.MAX_RETAINED_ISSUES);
 
           await diskAnalysis.__testing.clearState();
           await fs.remove(dataDir);
@@ -1096,7 +1154,7 @@ describe("diskAnalysis service", () => {
           // The retained array is full of non-partial-signalling symlink
           // issues by the time `denied` is processed -- confirms the setup
           // actually exercises the retention race, not just the code path.
-          expect(finished?.issues.length).toBe(100);
+          expect(finished?.issues.length).toBe(diskAnalysis.__testing.MAX_RETAINED_ISSUES);
           expect(
             finished?.issues.every((issue) => issue.code === "symlink-skipped")
           ).toBe(true);
@@ -1133,7 +1191,9 @@ describe("diskAnalysis service", () => {
         issueCount: number;
         partialResultDetected: boolean;
       } = { issues: [], issueCount: 0, partialResultDetected: false };
-      for (let i = 0; i < 150; i += 1) {
+      const cap = diskAnalysis.__testing.MAX_RETAINED_ISSUES;
+      const overfillCount = cap + 50;
+      for (let i = 0; i < overfillCount; i += 1) {
         diskAnalysis.__testing.recordIssueForTesting(
           job,
           diskAnalysis.createIssue("path-inaccessible", `/mnt/x${i}`, `bad ${i}`)
@@ -1142,7 +1202,7 @@ describe("diskAnalysis service", () => {
 
       // Fills the cap with ordinary recoverable issues -- confirms the setup
       // actually exercises the "array is already full" scenario.
-      expect(job.issues.length).toBe(100);
+      expect(job.issues.length).toBe(cap);
       expect(job.issues.some((issue) => issue.recoverable === false)).toBe(false);
 
       diskAnalysis.__testing.recordIssueForTesting(
@@ -1153,7 +1213,7 @@ describe("diskAnalysis service", () => {
       // The point of this test: the array is still full (nothing grew past
       // the cap), but the non-recoverable issue made it in anyway -- some
       // recoverable issue was evicted to make room for it.
-      expect(job.issues.length).toBe(100);
+      expect(job.issues.length).toBe(cap);
       expect(
         job.issues.some((issue) => issue.code === "unknown" && issue.recoverable === false)
       ).toBe(true);
@@ -1268,9 +1328,11 @@ describe("diskAnalysis service", () => {
         return await originalUnlink(target);
       });
 
-      await expect(diskAnalysis.pruneDiskAnalysisCache()).resolves.toBeUndefined();
-
-      unlinkSpy.mockRestore();
+      try {
+        await expect(diskAnalysis.pruneDiskAnalysisCache()).resolves.toBeUndefined();
+      } finally {
+        unlinkSpy.mockRestore();
+      }
       await diskAnalysis.__testing.clearState();
       await fs.remove(dataDir);
     });

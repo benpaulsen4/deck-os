@@ -123,9 +123,11 @@ const DiskAnalysisJobStateSchema = z.object({
   // (e.g. symlinks skipped under one directory) can aggregate into a single
   // issue object, so this can exceed `issues.length` once the array is
   // capped. This is the number the UI shows -- "how much did the scan miss".
-  // Required, not optional: the server always populates it, and an optional
-  // field only pushes the `?? 0` fallback onto every consumer instead.
-  issueCount: z.number().int().nonnegative(),
+  // `.default(0)`, not bare -- z.infer's *output* type for a defaulted field
+  // is still required (see `issues` two lines up: every consumer supplies
+  // it), so this keeps consumers seeing a plain `number` while still
+  // parsing input that predates this field.
+  issueCount: z.number().int().nonnegative().default(0),
   limits: DiskAnalysisResourceLimitsSchema,
 });
 
@@ -151,7 +153,16 @@ const DiskAnalysisSnapshotSchema = z.object({
   // once a job is pruned (FINISHED_JOB_TTL), the cached snapshot is the only
   // surviving record of a scan, and `issues.length` alone under-reports a
   // truncated array with no indication it was truncated.
-  issueCount: z.number().int().nonnegative(),
+  //
+  // `.default(0)` is load-bearing here, not just symmetry with the job-state
+  // field above: this schema is parsed on the cache *read* path
+  // (`readPersistedCache`) against a JSON file that may have been written by
+  // an older version of this service -- a snapshot from before this field
+  // existed (including this branch's own prior commit) has no
+  // `snapshot.issueCount` at all. A bare (non-defaulted) field would fail
+  // that parse, and the catch quarantines the file as `.corrupt-<epoch>`,
+  // discarding a perfectly good cache entry on every upgrade.
+  issueCount: z.number().int().nonnegative().default(0),
 });
 
 const DiskAnalysisSnapshotEnvelopeSchema = z.object({
