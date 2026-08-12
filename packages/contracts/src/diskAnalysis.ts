@@ -163,6 +163,20 @@ const DiskAnalysisSnapshotSchema = z.object({
   // that parse, and the catch quarantines the file as `.corrupt-<epoch>`,
   // discarding a perfectly good cache entry on every upgrade.
   issueCount: z.number().int().nonnegative().default(0),
+  // Whether these totals are a lower bound -- the same fact the job reports as
+  // `phase: "partial"`, recorded where it can outlive the job.
+  //
+  // `DiskAnalysisMountStateSchema.activeJob` only ever carries a queued or
+  // scanning job (the service filters on `isActivePhase`), so a job in the
+  // terminal `"partial"` phase is visible *only* to the client that watched it
+  // get there over SSE. Without this flag the "totals are a lower bound"
+  // warning vanished on the next page load, which is most of the times anyone
+  // looks at a scan.
+  //
+  // `.default(false)` for exactly the reason `issueCount` above is
+  // `.default(0)`: this schema is parsed on the cache read path against files
+  // older versions of the service wrote.
+  partial: z.boolean().default(false),
 });
 
 const DiskAnalysisSnapshotEnvelopeSchema = z.object({

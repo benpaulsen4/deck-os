@@ -1594,6 +1594,14 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
         },
         issues: [...job.issues],
         issueCount: job.issueCount,
+        // The same flag `runJob` turns into `phase: "partial"` a moment later
+        // (`setJobFinalState(job, hasPartialResult(job) ? "partial" : ...)`),
+        // recorded on the snapshot so the client can still say "totals are a
+        // lower bound" after the job has been pruned. Read here because this
+        // is where the tree stops changing: every worker has finished and
+        // every descendant is finalised, so no further issue can be recorded
+        // against this job.
+        partial: hasPartialResult(job),
       };
 
       // `snapshot.root.children` *is* `rootNode.children` now, not a deep copy of

@@ -2,6 +2,7 @@ import { getPathParent, trimTrailingPathSeparators } from "@deckos/contracts";
 import type {
   DiskAnalysisIssue,
   DiskAnalysisMountIdentity,
+  DiskAnalysisScanEvent,
   DiskAnalysisSnapshot,
   DiskAnalysisTreemapNode,
 } from "@deckos/contracts";
@@ -129,6 +130,12 @@ function getNodeLabel(targetPath: string): string {
  * synthetic nodes named `/var/lib\__deckos_other_entries__`, which nothing
  * else in the system -- `getPathParent`, the file browser, the treemap's
  * "open in Files" navigation -- can take apart correctly.
+ *
+ * The separator is decided by the *root* of the path, not by scanning its
+ * contents: a backslash is a legal character in a POSIX filename, so a
+ * directory genuinely called `back\slash` must not flip the rest of the path
+ * to Windows conventions. Only a drive-letter prefix (`C:\…`) or a UNC prefix
+ * (`\\server\share`) means backslash; everything else is POSIX.
  */
 function joinChildPath(parentPath: string, childName: string): string {
   const trimmed = trimTrailingPathSeparators(parentPath);
@@ -138,7 +145,7 @@ function joinChildPath(parentPath: string, childName: string): string {
   if (trimmed.endsWith("/") || trimmed.endsWith("\\")) {
     return `${trimmed}${childName}`;
   }
-  const separator = trimmed.lastIndexOf("\\") > trimmed.lastIndexOf("/") ? "\\" : "/";
+  const separator = /^([A-Za-z]:|\\\\)/.test(trimmed) ? "\\" : "/";
   return `${trimmed}${separator}${childName}`;
 }
 
@@ -639,6 +646,41 @@ export function resolveHoveredNode(
     rawRoot ??
     null
   );
+}
+
+/**
+ * The server-resolved mount identity carried by a scan event, or `null` for
+ * event shapes that carry none.
+ *
+ * Every path in the streamed tree descends from `path.resolve(mount)` while
+ * the page's own mount comes from the raw `?mount=` search param. When they
+ * differ -- a trailing separator, a `.`/`..` segment, a doubled separator, a
+ * lower-cased drive letter -- no branch ever equals the root, `buildAncestorChain`
+ * walks past it to `/`, and the whole live tree ends up under a phantom node.
+ * The client cannot reproduce `path.resolve` (no cwd, no platform), so it
+ * takes the identity the server puts on its own events instead: `ensureJob`
+ * stores the resolved mount on the job, and every event that names a mount
+ * names that one.
+ *
+ * Extracted from the SSE handler and exported so the per-event-shape
+ * discrimination is covered by a test rather than living as scattered
+ * assignments in a hot callback -- each event puts the identity in a different
+ * place, and getting one wrong silently reinstates the phantom root for that
+ * event type alone.
+ */
+export function getEventMountIdentity(
+  event: DiskAnalysisScanEvent
+): DiskAnalysisMountIdentity | null {
+  switch (event.event) {
+    case "status":
+    case "progress":
+    case "snapshot":
+      return event.job.mount;
+    case "branch":
+      return event.mount;
+    default:
+      return null;
+  }
 }
 
 const GENERIC_SCAN_START_FAILURE = "Failed to start disk analysis scan";

@@ -6,10 +6,15 @@ import {
   createSyntheticLiveRoot,
   describeScanStartError,
   findNodeByPath,
+  getEventMountIdentity,
   integrateBranchIntoTree,
   resolveHoveredNode,
 } from "./diskAnalysisClient";
-import type { DiskAnalysisMountIdentity, DiskAnalysisTreemapNode } from "@deckos/contracts";
+import type {
+  DiskAnalysisJobState,
+  DiskAnalysisMountIdentity,
+  DiskAnalysisTreemapNode,
+} from "@deckos/contracts";
 
 function makeDirectory(path: string, children: DiskAnalysisTreemapNode[] = []): DiskAnalysisTreemapNode {
   return {
@@ -289,5 +294,66 @@ describe("diskAnalysisClient", () => {
 
     expect(describeScanStartError(new Error("socket hang up"))).toBe("socket hang up");
     expect(describeScanStartError(null)).toBe("Failed to start disk analysis scan");
+  });
+
+  it("keeps a POSIX bucket path POSIX even when a directory name contains a backslash", () => {
+    // A backslash is a legal character in a POSIX filename. Sniffing the
+    // *last* separator in the path therefore picked `\` for
+    // `/data/back\slash` and produced a bucket nothing could navigate from.
+    // The separator follows the shape of the path's root, not its contents.
+    const root = makeDirectory("/data/back\\slash", [
+      makeDirectory("/data/back\\slash/big", [makeFile("/data/back\\slash/big/huge.bin", 8_000)]),
+      ...Array.from({ length: 60 }, (_, index) =>
+        makeFile(`/data/back\\slash/tiny-${index}.txt`, 10)
+      ),
+    ]);
+
+    const presentation = createPresentationTree(root, {
+      maxDepth: 3,
+      maxChildrenPerDirectory: 12,
+      minShareByDepth: [0, 0.02, 0.01],
+    });
+    const bucket = presentation?.children.find((child) =>
+      child.path.endsWith("__deckos_other_entries__")
+    );
+
+    expect(bucket?.path).toBe("/data/back\\slash/__deckos_other_entries__");
+  });
+
+  it("takes the mount identity off whichever scan event carries one", () => {
+    // The page builds its mount from the raw `?mount=` search param, which the
+    // server has already run through `path.resolve`. Only the events know the
+    // resolved form, and each event shape puts it somewhere different --
+    // getting one of them wrong silently reinstates the phantom-root bug for
+    // that event type alone.
+    const mount: DiskAnalysisMountIdentity = { mount: "/data/media", fs: "ext4" };
+    const job = { mount } as DiskAnalysisJobState;
+
+    expect(getEventMountIdentity({ event: "status", job })).toEqual(mount);
+    expect(getEventMountIdentity({ event: "progress", job })).toEqual(mount);
+    expect(
+      getEventMountIdentity({
+        event: "branch",
+        jobId: "11111111-1111-1111-1111-111111111111",
+        mount,
+        branch: makeDirectory("/data/media/videos"),
+      })
+    ).toEqual(mount);
+    expect(
+      getEventMountIdentity({
+        event: "snapshot",
+        job,
+        snapshot: { mount } as never,
+      })
+    ).toEqual(mount);
+
+    // A keepalive carries a job id and nothing else, so there is nothing to
+    // adopt and the caller must keep what it had.
+    expect(
+      getEventMountIdentity({
+        event: "keepalive",
+        jobId: "11111111-1111-1111-1111-111111111111",
+      })
+    ).toBeNull();
   });
 });

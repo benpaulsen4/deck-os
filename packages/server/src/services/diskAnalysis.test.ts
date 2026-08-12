@@ -367,6 +367,82 @@ describe("diskAnalysis service", () => {
     await fs.remove(mountDir);
   });
 
+  test("a partial scan records it on the snapshot so the warning survives a reload", async () => {
+    // B7 review round 1, finding 2: the client's partial banner keyed on
+    // `activeJob.phase === "partial"`, but `getMountState` only reports
+    // queued/scanning jobs in `activeJob`, so the banner rendered only in the
+    // tab that watched the scan finish. Every subsequent page load lost the
+    // "totals are a lower bound" warning entirely. The snapshot is the only
+    // thing that outlives the job, so the fact has to live on the snapshot.
+    process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = "2";
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await Promise.all([
+      fs.ensureDir(path.join(mountDir, "a")),
+      fs.ensureDir(path.join(mountDir, "b")),
+      fs.ensureDir(path.join(mountDir, "c")),
+    ]);
+    await fs.writeFile(path.join(mountDir, "a", "one.txt"), "1", "utf8");
+    await fs.writeFile(path.join(mountDir, "b", "two.txt"), "2", "utf8");
+    await fs.writeFile(path.join(mountDir, "c", "three.txt"), "3", "utf8");
+
+    let diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+
+    expect(finalJob?.phase).toBe("partial");
+    expect(snapshot?.snapshot.partial).toBe(true);
+
+    // Same `.default(...)` discipline as `issueCount` (B5 review round 2): the
+    // schema parse runs on the cache *read* path against a file an older
+    // version may have written, and a bare required field would quarantine a
+    // perfectly good cache entry as `.corrupt-<epoch>` on every upgrade.
+    const cacheFile = path.join(
+      dataDir,
+      "disk-analysis",
+      `${getMountCacheHash(mount)}.json`
+    );
+    const persisted = (await fs.readJson(cacheFile)) as {
+      snapshot: { partial?: boolean };
+    };
+    delete persisted.snapshot.partial;
+    await fs.writeJson(cacheFile, persisted, { spaces: 2 });
+
+    diskAnalysis.__testing.resetState();
+    diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const legacy = await diskAnalysis.getCachedSnapshot(mount);
+
+    expect(legacy).not.toBeNull();
+    expect(legacy?.snapshot.partial).toBe(false);
+    const files = await fs.readdir(path.join(dataDir, "disk-analysis"));
+    expect(files.some((file) => file.includes(".corrupt-"))).toBe(false);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
+  test("a scan that reached everything does not claim to be partial", async () => {
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    await fs.writeFile(path.join(mountDir, "notes.txt"), "whole", "utf8");
+
+    const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+    const mount = { mount: mountDir, fs: "testfs" };
+    const start = await diskAnalysis.startScan(mount);
+    const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+    const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+
+    expect(finalJob?.phase).toBe("completed");
+    expect(snapshot?.snapshot.partial).toBe(false);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+    await fs.remove(mountDir);
+  });
+
   test("scan enforces the indexed-node budget and reports a partial result", async () => {
     // Was driven by DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES=1. That knob
     // no longer truncates anything: it bounds how many directories may sit in
