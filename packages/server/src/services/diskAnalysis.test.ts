@@ -555,13 +555,26 @@ describe("diskAnalysis service", () => {
 
   test("adaptive small-file threshold buckets dense directories before hitting the node cap", async () => {
     process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = "20";
-    process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES = "1";
     const dataDir = await createTempDir("deckos-disk-analysis-data-");
     const mountDir = await createTempDir("deckos-disk-analysis-mount-");
     await fs.ensureDir(path.join(mountDir, "dense"));
     for (let index = 0; index < 1000; index += 1) {
       await fs.writeFile(path.join(mountDir, "dense", `f-${index}.bin`), "x", "utf8");
     }
+    // DISK-8: a literal "1"-byte configured threshold is meaningless once
+    // classification runs on allocated bytes -- a 1-byte file allocates a
+    // full block on ext4 (see getExpectedAllocatedBytes), so a threshold of
+    // 1 would never bucket anything there, and every one of these 1000 files
+    // would take the standalone-node path against a 20-node cap. Set the
+    // configured (base, multiplier-1) threshold to exactly this fixture's own
+    // allocated size instead: at multiplier 1 that alone would NOT bucket
+    // (allocated < allocated is false), so bucketing only happens once the
+    // adaptive multiplier this test exists to prove actually applies (2x for
+    // 1000+ entries) -- allocated < allocated * 2 is true on both platforms.
+    const perFileAllocatedBytes = getExpectedAllocatedBytes(
+      await fs.stat(path.join(mountDir, "dense", "f-0.bin"))
+    );
+    process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES = String(perFileAllocatedBytes);
 
     const diskAnalysis = await loadDiskAnalysisModule(dataDir);
     const mount = { mount: mountDir, fs: "testfs" };
@@ -597,9 +610,14 @@ describe("diskAnalysis service", () => {
     const expectedLocalFileBytes = getExpectedAllocatedBytes(await fs.stat(localFilePath));
 
     // Force the device-boundary branch without needing a real mount: stat the
-    // subdirectory (and the file inside it) onto a different st_dev, and fake the
-    // file's reported size at terabyte scale so a leak into the totals would be
-    // unmistakable rather than lost in rounding.
+    // subdirectory (and the file inside it) onto a different st_dev, and fake
+    // the file's reported apparent size at terabyte scale. Note this margin is
+    // smaller than it looks under DISK-8 accounting: `withDev` only overrides
+    // `size`, not `blocks`, and accounting now reads `blocks`, so a leak would
+    // surface as the real (small) allocated size of `nestedFilePath` landing
+    // in the totals, not the fabricated terabyte figure. The fake size still
+    // guards against any code path that reads `.size` directly instead of
+    // going through `getAllocatedSizeBytes`.
     const originalStat = fs.stat.bind(fs);
     const withDev = (stat: fs.Stats, dev: number, size: number = stat.size): fs.Stats =>
       Object.assign(Object.create(Object.getPrototypeOf(stat)) as fs.Stats, stat, {
@@ -636,8 +654,10 @@ describe("diskAnalysis service", () => {
         snapshot?.snapshot.issues.some((issue) => issue.code === "nested-mount-skipped")
       ).toBe(true);
       expect(snapshot?.snapshot.root.truncated).toBe(true);
-      // The 128 TB fabricated file lives entirely inside the skipped subtree. If it
-      // ever leaked into the totals this would be off by many orders of magnitude.
+      // The fabricated file lives entirely inside the skipped subtree. A leak
+      // would show up as an extra file and extra (real, allocated-size)
+      // bytes in the totals below -- not as a many-orders-of-magnitude jump,
+      // since accounting reads `blocks`, which the mock above leaves alone.
       expect(snapshot?.snapshot.totals.totalFiles).toBe(1);
       expect(snapshot?.snapshot.totals.totalBytes).toBe(expectedLocalFileBytes);
 
@@ -2078,16 +2098,19 @@ describe("diskAnalysis service", () => {
       // block. Read the real allocation back from the fixture itself rather
       // than hard-coding a block size no two filesystems agree on.
       const keepStat = await fs.stat(keepPath);
-      const expectedKeepBytes =
-        Number.isFinite(keepStat.blocks) && keepStat.blocks > 0
-          ? keepStat.blocks * 512
-          : keepStat.size;
-      // This re-derives the same rule getAllocatedSizeBytes applies, rather
-      // than calling it, so a conceptual error shared by both copies (e.g.
-      // the wrong 512-byte unit, or a sign flip) would make both agree on
-      // the same wrong answer and slip past `toBe(expectedKeepBytes)` below.
-      // A coarse bound anchored to the fixture's real 1024-byte write catches
-      // that class of error even though it can't catch everything.
+      // Routed through the shared `getExpectedAllocatedBytes` helper (see its
+      // docblock) rather than carrying its own inline copy of the rule: this
+      // file previously held two independent copies of "blocks > 0 ? blocks *
+      // 512 : size" that would silently disagree the moment a 0-byte or
+      // sparse fixture landed near either one, since only the shared helper
+      // was updated with the win32-only fallback gate. One rule, one place.
+      const expectedKeepBytes = getExpectedAllocatedBytes(keepStat);
+      // Still independent of the *implementation*'s `getAllocatedSizeBytes`
+      // (this file never imports it), so a conceptual error shared by both
+      // copies -- the wrong 512-byte unit, or a sign flip -- would make both
+      // agree on the same wrong answer and slip past `toBe(expectedKeepBytes)`
+      // below. A coarse bound anchored to the fixture's real 1024-byte write
+      // catches that class of error even though it can't catch everything.
       expect(expectedKeepBytes).toBeGreaterThanOrEqual(1024);
       expect(expectedKeepBytes).toBeLessThanOrEqual(65536);
 
@@ -2231,7 +2254,14 @@ describe("diskAnalysis service", () => {
   describe("hardlink and allocated-size accounting (DISK-8)", () => {
     // fs.link behaves differently on Windows (junctions/reparse points, and
     // nlink semantics that don't match POSIX), so the fixture this test
-    // builds would not mean what it says there.
+    // builds would not mean what it says there. There is a second, confirmed
+    // reason beyond that theoretical one: real NTFS file IDs are 64-bit and
+    // routinely exceed Number.MAX_SAFE_INTEGER (measured directly -- a real
+    // hardlink on this platform reported `ino=21673573207011532`), which
+    // trips the safety guard in `executeScan` (see the comment there) and
+    // makes dedup a no-op. This test would not merely mean something
+    // different on Windows -- it would actually fail there, asserting
+    // roughly 1 MB where undeduped links would report roughly 10 MB.
     test.skipIf(process.platform === "win32")(
       "hardlinked files are counted once",
       async () => {

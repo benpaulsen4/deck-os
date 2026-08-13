@@ -1931,13 +1931,19 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
                 // here is not a merely-inaccurate answer but a distinct real
                 // file silently vanishing from the tree and the totals, so an
                 // unsafe `ino` is treated as unmeasured and this file is
-                // counted normally instead of risking the key. A link already
-                // seen (and confirmed via a safe key) has already had its
-                // bytes counted in full through the first path that reached
-                // it, so this one is skipped entirely: no size, no
-                // childCount, no extension-legend entry, no node in the tree.
-                // Counting it again would be counting the same disk blocks
-                // twice.
+                // counted normally instead of risking the key. This is not a
+                // rare-filesystem corner case: Windows/NTFS file IDs are
+                // 64-bit and routinely exceed 2^53 even for an ordinary
+                // hardlink on a fresh volume, so on that platform this guard
+                // is the common path and hardlink dedup effectively does not
+                // fire -- every link is counted as its own file there.
+                //
+                // A link already seen (and confirmed via a safe key) has
+                // already had its bytes counted in full through the first
+                // path that reached it, so this one is skipped entirely: no
+                // size, no childCount, no extension-legend entry, no node in
+                // the tree. Counting it again would be counting the same
+                // disk blocks twice.
                 const inodeKey = `${stat.dev}:${stat.ino}`;
                 if (seenHardlinkInodes.has(inodeKey)) {
                   continue;
