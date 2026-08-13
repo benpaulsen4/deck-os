@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as authService from "../services/auth.js";
+import { DATA_DIR } from "../lib/config.js";
 
 const metricsMock = vi.hoisted(() => ({
   startMetricsPolling: vi.fn(),
@@ -476,9 +477,26 @@ describe("runtimeRoutes session lock (AUTH-6)", () => {
 
   afterEach(async () => {
     vi.useRealTimers();
-    authService.resetAuthStateForTests();
+    // Restores the storage path to production's default (this also resets
+    // in-memory auth state) so a later-appended describe block never inherits
+    // a path pointing at a temp dir this block has already removed.
+    authService.setAuthStoragePathForTests(DATA_DIR);
     await Promise.all(createdDirs.splice(0).map((dir) => fs.remove(dir)));
   });
+
+  /**
+   * Drains pending microtasks without advancing the fake clock. Needed after
+   * resolving a promise created outside vitest's fake-timer machinery (like a
+   * manually deferred Docker call): `vi.advanceTimersByTimeAsync` flushes the
+   * timer queue it manages, but is not a general-purpose microtask drain, so a
+   * multi-hop `await` chain resuming from an externally-resolved promise can
+   * still be mid-flight when it returns.
+   */
+  async function flushMicrotasks(hops = 10) {
+    for (let i = 0; i < hops; i++) {
+      await Promise.resolve();
+    }
+  }
 
   /** Configures a real passcode and returns a genuinely valid session cookie. */
   async function setupUnlockedSession() {
@@ -533,6 +551,8 @@ describe("runtimeRoutes session lock (AUTH-6)", () => {
     const second = await reader.read();
     expect(second.done).toBe(false);
     expect(new TextDecoder().decode(second.value)).toContain("event: keepalive");
+
+    await reader.cancel();
   });
 
   test("closes the pull status stream when the session is locked", async () => {
@@ -677,5 +697,84 @@ describe("runtimeRoutes session lock (AUTH-6)", () => {
 
     const second = await reader.read();
     expect(second.done).toBe(true);
+  });
+
+  test("clears the session-check interval when the client disconnects while docker events is still loading", async () => {
+    const { cookie } = await setupUnlockedSession();
+    let resolveGetEvents!: (stream: PassThrough) => void;
+    const getEventsPromise = new Promise<PassThrough>((resolve) => {
+      resolveGetEvents = resolve;
+    });
+    dockerMock.getDockerAsync.mockResolvedValue({
+      getEvents: vi.fn(() => getEventsPromise),
+    });
+    const app = createApp();
+
+    vi.useFakeTimers();
+    // The route awaits `dockerService.getDockerAsync()` and returns the SSE
+    // response before its streamSSE callback ever reaches `docker.getEvents()`,
+    // so this resolves while that call is still pending.
+    const res = await app.request("http://localhost/api/docker/events", {
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    const timersBeforeConnect = vi.getTimerCount();
+
+    // Simulate the client disconnecting while `docker.getEvents()` is still
+    // in flight -- this is what fires `stream.abort()` before the handler has
+    // reached the point where it registers its session-check interval.
+    const reader = getResponseReader(res);
+    await reader.cancel();
+
+    // Now let the deferred Docker call resolve so the callback resumes past
+    // the await and reaches the (already-aborted) interval registration.
+    resolveGetEvents(new PassThrough());
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // The strongest signal available here: vi.getTimerCount() reflects every
+    // timer vitest's fake clock is holding. The callback still unconditionally
+    // reaches `stream.sleep(1000000)` after the (already-aborted) session
+    // check, registering one setTimeout that this finding does not touch and
+    // is not what is under test -- so the accounted-for total is exactly one
+    // more than before the connection opened. If the session-check interval
+    // also leaked, this would be two more, not one.
+    expect(vi.getTimerCount()).toBe(timersBeforeConnect + 1);
+  });
+
+  test("clears the session-check interval when the client disconnects while container logs are still loading", async () => {
+    const { cookie } = await setupUnlockedSession();
+    let resolveLogs!: (stream: PassThrough) => void;
+    const logsPromise = new Promise<PassThrough>((resolve) => {
+      resolveLogs = resolve;
+    });
+    const container = {
+      inspect: vi.fn(async () => ({ Config: { Tty: false } })),
+      logs: vi.fn(() => logsPromise),
+    };
+    dockerMock.getDockerAsync.mockResolvedValue({
+      getContainer: vi.fn(() => container),
+    });
+    const app = createApp();
+
+    vi.useFakeTimers();
+    const res = await app.request("http://localhost/api/logs/container-1?tail=100", {
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+    const timersBeforeConnect = vi.getTimerCount();
+
+    // Disconnect while `container.logs()` is still in flight -- the same race
+    // as the docker-events test above, at the other new-interval call site.
+    const reader = getResponseReader(res);
+    await reader.cancel();
+
+    resolveLogs(new PassThrough());
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // See the docker-events test above: +1 accounts for the unconditional
+    // `stream.sleep(1000000)` setTimeout, not the interval under test.
+    expect(vi.getTimerCount()).toBe(timersBeforeConnect + 1);
   });
 });

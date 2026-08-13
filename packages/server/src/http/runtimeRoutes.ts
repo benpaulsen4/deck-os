@@ -20,26 +20,60 @@ import * as diskAnalysisService from "../services/diskAnalysis.js";
 const SESSION_CHECK_INTERVAL_MS = 30000;
 
 /**
- * Re-validates the session that opened this SSE connection and aborts the
- * stream if the panel has since been locked. Reuses `authService.getAuthStatus`
- * -- the same helper `protectedProcedure` and the `/api/*` guard use -- so an
- * unlocked box (`config.enabled === false`) always reports unlocked and never
- * closes a stream that has no passcode configured.
+ * Re-validates, on a repeating timer, the session that opened this SSE
+ * connection -- reusing `authService.getAuthStatus`, the same helper
+ * `protectedProcedure` and the `/api/*` guard use, so an unlocked box
+ * (`config.enabled === false`) always reports unlocked and this never closes
+ * a stream that has no passcode configured. While the session stays valid,
+ * `onTick` runs each interval (omit it for streams that only need the lock
+ * check, not a keepalive payload); once it doesn't, the stream is aborted and
+ * the interval stops.
  *
  * `stream.abort()` runs the same `stream.onAbort` cleanup a real client
  * disconnect triggers, never throws (Hono swallows write errors on an aborted
  * stream), and closes the response body the client is reading from.
+ *
+ * Hono's `abort()` is guarded (`if (!this.aborted)`), so a listener added via
+ * `stream.onAbort` *after* abort already ran is never invoked. A client that
+ * disconnects while an earlier `await` in the route handler is still pending
+ * (the Docker round-trip in `/api/docker/events` and `/api/logs/:containerId`,
+ * both of which call this function only after `await`ing a Dockerode call)
+ * triggers exactly that: `abort()` can run before this function's
+ * `setInterval`/`onAbort` calls execute, so the cleanup registered here would
+ * silently never fire and the interval -- and everything its closure keeps
+ * alive -- would leak for the life of the process. Checking `stream.aborted`
+ * immediately after registering, with no `await` in between, closes that
+ * window: nothing can run between `setInterval` and this check, so it always
+ * catches an abort that already happened, while an abort that happens *after*
+ * this point is still caught by the `onAbort` listener itself.
  */
-async function closeIfSessionLocked(
+function withSessionCheck(
   stream: SSEStreamingApi,
-  sessionToken: string | null
-): Promise<boolean> {
-  const status = await authService.getAuthStatus(sessionToken);
-  if (status.unlocked) {
-    return false;
+  sessionToken: string | null,
+  onTick?: () => void
+): void {
+  const interval = setInterval(() => {
+    authService
+      .getAuthStatus(sessionToken)
+      .then((status) => {
+        if (!status.unlocked) {
+          stream.abort();
+          return;
+        }
+        onTick?.();
+      })
+      .catch((error) => {
+        console.error("[deckos] Error checking session status:", error);
+      });
+  }, SESSION_CHECK_INTERVAL_MS);
+
+  stream.onAbort(() => {
+    clearInterval(interval);
+  });
+
+  if (stream.aborted) {
+    clearInterval(interval);
   }
-  stream.abort();
-  return true;
 }
 
 export function registerRuntimeRoutes(app: Hono) {
@@ -106,29 +140,19 @@ export function registerRuntimeRoutes(app: Hono) {
         }
       });
 
-      const keepaliveInterval = setInterval(() => {
-        closeIfSessionLocked(stream, sessionToken)
-          .then((closed) => {
-            if (closed) {
-              return;
-            }
-            try {
-              stream.writeSSE({
-                data: "keepalive",
-                event: "keepalive",
-                id: Date.now().toString(),
-              });
-            } catch (error) {
-              console.error("[deckos] Error sending keepalive:", error);
-            }
-          })
-          .catch((error) => {
-            console.error("[deckos] Error checking session status:", error);
+      withSessionCheck(stream, sessionToken, () => {
+        try {
+          stream.writeSSE({
+            data: "keepalive",
+            event: "keepalive",
+            id: Date.now().toString(),
           });
-      }, SESSION_CHECK_INTERVAL_MS);
+        } catch (error) {
+          console.error("[deckos] Error sending keepalive:", error);
+        }
+      });
 
       stream.onAbort(() => {
-        clearInterval(keepaliveInterval);
         unsubscribe();
       });
 
@@ -177,14 +201,9 @@ export function registerRuntimeRoutes(app: Hono) {
         console.error("Docker events error:", err);
       });
 
-      const sessionCheckInterval = setInterval(() => {
-        closeIfSessionLocked(stream, sessionToken).catch((error) => {
-          console.error("[deckos] Error checking session status:", error);
-        });
-      }, SESSION_CHECK_INTERVAL_MS);
+      withSessionCheck(stream, sessionToken);
 
       stream.onAbort(() => {
-        clearInterval(sessionCheckInterval);
         eventStream.destroy();
       });
 
@@ -266,26 +285,16 @@ export function registerRuntimeRoutes(app: Hono) {
         return;
       }
 
-      const keepaliveInterval = setInterval(() => {
-        closeIfSessionLocked(stream, sessionToken)
-          .then((closed) => {
-            if (closed) {
-              return;
-            }
-            try {
-              writeEvent(diskAnalysisService.getJobKeepaliveEvent(jobId));
-            } catch (error) {
-              console.error("[deckos] Error sending disk analysis keepalive:", error);
-            }
-          })
-          .catch((error) => {
-            console.error("[deckos] Error checking session status:", error);
-          });
-      }, SESSION_CHECK_INTERVAL_MS);
+      withSessionCheck(stream, sessionToken, () => {
+        try {
+          writeEvent(diskAnalysisService.getJobKeepaliveEvent(jobId));
+        } catch (error) {
+          console.error("[deckos] Error sending disk analysis keepalive:", error);
+        }
+      });
 
       stream.onAbort(() => {
         streamClosed = true;
-        clearInterval(keepaliveInterval);
         unsubscribe();
       });
 
@@ -349,29 +358,19 @@ export function registerRuntimeRoutes(app: Hono) {
         }
       });
 
-      const keepaliveInterval = setInterval(() => {
-        closeIfSessionLocked(stream, sessionToken)
-          .then((closed) => {
-            if (closed) {
-              return;
-            }
-            try {
-              stream.writeSSE({
-                data: "keepalive",
-                event: "keepalive",
-                id: Date.now().toString(),
-              });
-            } catch (error) {
-              console.error("[deckos] Error sending pull keepalive:", error);
-            }
-          })
-          .catch((error) => {
-            console.error("[deckos] Error checking session status:", error);
+      withSessionCheck(stream, sessionToken, () => {
+        try {
+          stream.writeSSE({
+            data: "keepalive",
+            event: "keepalive",
+            id: Date.now().toString(),
           });
-      }, SESSION_CHECK_INTERVAL_MS);
+        } catch (error) {
+          console.error("[deckos] Error sending pull keepalive:", error);
+        }
+      });
 
       stream.onAbort(() => {
-        clearInterval(keepaliveInterval);
         unsubscribe();
       });
 
@@ -496,14 +495,9 @@ export function registerRuntimeRoutes(app: Hono) {
         console.error("Container logs error:", err);
       });
 
-      const sessionCheckInterval = setInterval(() => {
-        closeIfSessionLocked(stream, sessionToken).catch((error) => {
-          console.error("[deckos] Error checking session status:", error);
-        });
-      }, SESSION_CHECK_INTERVAL_MS);
+      withSessionCheck(stream, sessionToken);
 
       stream.onAbort(() => {
-        clearInterval(sessionCheckInterval);
         logStream.destroy();
       });
 
