@@ -39,18 +39,23 @@ const SESSION_CHECK_INTERVAL_MS = 30000;
  * (the Docker round-trip in `/api/docker/events` and `/api/logs/:containerId`,
  * both of which call this function only after `await`ing a Dockerode call)
  * triggers exactly that: `abort()` can run before this function's
- * `setInterval`/`onAbort` calls execute, so the cleanup registered here would
+ * `setInterval`/`onAbort` calls execute, so cleanup registered here would
  * silently never fire and the interval -- and everything its closure keeps
  * alive -- would leak for the life of the process. Checking `stream.aborted`
  * immediately after registering, with no `await` in between, closes that
  * window: nothing can run between `setInterval` and this check, so it always
  * catches an abort that already happened, while an abort that happens *after*
  * this point is still caught by the `onAbort` listener itself.
+ *
+ * `onCleanup` (e.g. destroying the underlying Docker stream) runs through
+ * this exact same guard rather than a caller's own separate `stream.onAbort`
+ * call, so it is never exposed to the too-late-registration race above --
+ * that race is what this function exists to close.
  */
 function withSessionCheck(
   stream: SSEStreamingApi,
   sessionToken: string | null,
-  onTick?: () => void
+  { onTick, onCleanup }: { onTick?: () => void; onCleanup?: () => void } = {}
 ): void {
   const interval = setInterval(() => {
     authService
@@ -69,10 +74,12 @@ function withSessionCheck(
 
   stream.onAbort(() => {
     clearInterval(interval);
+    onCleanup?.();
   });
 
   if (stream.aborted) {
     clearInterval(interval);
+    onCleanup?.();
   }
 }
 
@@ -140,16 +147,18 @@ export function registerRuntimeRoutes(app: Hono) {
         }
       });
 
-      withSessionCheck(stream, sessionToken, () => {
-        try {
-          stream.writeSSE({
-            data: "keepalive",
-            event: "keepalive",
-            id: Date.now().toString(),
-          });
-        } catch (error) {
-          console.error("[deckos] Error sending keepalive:", error);
-        }
+      withSessionCheck(stream, sessionToken, {
+        onTick: () => {
+          try {
+            stream.writeSSE({
+              data: "keepalive",
+              event: "keepalive",
+              id: Date.now().toString(),
+            });
+          } catch (error) {
+            console.error("[deckos] Error sending keepalive:", error);
+          }
+        },
       });
 
       stream.onAbort(() => {
@@ -201,10 +210,8 @@ export function registerRuntimeRoutes(app: Hono) {
         console.error("Docker events error:", err);
       });
 
-      withSessionCheck(stream, sessionToken);
-
-      stream.onAbort(() => {
-        eventStream.destroy();
+      withSessionCheck(stream, sessionToken, {
+        onCleanup: () => eventStream.destroy(),
       });
 
       await stream.sleep(1000000);
@@ -285,12 +292,14 @@ export function registerRuntimeRoutes(app: Hono) {
         return;
       }
 
-      withSessionCheck(stream, sessionToken, () => {
-        try {
-          writeEvent(diskAnalysisService.getJobKeepaliveEvent(jobId));
-        } catch (error) {
-          console.error("[deckos] Error sending disk analysis keepalive:", error);
-        }
+      withSessionCheck(stream, sessionToken, {
+        onTick: () => {
+          try {
+            writeEvent(diskAnalysisService.getJobKeepaliveEvent(jobId));
+          } catch (error) {
+            console.error("[deckos] Error sending disk analysis keepalive:", error);
+          }
+        },
       });
 
       stream.onAbort(() => {
@@ -358,16 +367,18 @@ export function registerRuntimeRoutes(app: Hono) {
         }
       });
 
-      withSessionCheck(stream, sessionToken, () => {
-        try {
-          stream.writeSSE({
-            data: "keepalive",
-            event: "keepalive",
-            id: Date.now().toString(),
-          });
-        } catch (error) {
-          console.error("[deckos] Error sending pull keepalive:", error);
-        }
+      withSessionCheck(stream, sessionToken, {
+        onTick: () => {
+          try {
+            stream.writeSSE({
+              data: "keepalive",
+              event: "keepalive",
+              id: Date.now().toString(),
+            });
+          } catch (error) {
+            console.error("[deckos] Error sending pull keepalive:", error);
+          }
+        },
       });
 
       stream.onAbort(() => {
@@ -495,10 +506,8 @@ export function registerRuntimeRoutes(app: Hono) {
         console.error("Container logs error:", err);
       });
 
-      withSessionCheck(stream, sessionToken);
-
-      stream.onAbort(() => {
-        logStream.destroy();
+      withSessionCheck(stream, sessionToken, {
+        onCleanup: () => logStream.destroy(),
       });
 
       await stream.sleep(1000000);

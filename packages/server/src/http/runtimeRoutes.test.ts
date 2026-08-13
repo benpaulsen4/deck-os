@@ -728,7 +728,9 @@ describe("runtimeRoutes session lock (AUTH-6)", () => {
 
     // Now let the deferred Docker call resolve so the callback resumes past
     // the await and reaches the (already-aborted) interval registration.
-    resolveGetEvents(new PassThrough());
+    const eventsStream = new PassThrough();
+    const destroySpy = vi.spyOn(eventsStream, "destroy");
+    resolveGetEvents(eventsStream);
     await flushMicrotasks();
     await vi.advanceTimersByTimeAsync(0);
 
@@ -740,6 +742,15 @@ describe("runtimeRoutes session lock (AUTH-6)", () => {
     // more than before the connection opened. If the session-check interval
     // also leaked, this would be two more, not one.
     expect(vi.getTimerCount()).toBe(timersBeforeConnect + 1);
+
+    // The route's own `eventStream.destroy()` cleanup is registered by a
+    // separate `stream.onAbort(...)` call positioned exactly where the
+    // interval was -- after the awaited `docker.getEvents()`. It shares the
+    // same race, and there is no way to observe it directly (it is not
+    // exposed outside the route closure), so this asserts on the mock's
+    // `destroy` spy instead: the strongest available signal that the actual
+    // Docker event source was torn down rather than left running.
+    expect(destroySpy).toHaveBeenCalled();
   });
 
   test("clears the session-check interval when the client disconnects while container logs are still loading", async () => {
@@ -769,12 +780,20 @@ describe("runtimeRoutes session lock (AUTH-6)", () => {
     const reader = getResponseReader(res);
     await reader.cancel();
 
-    resolveLogs(new PassThrough());
+    const logStream = new PassThrough();
+    const destroySpy = vi.spyOn(logStream, "destroy");
+    resolveLogs(logStream);
     await flushMicrotasks();
     await vi.advanceTimersByTimeAsync(0);
 
     // See the docker-events test above: +1 accounts for the unconditional
     // `stream.sleep(1000000)` setTimeout, not the interval under test.
     expect(vi.getTimerCount()).toBe(timersBeforeConnect + 1);
+
+    // Same reasoning as the docker-events test above: `logStream.destroy()`
+    // is registered by its own `stream.onAbort(...)` call at the same
+    // too-late position, so this is the strongest available signal that it
+    // ran rather than leaving the container log source open.
+    expect(destroySpy).toHaveBeenCalled();
   });
 });
