@@ -89,6 +89,33 @@ function getMountCacheHash(mount: DiskAnalysisMountIdentity): string {
   return crypto.createHash("sha1").update(normalizedMount).digest("hex");
 }
 
+/**
+ * DISK-8: re-derives the same allocated-bytes rule `getAllocatedSizeBytes`
+ * (packages/server/src/services/diskAnalysis.ts) applies, independently of
+ * that implementation -- this file never imports or calls it -- so exact-byte
+ * assertions built from it are checking the real filesystem's answer, not
+ * merely replaying whatever the implementation happens to compute. A 4-byte
+ * or 64-byte fixture is a full filesystem block on ext4/tmpfs (as CI's
+ * ubuntu-24.04 runner is) but MFT-resident with no cluster allocated on NTFS,
+ * so hard-coding either platform's number would be correct on only one of
+ * them; deriving it from the fixture's own `fs.stat` at run time is correct
+ * on both.
+ */
+function getExpectedAllocatedBytes(stat: fs.Stats): number {
+  if (!Number.isFinite(stat.blocks) || stat.blocks < 0) {
+    return stat.size;
+  }
+  if (stat.blocks > 0) {
+    return stat.blocks * 512;
+  }
+  // blocks === 0. On POSIX this is a real, meaningful zero-allocation answer
+  // (an empty or fully sparse file). On Windows/NTFS it instead means the
+  // file is resident inside the MFT record -- not "no data", just "no
+  // separate cluster to measure" -- so only there does the apparent length
+  // stand in.
+  return process.platform === "win32" ? stat.size : 0;
+}
+
 describe("diskAnalysis service", () => {
   beforeEach(() => {
     process.env.DECKOS_DISK_ANALYSIS_MAX_WORKERS = "1";
@@ -112,8 +139,16 @@ describe("diskAnalysis service", () => {
     const mountDir = await createTempDir("deckos-disk-analysis-mount-");
     await fs.ensureDir(path.join(mountDir, "alpha"));
     await fs.ensureDir(path.join(mountDir, "beta"));
-    await fs.writeFile(path.join(mountDir, "alpha", "report.txt"), "hello world", "utf8");
-    await fs.writeFile(path.join(mountDir, "beta", "movie.mkv"), Buffer.alloc(64));
+    const reportPath = path.join(mountDir, "alpha", "report.txt");
+    const moviePath = path.join(mountDir, "beta", "movie.mkv");
+    await fs.writeFile(reportPath, "hello world", "utf8");
+    await fs.writeFile(moviePath, Buffer.alloc(64));
+    // DISK-8: totals report allocated bytes, not apparent length, so derive
+    // the expectation from what these fixtures actually occupy on disk here
+    // rather than hard-coding their apparent (11- and 64-byte) sizes.
+    const expectedReportBytes = getExpectedAllocatedBytes(await fs.stat(reportPath));
+    const expectedMovieBytes = getExpectedAllocatedBytes(await fs.stat(moviePath));
+    const expectedTotalBytes = expectedReportBytes + expectedMovieBytes;
 
     const diskAnalysis = await loadDiskAnalysisModule(dataDir);
     const mount = { mount: mountDir, fs: "testfs" };
@@ -147,8 +182,8 @@ describe("diskAnalysis service", () => {
     const cached = await diskAnalysis.getCachedSnapshot(mount);
     expect(cached?.cache.state).toBe("fresh");
     expect(cached?.snapshot.totals.totalFiles).toBe(2);
-    expect(cached?.snapshot.totals.totalBytes).toBe(75);
-    expect(cached?.snapshot.root.recursiveSize).toBe(75);
+    expect(cached?.snapshot.totals.totalBytes).toBe(expectedTotalBytes);
+    expect(cached?.snapshot.root.recursiveSize).toBe(expectedTotalBytes);
     expect(
       cached?.snapshot.root.children.every(
         (child) =>
@@ -165,8 +200,8 @@ describe("diskAnalysis service", () => {
     ]);
     const alphaDir = cached?.snapshot.root.children.find((child) => child.path.endsWith("alpha"));
     const betaDir = cached?.snapshot.root.children.find((child) => child.path.endsWith("beta"));
-    expect(alphaDir?.recursiveSize).toBe(11);
-    expect(betaDir?.recursiveSize).toBe(64);
+    expect(alphaDir?.recursiveSize).toBe(expectedReportBytes);
+    expect(betaDir?.recursiveSize).toBe(expectedMovieBytes);
 
     await diskAnalysis.__testing.clearState();
     await fs.remove(dataDir);
@@ -557,6 +592,9 @@ describe("diskAnalysis service", () => {
     await fs.ensureDir(nestedMountDir);
     await fs.writeFile(localFilePath, "keep", "utf8");
     await fs.writeFile(nestedFilePath, Buffer.alloc(2048));
+    // DISK-8: derive the expected total from what "keep.txt" actually
+    // occupies on disk here, rather than its 4-byte apparent length.
+    const expectedLocalFileBytes = getExpectedAllocatedBytes(await fs.stat(localFilePath));
 
     // Force the device-boundary branch without needing a real mount: stat the
     // subdirectory (and the file inside it) onto a different st_dev, and fake the
@@ -601,7 +639,7 @@ describe("diskAnalysis service", () => {
       // The 128 TB fabricated file lives entirely inside the skipped subtree. If it
       // ever leaked into the totals this would be off by many orders of magnitude.
       expect(snapshot?.snapshot.totals.totalFiles).toBe(1);
-      expect(snapshot?.snapshot.totals.totalBytes).toBe(4);
+      expect(snapshot?.snapshot.totals.totalBytes).toBe(expectedLocalFileBytes);
 
       await diskAnalysis.__testing.clearState();
       await fs.remove(dataDir);
@@ -797,6 +835,12 @@ describe("diskAnalysis service", () => {
         )
       );
     }
+    // DISK-8: every file here is the same 64-byte fixture, so one real stat
+    // gives the per-file allocated size that "every file accounted for
+    // exactly once" should multiply out to, on either platform.
+    const perFileAllocatedBytes = getExpectedAllocatedBytes(
+      await fs.stat(path.join(mountDir, "d0", "f0.bin"))
+    );
 
     const diskAnalysis = await loadDiskAnalysisModule(dataDir);
     diskAnalysis.__testing.resetInstrumentation();
@@ -825,7 +869,9 @@ describe("diskAnalysis service", () => {
       deepest = deepest?.children.find((child) => child.name === `d${level}`);
     }
     expect(deepest?.children).toHaveLength(filesPerDirectory);
-    expect(snapshot?.snapshot.totals.totalBytes).toBe(depth * filesPerDirectory * 64);
+    expect(snapshot?.snapshot.totals.totalBytes).toBe(
+      depth * filesPerDirectory * perFileAllocatedBytes
+    );
 
     await diskAnalysis.__testing.clearState();
     await fs.remove(dataDir);
@@ -2036,6 +2082,14 @@ describe("diskAnalysis service", () => {
         Number.isFinite(keepStat.blocks) && keepStat.blocks > 0
           ? keepStat.blocks * 512
           : keepStat.size;
+      // This re-derives the same rule getAllocatedSizeBytes applies, rather
+      // than calling it, so a conceptual error shared by both copies (e.g.
+      // the wrong 512-byte unit, or a sign flip) would make both agree on
+      // the same wrong answer and slip past `toBe(expectedKeepBytes)` below.
+      // A coarse bound anchored to the fixture's real 1024-byte write catches
+      // that class of error even though it can't catch everything.
+      expect(expectedKeepBytes).toBeGreaterThanOrEqual(1024);
+      expect(expectedKeepBytes).toBeLessThanOrEqual(65536);
 
       const gate = createGate();
       const resolvedStuck = path.resolve(stuckPath);
@@ -2083,6 +2137,12 @@ describe("diskAnalysis service", () => {
         await fs.ensureDir(directory);
         await fs.writeFile(path.join(directory, "f.bin"), Buffer.alloc(64));
       }
+      // DISK-8: every file here is the same 64-byte fixture, so one real stat
+      // gives the per-file allocated size to multiply out to, on either
+      // platform.
+      const perFileAllocatedBytes = getExpectedAllocatedBytes(
+        await fs.stat(path.join(root, "d0", "f.bin"))
+      );
 
       const diskAnalysis = await loadDiskAnalysisModule(dataDir);
       const mount = { mount: root, fs: "testfs" };
@@ -2095,7 +2155,7 @@ describe("diskAnalysis service", () => {
       expect(finished?.phase).toBe("completed");
       expect(snapshot?.snapshot.totals.totalDirectories).toBe(width + 1);
       expect(snapshot?.snapshot.totals.totalFiles).toBe(width);
-      expect(snapshot?.snapshot.totals.totalBytes).toBe(width * 64);
+      expect(snapshot?.snapshot.totals.totalBytes).toBe(width * perFileAllocatedBytes);
       expect(snapshot?.snapshot.root.truncated).toBe(false);
       expect(snapshot?.snapshot.issues.some((issue) => issue.code === "partial-scan")).toBe(false);
 
@@ -2133,7 +2193,13 @@ describe("diskAnalysis service", () => {
 
       const expectedDirectories = branches * depth + 1;
       const expectedFiles = branches * depth * filesPerDirectory;
-      const expectedBytes = expectedFiles * 64;
+      // DISK-8: every file here is the same 64-byte fixture, so one real stat
+      // gives the per-file allocated size to multiply out to, on either
+      // platform.
+      const perFileAllocatedBytes = getExpectedAllocatedBytes(
+        await fs.stat(path.join(root, "b0-l0", "f0.bin"))
+      );
+      const expectedBytes = expectedFiles * perFileAllocatedBytes;
 
       const diskAnalysis = await loadDiskAnalysisModule(dataDir);
       const mount = { mount: root, fs: "testfs" };
@@ -2191,6 +2257,13 @@ describe("diskAnalysis service", () => {
         // inode and must not be summed as if they were distinct files.
         expect(snapshot?.snapshot.root.size).toBeLessThan(2 * 1024 * 1024);
         expect(snapshot?.snapshot.totals.totalBytes).toBeLessThan(2 * 1024 * 1024);
+        // An upper bound alone is satisfied by a scan that lost the original
+        // along with its links, or dropped the directory entirely -- neither
+        // of which is the behaviour this test exists to prove. Pin the floor
+        // too: the one real file must actually be seen and its megabyte of
+        // data must actually land.
+        expect(snapshot?.snapshot.totals.totalFiles).toBe(1);
+        expect(snapshot?.snapshot.totals.totalBytes).toBeGreaterThanOrEqual(1024 * 1024);
 
         await diskAnalysis.__testing.clearState();
         await fs.remove(dataDir);

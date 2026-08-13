@@ -792,14 +792,27 @@ function getComparableDeviceId(stat: fs.Stats): number | null {
  * on every platform. On Windows/NTFS it is observed as `0` for small files
  * resident inside the MFT record with no cluster allocated, and a genuine
  * cluster count once a file is large enough to need one -- so it is neither
- * "always populated" nor "always zero" there, and either fallback direction
- * (trust it blindly, or ignore it outright) would be wrong for some file on
- * this platform. The fallback to `stat.size` is deliberate: use the allocated
- * figure only when it is a positive, finite measurement, and apparent size
- * everywhere that measurement is absent (0, negative, NaN, or undefined).
+ * "always populated" nor "always zero" there, and the fallback to
+ * `stat.size` is only correct on that platform: `blocks === 0` there means
+ * "no separate allocation to measure", not "no data".
+ *
+ * On POSIX, `blocks === 0` is not evidence of a missing measurement -- it is
+ * the answer, for an empty file or a fully sparse one. A 1 GB sparse file
+ * with zero real blocks allocated legitimately reports `blocks === 0`, and
+ * falling back to its apparent size there would report it as costing 1 GB,
+ * the opposite of what this helper exists to do. So the `stat.size` fallback
+ * is scoped to Windows; everywhere else a measured zero stands as zero, and
+ * only a genuinely absent measurement (negative, NaN, or undefined) falls
+ * back to apparent size.
  */
 function getAllocatedSizeBytes(stat: fs.Stats): number {
-  return Number.isFinite(stat.blocks) && stat.blocks > 0 ? stat.blocks * 512 : stat.size;
+  if (!Number.isFinite(stat.blocks) || stat.blocks < 0) {
+    return stat.size;
+  }
+  if (stat.blocks > 0) {
+    return stat.blocks * 512;
+  }
+  return process.platform === "win32" ? stat.size : 0;
 }
 
 function getCacheState(generatedAt: string): "fresh" | "stale" {
@@ -1907,16 +1920,24 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
                 continue;
               }
 
-              if (stat.nlink > 1) {
+              if (stat.nlink > 1 && Number.isSafeInteger(stat.ino)) {
                 // A dev:ino pair identifies the physical inode; hardlinks to
                 // it share one. Only checked when nlink > 1 -- see the
                 // comment on `seenHardlinkInodes` -- so an ordinary file
                 // (nlink === 1, the overwhelming common case) never pays for
-                // the lookup. A link already seen has already had its bytes
-                // counted in full through the first path that reached it, so
-                // this one is skipped entirely: no size, no childCount, no
-                // extension-legend entry, no node in the tree. Counting it
-                // again would be counting the same disk blocks twice.
+                // the lookup. `ino`, like `dev` (see `getComparableDeviceId`),
+                // can exceed Number.MAX_SAFE_INTEGER on 64-bit-inode
+                // filesystems; unlike a device-id comparison, a collision
+                // here is not a merely-inaccurate answer but a distinct real
+                // file silently vanishing from the tree and the totals, so an
+                // unsafe `ino` is treated as unmeasured and this file is
+                // counted normally instead of risking the key. A link already
+                // seen (and confirmed via a safe key) has already had its
+                // bytes counted in full through the first path that reached
+                // it, so this one is skipped entirely: no size, no
+                // childCount, no extension-legend entry, no node in the tree.
+                // Counting it again would be counting the same disk blocks
+                // twice.
                 const inodeKey = `${stat.dev}:${stat.ino}`;
                 if (seenHardlinkInodes.has(inodeKey)) {
                   continue;
