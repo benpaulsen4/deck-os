@@ -5,7 +5,12 @@ import { Hono } from "hono";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as authService from "../services/auth.js";
-import { DATA_DIR } from "../lib/config.js";
+import {
+  DATA_DIR,
+  LOG_LINE_MAX_CHARS,
+  LOG_WRITE_QUEUE_MAX_MESSAGES,
+  LOG_WRITE_QUEUE_PAUSE_AT,
+} from "../lib/config.js";
 
 const metricsMock = vi.hoisted(() => ({
   startMetricsPolling: vi.fn(),
@@ -795,5 +800,255 @@ describe("runtimeRoutes session lock (AUTH-6)", () => {
     // too-late position, so this is the strongest available signal that it
     // ran rather than leaving the container log source open.
     expect(destroySpy).toHaveBeenCalled();
+  });
+});
+
+describe("runtimeRoutes log stream bounds (DOCK-10)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dockerMock.getDockerAsync.mockResolvedValue(null);
+  });
+
+  type SseEvent = { event: string | undefined; data: string };
+
+  /** Wraps a payload in Docker's 8-byte stdout multiplexing header. */
+  function dockerFrame(payload: string): Buffer {
+    const body = Buffer.from(payload, "utf8");
+    const header = Buffer.alloc(8);
+    header.writeUInt8(1, 0);
+    header.writeUInt32BE(body.length, 4);
+    return Buffer.concat([header, body]);
+  }
+
+  function mountLogStream() {
+    const logStream = new PassThrough();
+    const container = {
+      inspect: vi.fn(async () => ({ Config: { Tty: false } })),
+      logs: vi.fn(async () => logStream),
+    };
+    dockerMock.getDockerAsync.mockResolvedValue({
+      getContainer: vi.fn(() => container),
+    });
+    return logStream;
+  }
+
+  /**
+   * Reads the SSE body into parsed events, stopping as soon as `until` is
+   * satisfied or `maxReads` chunks have been consumed. The read cap is what
+   * keeps a regression fast and legible: against unbounded code these
+   * assertions fail on the collected events rather than blocking forever on a
+   * notice that is never sent.
+   */
+  async function collectSse(
+    response: Response,
+    { until, maxReads }: { until: (events: SseEvent[]) => boolean; maxReads: number }
+  ): Promise<SseEvent[]> {
+    const reader = getResponseReader(response);
+    const decoder = new TextDecoder();
+    const events: SseEvent[] = [];
+    let buffer = "";
+
+    try {
+      for (let i = 0; i < maxReads; i += 1) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop() ?? "";
+        for (const block of blocks) {
+          let event: string | undefined;
+          const dataLines: string[] = [];
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event: ")) event = line.slice(7);
+            else if (line.startsWith("data: ")) dataLines.push(line.slice(6));
+          }
+          events.push({ event, data: dataLines.join("\n") });
+        }
+
+        if (until(events)) break;
+      }
+    } finally {
+      await reader.cancel();
+    }
+
+    return events;
+  }
+
+  function parsedLines(events: SseEvent[]): { line: string; truncated?: boolean }[] {
+    return events
+      .filter((event) => event.event === "log")
+      .map((event) => JSON.parse(event.data) as { line: string; truncated?: boolean });
+  }
+
+  test("emits a container's endless line in bounded pieces instead of buffering it", async () => {
+    const logStream = mountLogStream();
+    const app = createApp();
+
+    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    expect(res.status).toBe(200);
+
+    // Eight frames of one repeated character, no newline anywhere: exactly the
+    // shape a progress bar or a stuck process produces. Nothing in the route
+    // may hold all of it at once.
+    const frameChars = 64 * 1024;
+    const frameCount = 8;
+    for (let i = 0; i < frameCount; i += 1) {
+      logStream.write(dockerFrame("a".repeat(frameChars)));
+    }
+    // A terminated marker line so this test never depends on a read that would
+    // block: unbounded code flushes its one giant line when this newline
+    // arrives, so the assertions below run either way.
+    logStream.write(dockerFrame("\nTAIL\n"));
+
+    const events = await collectSse(res, {
+      until: (collected) =>
+        parsedLines(collected).some((payload) => payload.line === "TAIL"),
+      maxReads: 200,
+    });
+
+    const lines = parsedLines(events);
+    const filler = lines.filter((payload) => payload.line.startsWith("a"));
+
+    // Unbounded code emits the whole run as a single line, so it produces one
+    // filler payload of 512 KiB rather than several capped ones.
+    expect(filler.length).toBeGreaterThanOrEqual(
+      (frameChars * frameCount) / LOG_LINE_MAX_CHARS
+    );
+    for (const payload of filler) {
+      expect(payload.line.length).toBeLessThanOrEqual(LOG_LINE_MAX_CHARS);
+    }
+    // Capping must reframe the output, never discard it.
+    expect(filler.reduce((total, payload) => total + payload.line.length, 0)).toBe(
+      frameChars * frameCount
+    );
+    // Every piece that is a continuation rather than a real line says so.
+    expect(filler.every((payload) => payload.truncated === true)).toBe(true);
+    expect(lines.some((payload) => payload.line === "TAIL")).toBe(true);
+  });
+
+  test("caps a long line that arrives already terminated in a single chunk", async () => {
+    const logStream = mountLogStream();
+    const app = createApp();
+
+    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    expect(res.status).toBe(200);
+
+    // The endless-line case flushes at the cap because the cap is reached
+    // before any newline shows up. This is the other half: the newline is
+    // already in the same chunk, so the line is emitted on the newline path
+    // instead -- which must respect the same bound rather than handing the
+    // client one oversized message.
+    const lineChars = LOG_LINE_MAX_CHARS + 36 * 1024;
+    logStream.write(dockerFrame(`${"b".repeat(lineChars)}\nTAIL\n`));
+
+    const events = await collectSse(res, {
+      until: (collected) =>
+        parsedLines(collected).some((payload) => payload.line === "TAIL"),
+      maxReads: 200,
+    });
+
+    const lines = parsedLines(events);
+    const filler = lines.filter((payload) => payload.line.startsWith("b"));
+
+    for (const payload of filler) {
+      expect(payload.line.length).toBeLessThanOrEqual(LOG_LINE_MAX_CHARS);
+    }
+    expect(filler.reduce((total, payload) => total + payload.line.length, 0)).toBe(
+      lineChars
+    );
+    // The final piece completes a real line, so it is not a continuation.
+    expect(filler.at(-1)?.truncated).toBeUndefined();
+    expect(lines.some((payload) => payload.line === "TAIL")).toBe(true);
+  });
+
+  test("pauses the docker log stream while queued writes are ahead of the client", async () => {
+    const logStream = mountLogStream();
+    const app = createApp();
+
+    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    expect(res.status).toBe(200);
+
+    // Above the pause mark but below the hard cap, so this exercises flow
+    // control alone -- nothing here should be dropped.
+    const lineCount = LOG_WRITE_QUEUE_PAUSE_AT + 72;
+    const payload = Array.from(
+      { length: lineCount },
+      (_unused, index) => `log-line-${index}`
+    ).join("\n");
+    logStream.write(dockerFrame(`${payload}\n`));
+
+    // Let the route's data handler run without reading a single byte of the
+    // response: the client is deliberately not keeping up.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(logStream.isPaused()).toBe(true);
+
+    const events = await collectSse(res, {
+      until: (collected) =>
+        parsedLines(collected).some(
+          (entry) => entry.line === `log-line-${lineCount - 1}`
+        ),
+      maxReads: lineCount * 2,
+    });
+
+    expect(parsedLines(events).some((entry) => entry.line === "log-line-0")).toBe(true);
+    // Draining the queue has to hand the source back, or the log view freezes
+    // permanently after the first burst.
+    expect(logStream.isPaused()).toBe(false);
+  });
+
+  test("tells the client how many log lines were dropped when the queue overflows", async () => {
+    const logStream = mountLogStream();
+    const app = createApp();
+
+    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    expect(res.status).toBe(200);
+
+    // One Docker chunk that expands past the hard cap. The source can only be
+    // paused between chunks, so this is the case flow control cannot catch and
+    // the queue bound has to.
+    const lineCount = LOG_WRITE_QUEUE_MAX_MESSAGES * 10;
+    const payload = Array.from(
+      { length: lineCount },
+      (_unused, index) => `log-line-${index}`
+    ).join("\n");
+    logStream.write(dockerFrame(`${payload}\n`));
+
+    const events = await collectSse(res, {
+      // Reads one event past the notice, so the surviving-tail assertion below
+      // has something to look at.
+      until: (collected) => {
+        const index = collected.findIndex((event) => event.event === "log-dropped");
+        return (
+          index !== -1 && collected.slice(index + 1).some((event) => event.event === "log")
+        );
+      },
+      maxReads: 12,
+    });
+
+    const noticeIndex = events.findIndex((event) => event.event === "log-dropped");
+    expect(noticeIndex).toBeGreaterThanOrEqual(0);
+    const parsed = JSON.parse(events[noticeIndex]?.data ?? "{}") as {
+      line?: string;
+      dropped?: number;
+    };
+    expect(parsed.dropped).toBeGreaterThan(0);
+    // Delivered as a `line` payload because that is the only field the log
+    // viewer renders -- a gap the user cannot see is the thing being fixed.
+    expect(parsed.line).toContain("dropped");
+    expect(parsed.line).toContain(String(parsed.dropped));
+
+    // The oldest queued lines are the ones discarded, so what survives is the
+    // live tail rather than a stale head.
+    const firstAfterNotice = events
+      .slice(noticeIndex + 1)
+      .find((event) => event.event === "log");
+    expect(firstAfterNotice).toBeDefined();
+    const survivor = JSON.parse(firstAfterNotice?.data ?? "{}") as { line?: string };
+    expect(Number(String(survivor.line).replace("log-line-", ""))).toBeGreaterThan(
+      lineCount - LOG_WRITE_QUEUE_MAX_MESSAGES - 2
+    );
   });
 });

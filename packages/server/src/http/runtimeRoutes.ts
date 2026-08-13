@@ -3,10 +3,17 @@ import { getCookie } from "hono/cookie";
 import { streamSSE, type SSEStreamingApi } from "hono/streaming";
 import { z } from "zod";
 import { Readable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 import type Dockerode from "dockerode";
 import { AppIdSchema } from "../lib/schema.js";
 import { getCurrentVersion } from "../lib/version.js";
-import { LOG_HISTORY_SIZE } from "../lib/config.js";
+import {
+  LOG_HISTORY_SIZE,
+  LOG_LINE_MAX_CHARS,
+  LOG_WRITE_QUEUE_MAX_MESSAGES,
+  LOG_WRITE_QUEUE_PAUSE_AT,
+  LOG_WRITE_QUEUE_RESUME_AT,
+} from "../lib/config.js";
 import * as metricsService from "../services/metrics.js";
 import * as dockerService from "../services/docker.js";
 import * as pullJobsService from "../services/pullJobs.js";
@@ -440,65 +447,185 @@ export function registerRuntimeRoutes(app: Hono) {
 
       const logStream = (await container.logs(logOptions)) as unknown as Readable;
 
-      let lineBuffer = "";
-      let binaryBuffer = Buffer.alloc(0);
+      // --- SSE write queue -------------------------------------------------
+      // `writeSSE` returns a promise that only settles once the underlying
+      // TransformStream has room. Firing it and walking away (as this route
+      // used to) throws that backpressure signal away: a chatty container and
+      // a slow reader accumulate pending write promises until the process runs
+      // out of memory. Serialising the writes through this queue is what makes
+      // the signal observable -- `writeQueue.length` is how far behind the
+      // client is -- and gives somewhere to enforce a bound.
+      const writeQueue: { data: string; event: string; id: string }[] = [];
+      let draining = false;
+      let sourcePaused = false;
+      let droppedLines = 0;
+
+      const resumeSource = () => {
+        if (sourcePaused && writeQueue.length <= LOG_WRITE_QUEUE_RESUME_AT) {
+          sourcePaused = false;
+          logStream.resume();
+        }
+      };
+
+      const drain = async () => {
+        if (draining) return;
+        draining = true;
+        try {
+          while (!stream.aborted && !stream.closed) {
+            if (droppedLines > 0) {
+              const dropped = droppedLines;
+              droppedLines = 0;
+              // Sent as a `line` payload because that is the only field the log
+              // viewer renders. The gap sits exactly here -- the discarded
+              // messages were the ones ahead of whatever is now at the front of
+              // the queue -- so the notice lands in the right place in the
+              // output rather than the client silently missing output.
+              await stream.writeSSE({
+                data: JSON.stringify({
+                  line: `[deckos] dropped ${dropped} log line${dropped === 1 ? "" : "s"}: this container is producing output faster than the browser can read it`,
+                  dropped,
+                }),
+                event: "log-dropped",
+                id: Date.now().toString(),
+              });
+              continue;
+            }
+
+            const message = writeQueue.shift();
+            if (!message) break;
+            await stream.writeSSE(message);
+            resumeSource();
+          }
+        } finally {
+          draining = false;
+          resumeSource();
+        }
+      };
+
+      const enqueue = (message: { data: string; event: string; id: string }) => {
+        if (stream.aborted || stream.closed) return;
+        writeQueue.push(message);
+
+        if (writeQueue.length > LOG_WRITE_QUEUE_MAX_MESSAGES) {
+          // Drop oldest. For a live log tail the newest lines are the ones the
+          // user is watching, and discarding from the front also bounds how
+          // stale the surviving queue can be. Only reachable when a single
+          // Docker chunk expands past the cap, since the pause below stops the
+          // source between chunks.
+          droppedLines += writeQueue.length - LOG_WRITE_QUEUE_MAX_MESSAGES;
+          writeQueue.splice(0, writeQueue.length - LOG_WRITE_QUEUE_MAX_MESSAGES);
+        }
+
+        if (!sourcePaused && writeQueue.length >= LOG_WRITE_QUEUE_PAUSE_AT) {
+          // Real backpressure: pausing the Docker stream lets it propagate to
+          // the daemon rather than blocking this handler, which is the one
+          // thing awaiting `writeSSE` inline here could not do safely.
+          sourcePaused = true;
+          logStream.pause();
+        }
+
+        void drain();
+      };
+
+      // --- line assembly ---------------------------------------------------
+      // Held as an array of pieces with a running length, joined once per
+      // emitted line. Re-splitting a growing string on every chunk (what this
+      // route used to do) is O(n^2) in the length of the line.
+      let pendingLine: string[] = [];
+      let pendingLineChars = 0;
+
+      const takePendingLine = () => {
+        if (pendingLineChars === 0) return "";
+        const text = pendingLine.join("");
+        pendingLine = [];
+        pendingLineChars = 0;
+        return text;
+      };
+
+      const emitLine = (line: string, truncated: boolean) => {
+        // A truncated piece is a mid-line fragment, so a trailing `\r` is
+        // content there rather than a line ending.
+        const cleanLine = !truncated && line.endsWith("\r") ? line.slice(0, -1) : line;
+        if (!cleanLine) return;
+        enqueue({
+          data: JSON.stringify(truncated ? { line: cleanLine, truncated } : { line: cleanLine }),
+          event: "log",
+          id: Date.now().toString(),
+        });
+      };
+
+      // Buffers `text[from, to)`, flushing at the cap: a container emitting one
+      // endless line would otherwise grow this without limit. Flushing (rather
+      // than discarding) means the bound costs line framing and never bytes --
+      // the client gets every character, marked as a continuation.
+      const appendPendingLine = (text: string, from: number, to: number) => {
+        let offset = from;
+        while (offset < to) {
+          const take = Math.min(LOG_LINE_MAX_CHARS - pendingLineChars, to - offset);
+          pendingLine.push(text.slice(offset, offset + take));
+          pendingLineChars += take;
+          offset += take;
+          if (pendingLineChars >= LOG_LINE_MAX_CHARS) {
+            emitLine(takePendingLine(), true);
+          }
+        }
+      };
+
+      const pushText = (text: string) => {
+        if (!text) return;
+        let offset = 0;
+
+        for (;;) {
+          const index = text.indexOf("\n", offset);
+          if (index === -1) break;
+          // Routed through the same capped append rather than emitted directly,
+          // so a line that arrives already terminated inside one chunk obeys the
+          // cap too instead of becoming a single oversized message. An empty
+          // line leaves nothing pending and `emitLine` skips it, as before.
+          appendPendingLine(text, offset, index);
+          emitLine(takePendingLine(), false);
+          offset = index + 1;
+        }
+
+        appendPendingLine(text, offset, text.length);
+      };
+
+      // --- docker frame demultiplexing -------------------------------------
+      // Payload bytes are fed to the line assembler as they arrive rather than
+      // buffered until the frame is complete, so the only per-frame state is a
+      // partial 8-byte header plus whatever partial UTF-8 sequence the decoder
+      // holds (at most 3 bytes). That removes the `Buffer.concat`-per-chunk
+      // growth entirely, and, unlike decoding each frame independently, keeps
+      // a multi-byte character split across two frames intact.
+      const decoder = new StringDecoder("utf8");
+      const frameHeader = Buffer.alloc(8);
+      let frameHeaderBytes = 0;
+      let framePayloadRemaining = 0;
 
       logStream.on("data", (chunk: Buffer) => {
         if (isTty) {
-          lineBuffer += chunk.toString("utf-8");
-          const lines = lineBuffer.split("\n");
-          lineBuffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            const cleanLine = line.endsWith("\r") ? line.slice(0, -1) : line;
-            if (!cleanLine) continue;
-            try {
-              stream.writeSSE({
-                data: JSON.stringify({ line: cleanLine }),
-                event: "log",
-                id: Date.now().toString(),
-              });
-            } catch (err) {
-              console.error("[deckos] Error streaming logs:", err);
-              return;
-            }
-          }
+          pushText(decoder.write(chunk));
           return;
         }
 
-        binaryBuffer = Buffer.concat([binaryBuffer, chunk]);
-
-        while (binaryBuffer.length >= 8) {
-          const header = binaryBuffer.subarray(0, 8);
-          const size = header.readUInt32BE(4);
-
-          if (binaryBuffer.length < 8 + size) {
-            break;
+        let offset = 0;
+        while (offset < chunk.length) {
+          if (framePayloadRemaining > 0) {
+            const take = Math.min(framePayloadRemaining, chunk.length - offset);
+            pushText(decoder.write(chunk.subarray(offset, offset + take)));
+            offset += take;
+            framePayloadRemaining -= take;
+            continue;
           }
 
-          const payload = binaryBuffer.subarray(8, 8 + size);
-          const text = payload.toString("utf-8");
-
-          lineBuffer += text;
-          const lines = lineBuffer.split("\n");
-          lineBuffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            const cleanLine = line.endsWith("\r") ? line.slice(0, -1) : line;
-            if (!cleanLine) continue;
-            try {
-              stream.writeSSE({
-                data: JSON.stringify({ line: cleanLine }),
-                event: "log",
-                id: Date.now().toString(),
-              });
-            } catch (err) {
-              console.error("[deckos] Error streaming logs:", err);
-              return;
-            }
+          const take = Math.min(8 - frameHeaderBytes, chunk.length - offset);
+          chunk.copy(frameHeader, frameHeaderBytes, offset, offset + take);
+          frameHeaderBytes += take;
+          offset += take;
+          if (frameHeaderBytes === 8) {
+            framePayloadRemaining = frameHeader.readUInt32BE(4);
+            frameHeaderBytes = 0;
           }
-
-          binaryBuffer = binaryBuffer.subarray(8 + size);
         }
       });
 
@@ -507,7 +634,12 @@ export function registerRuntimeRoutes(app: Hono) {
       });
 
       withSessionCheck(stream, sessionToken, {
-        onCleanup: () => logStream.destroy(),
+        onCleanup: () => {
+          writeQueue.length = 0;
+          pendingLine = [];
+          pendingLineChars = 0;
+          logStream.destroy();
+        },
       });
 
       await stream.sleep(1000000);
