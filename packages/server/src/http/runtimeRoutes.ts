@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
-import { streamSSE } from "hono/streaming";
+import { getCookie } from "hono/cookie";
+import { streamSSE, type SSEStreamingApi } from "hono/streaming";
 import { z } from "zod";
 import { Readable } from "node:stream";
 import type Dockerode from "dockerode";
@@ -9,11 +10,37 @@ import { LOG_HISTORY_SIZE } from "../lib/config.js";
 import * as metricsService from "../services/metrics.js";
 import * as dockerService from "../services/docker.js";
 import * as pullJobsService from "../services/pullJobs.js";
+import * as authService from "../services/auth.js";
 import {
   DiskAnalysisMountIdentitySchema,
   DiskAnalysisScanEventSchema,
 } from "@deckos/contracts";
 import * as diskAnalysisService from "../services/diskAnalysis.js";
+
+const SESSION_CHECK_INTERVAL_MS = 30000;
+
+/**
+ * Re-validates the session that opened this SSE connection and aborts the
+ * stream if the panel has since been locked. Reuses `authService.getAuthStatus`
+ * -- the same helper `protectedProcedure` and the `/api/*` guard use -- so an
+ * unlocked box (`config.enabled === false`) always reports unlocked and never
+ * closes a stream that has no passcode configured.
+ *
+ * `stream.abort()` runs the same `stream.onAbort` cleanup a real client
+ * disconnect triggers, never throws (Hono swallows write errors on an aborted
+ * stream), and closes the response body the client is reading from.
+ */
+async function closeIfSessionLocked(
+  stream: SSEStreamingApi,
+  sessionToken: string | null
+): Promise<boolean> {
+  const status = await authService.getAuthStatus(sessionToken);
+  if (status.unlocked) {
+    return false;
+  }
+  stream.abort();
+  return true;
+}
 
 export function registerRuntimeRoutes(app: Hono) {
   app.get("/api/health", (c) => {
@@ -42,6 +69,7 @@ export function registerRuntimeRoutes(app: Hono) {
   });
 
   app.get("/api/metrics/stream", async (c) => {
+    const sessionToken = getCookie(c, authService.getAuthCookieName()) ?? null;
     metricsService.startMetricsPolling();
 
     return streamSSE(c, async (stream) => {
@@ -79,16 +107,25 @@ export function registerRuntimeRoutes(app: Hono) {
       });
 
       const keepaliveInterval = setInterval(() => {
-        try {
-          stream.writeSSE({
-            data: "keepalive",
-            event: "keepalive",
-            id: Date.now().toString(),
+        closeIfSessionLocked(stream, sessionToken)
+          .then((closed) => {
+            if (closed) {
+              return;
+            }
+            try {
+              stream.writeSSE({
+                data: "keepalive",
+                event: "keepalive",
+                id: Date.now().toString(),
+              });
+            } catch (error) {
+              console.error("[deckos] Error sending keepalive:", error);
+            }
+          })
+          .catch((error) => {
+            console.error("[deckos] Error checking session status:", error);
           });
-        } catch (error) {
-          console.error("[deckos] Error sending keepalive:", error);
-        }
-      }, 30000);
+      }, SESSION_CHECK_INTERVAL_MS);
 
       stream.onAbort(() => {
         clearInterval(keepaliveInterval);
@@ -104,6 +141,7 @@ export function registerRuntimeRoutes(app: Hono) {
   });
 
   app.get("/api/docker/events", async (c) => {
+    const sessionToken = getCookie(c, authService.getAuthCookieName()) ?? null;
     const docker = await dockerService.getDockerAsync();
     if (!docker) {
       return c.json({ error: "Docker is not available" }, 503);
@@ -139,7 +177,14 @@ export function registerRuntimeRoutes(app: Hono) {
         console.error("Docker events error:", err);
       });
 
+      const sessionCheckInterval = setInterval(() => {
+        closeIfSessionLocked(stream, sessionToken).catch((error) => {
+          console.error("[deckos] Error checking session status:", error);
+        });
+      }, SESSION_CHECK_INTERVAL_MS);
+
       stream.onAbort(() => {
+        clearInterval(sessionCheckInterval);
         eventStream.destroy();
       });
 
@@ -148,6 +193,7 @@ export function registerRuntimeRoutes(app: Hono) {
   });
 
   app.get("/api/disk-analysis/jobs/:jobId/events", async (c) => {
+    const sessionToken = getCookie(c, authService.getAuthCookieName()) ?? null;
     const accept = c.req.header("accept") ?? "";
     if (!accept.toLowerCase().includes("text/event-stream")) {
       return c.json({ error: "This endpoint only supports SSE subscriptions" }, 406);
@@ -221,12 +267,21 @@ export function registerRuntimeRoutes(app: Hono) {
       }
 
       const keepaliveInterval = setInterval(() => {
-        try {
-          writeEvent(diskAnalysisService.getJobKeepaliveEvent(jobId));
-        } catch (error) {
-          console.error("[deckos] Error sending disk analysis keepalive:", error);
-        }
-      }, 30000);
+        closeIfSessionLocked(stream, sessionToken)
+          .then((closed) => {
+            if (closed) {
+              return;
+            }
+            try {
+              writeEvent(diskAnalysisService.getJobKeepaliveEvent(jobId));
+            } catch (error) {
+              console.error("[deckos] Error sending disk analysis keepalive:", error);
+            }
+          })
+          .catch((error) => {
+            console.error("[deckos] Error checking session status:", error);
+          });
+      }, SESSION_CHECK_INTERVAL_MS);
 
       stream.onAbort(() => {
         streamClosed = true;
@@ -259,6 +314,7 @@ export function registerRuntimeRoutes(app: Hono) {
   });
 
   app.get("/api/pull/:jobId", async (c) => {
+    const sessionToken = getCookie(c, authService.getAuthCookieName()) ?? null;
     const { jobId } = c.req.param();
     const job = pullJobsService.getPullJob(jobId);
     if (!job) {
@@ -294,16 +350,25 @@ export function registerRuntimeRoutes(app: Hono) {
       });
 
       const keepaliveInterval = setInterval(() => {
-        try {
-          stream.writeSSE({
-            data: "keepalive",
-            event: "keepalive",
-            id: Date.now().toString(),
+        closeIfSessionLocked(stream, sessionToken)
+          .then((closed) => {
+            if (closed) {
+              return;
+            }
+            try {
+              stream.writeSSE({
+                data: "keepalive",
+                event: "keepalive",
+                id: Date.now().toString(),
+              });
+            } catch (error) {
+              console.error("[deckos] Error sending pull keepalive:", error);
+            }
+          })
+          .catch((error) => {
+            console.error("[deckos] Error checking session status:", error);
           });
-        } catch (error) {
-          console.error("[deckos] Error sending pull keepalive:", error);
-        }
-      }, 30000);
+      }, SESSION_CHECK_INTERVAL_MS);
 
       stream.onAbort(() => {
         clearInterval(keepaliveInterval);
@@ -315,6 +380,7 @@ export function registerRuntimeRoutes(app: Hono) {
   });
 
   app.get("/api/logs/:containerId", async (c) => {
+    const sessionToken = getCookie(c, authService.getAuthCookieName()) ?? null;
     const { containerId } = c.req.param();
     const tailQuery = c.req.query("tail") || "2000";
     const sinceQuery = c.req.query("since");
@@ -430,7 +496,14 @@ export function registerRuntimeRoutes(app: Hono) {
         console.error("Container logs error:", err);
       });
 
+      const sessionCheckInterval = setInterval(() => {
+        closeIfSessionLocked(stream, sessionToken).catch((error) => {
+          console.error("[deckos] Error checking session status:", error);
+        });
+      }, SESSION_CHECK_INTERVAL_MS);
+
       stream.onAbort(() => {
+        clearInterval(sessionCheckInterval);
         logStream.destroy();
       });
 

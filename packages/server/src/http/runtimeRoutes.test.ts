@@ -1,6 +1,10 @@
+import fs from "fs-extra";
+import os from "node:os";
+import path from "node:path";
 import { Hono } from "hono";
 import { PassThrough } from "node:stream";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import * as authService from "../services/auth.js";
 
 const metricsMock = vi.hoisted(() => ({
   startMetricsPolling: vi.fn(),
@@ -459,5 +463,219 @@ describe("runtimeRoutes", () => {
     const payload = new TextDecoder().decode(first.value);
     expect(payload).toContain("event: log");
     expect(payload).toContain('"line":"line-one"');
+  });
+});
+
+describe("runtimeRoutes session lock (AUTH-6)", () => {
+  const createdDirs: string[] = [];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dockerMock.getDockerAsync.mockResolvedValue(null);
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    authService.resetAuthStateForTests();
+    await Promise.all(createdDirs.splice(0).map((dir) => fs.remove(dir)));
+  });
+
+  /** Configures a real passcode and returns a genuinely valid session cookie. */
+  async function setupUnlockedSession() {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "deckos-runtime-lock-"));
+    createdDirs.push(root);
+    authService.setAuthStoragePathForTests(root);
+    await authService.configureAuth({ passcode: "1234", sessionDurationMs: 3_600_000 });
+    const { token } = await authService.unlock({ passcode: "1234", ip: "127.0.0.1" });
+    return { cookie: `deckos_session=${token}`, token };
+  }
+
+  test("closes the metrics stream when the session is locked", async () => {
+    const { cookie, token } = await setupUnlockedSession();
+    metricsMock.getCachedMetrics.mockReturnValue({ cpuPercent: 5 });
+    const app = createApp();
+
+    vi.useFakeTimers();
+    const res = await app.request("http://localhost/api/metrics/stream", {
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+
+    const reader = getResponseReader(res);
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    expect(new TextDecoder().decode(first.value)).toContain("event: metrics");
+
+    authService.revokeSession(token);
+    await vi.advanceTimersByTimeAsync(31_000);
+
+    const second = await reader.read();
+    expect(second.done).toBe(true);
+  });
+
+  test("keeps the metrics stream open when no passcode is configured", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "deckos-runtime-lock-"));
+    createdDirs.push(root);
+    authService.setAuthStoragePathForTests(root);
+    metricsMock.getCachedMetrics.mockReturnValue({ cpuPercent: 5 });
+    const app = createApp();
+
+    vi.useFakeTimers();
+    const res = await app.request("http://localhost/api/metrics/stream");
+    expect(res.status).toBe(200);
+
+    const reader = getResponseReader(res);
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(31_000);
+
+    const second = await reader.read();
+    expect(second.done).toBe(false);
+    expect(new TextDecoder().decode(second.value)).toContain("event: keepalive");
+  });
+
+  test("closes the pull status stream when the session is locked", async () => {
+    const { cookie, token } = await setupUnlockedSession();
+    pullJobsMock.getPullJob.mockReturnValue({
+      jobId: "job-lock",
+      appId: "my-app",
+      status: "running",
+      progress: {
+        currentBytes: null,
+        totalBytes: null,
+        percent: 10,
+        completedImages: 0,
+        totalImages: 1,
+        indeterminate: true,
+      },
+    });
+    const app = createApp();
+
+    vi.useFakeTimers();
+    const res = await app.request("http://localhost/api/pull/job-lock", {
+      headers: { cookie, accept: "text/event-stream" },
+    });
+    expect(res.status).toBe(200);
+
+    const reader = getResponseReader(res);
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    expect(new TextDecoder().decode(first.value)).toContain("event: pull");
+
+    authService.revokeSession(token);
+    await vi.advanceTimersByTimeAsync(31_000);
+
+    const second = await reader.read();
+    expect(second.done).toBe(true);
+  });
+
+  test("closes the disk analysis events stream when the session is locked", async () => {
+    const { cookie, token } = await setupUnlockedSession();
+    diskAnalysisMock.getJobStreamInitialEvent.mockReturnValue({
+      event: "status",
+      job: {
+        jobId: "11111111-1111-1111-1111-111111111111",
+        mount: { mount: "C:\\", fs: "ntfs" },
+        phase: "scanning",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        progress: {
+          directoriesDiscovered: 1,
+          directoriesCompleted: 0,
+          filesDiscovered: 0,
+          bytesProcessed: 0,
+        },
+        issues: [],
+        limits: {
+          maxWorkers: 2,
+          maxPendingDirectories: 10,
+          maxIndexedNodes: 100,
+        },
+      },
+    });
+    const app = createApp();
+
+    vi.useFakeTimers();
+    const res = await app.request(
+      "http://localhost/api/disk-analysis/jobs/11111111-1111-1111-1111-111111111111/events?mount=C%3A%5C&fs=ntfs",
+      {
+        headers: { cookie, accept: "text/event-stream" },
+      }
+    );
+    expect(res.status).toBe(200);
+
+    const reader = getResponseReader(res);
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    expect(new TextDecoder().decode(first.value)).toContain("event: status");
+
+    authService.revokeSession(token);
+    await vi.advanceTimersByTimeAsync(31_000);
+
+    const second = await reader.read();
+    expect(second.done).toBe(true);
+  });
+
+  test("closes the docker events stream when the session is locked", async () => {
+    const { cookie, token } = await setupUnlockedSession();
+    const eventsStream = new PassThrough();
+    dockerMock.getDockerAsync.mockResolvedValue({
+      getEvents: vi.fn(async () => eventsStream),
+    });
+    const app = createApp();
+
+    vi.useFakeTimers();
+    const res = await app.request("http://localhost/api/docker/events", {
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+
+    const reader = getResponseReader(res);
+    eventsStream.write('{"status":"start","id":"c1"}\n');
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    expect(new TextDecoder().decode(first.value)).toContain("event: docker-event");
+
+    authService.revokeSession(token);
+    await vi.advanceTimersByTimeAsync(31_000);
+
+    const second = await reader.read();
+    expect(second.done).toBe(true);
+  });
+
+  test("closes the container logs stream when the session is locked", async () => {
+    const { cookie, token } = await setupUnlockedSession();
+    const logStream = new PassThrough();
+    const container = {
+      inspect: vi.fn(async () => ({ Config: { Tty: false } })),
+      logs: vi.fn(async () => logStream),
+    };
+    dockerMock.getDockerAsync.mockResolvedValue({
+      getContainer: vi.fn(() => container),
+    });
+    const app = createApp();
+
+    vi.useFakeTimers();
+    const res = await app.request("http://localhost/api/logs/container-1?tail=100", {
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+
+    const reader = getResponseReader(res);
+    const line = Buffer.from("line-one\n", "utf8");
+    const header = Buffer.alloc(8);
+    header.writeUInt8(1, 0);
+    header.writeUInt32BE(line.length, 4);
+    logStream.write(Buffer.concat([header, line]));
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    expect(new TextDecoder().decode(first.value)).toContain("event: log");
+
+    authService.revokeSession(token);
+    await vi.advanceTimersByTimeAsync(31_000);
+
+    const second = await reader.read();
+    expect(second.done).toBe(true);
   });
 });
