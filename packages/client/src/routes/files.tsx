@@ -222,19 +222,6 @@ function getSymlinkTitle(entry: { isSymlink: boolean; linkTarget: string | null 
   return entry.linkTarget ? `Symlink → ${entry.linkTarget}` : "Symlink (target unavailable)";
 }
 
-const symlinkBadgeStyle: React.CSSProperties = {
-  marginLeft: "2px",
-  flexShrink: 0,
-  fontSize: "10px",
-  fontWeight: 500,
-  letterSpacing: "0.04em",
-  textTransform: "uppercase",
-  color: "var(--text-secondary)",
-  border: "1px solid var(--border-active)",
-  borderRadius: 2,
-  padding: "0 4px",
-};
-
 type FileListEntry = {
   name: string;
   type: "directory" | "file" | "symlink" | "other";
@@ -1482,7 +1469,7 @@ function FilesPage() {
                               : renderEntryIcon(entry, 14)}
                             <span>{entry.name}</span>
                             {entry.isSymlink && (
-                              <span style={symlinkBadgeStyle}>LINK</span>
+                              <span className="files-symlink-badge">LINK</span>
                             )}
                           </div>
                         </td>
@@ -1533,7 +1520,7 @@ function FilesPage() {
                     <div className="files-grid-icon">{renderEntryIcon(entry, 18)}</div>
                     <div className="files-grid-name">
                       {entry.name}
-                      {entry.isSymlink && <span style={symlinkBadgeStyle}>LINK</span>}
+                      {entry.isSymlink && <span className="files-symlink-badge">LINK</span>}
                     </div>
                     <div className="files-grid-meta">{getEntryTypeLabel(entry)}</div>
                   </button>

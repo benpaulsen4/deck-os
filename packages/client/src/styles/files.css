@@ -371,6 +371,28 @@
   white-space: nowrap;
 }
 
+.files-symlink-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-active);
+  border-radius: 2px;
+  padding: 0 4px;
+}
+
+/* Overrides `.files-entry-button span`'s ellipsis/shrink rules -- the badge
+   is a fixed-width label, not truncatable text, even though it's also a
+   <span> inside that container. */
+.files-entry-button .files-symlink-badge {
+  min-width: auto;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
 .files-row {
   cursor: pointer;
 }
