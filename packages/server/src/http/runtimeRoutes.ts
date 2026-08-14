@@ -608,6 +608,26 @@ export function registerRuntimeRoutes(app: Hono) {
         appendPendingLine(text, offset, text.length);
       };
 
+      // Emits whatever unterminated text is still buffered. Deferring the cap
+      // flush (above) means a full buffer waits for proof that the line
+      // continues -- so if the container stops producing output, or the log
+      // stream ends, that proof never comes and the fragment would otherwise
+      // sit here forever. This is the other half of that bargain, and it also
+      // closes a loss that predates the buffering work entirely: *any*
+      // trailing line without a newline used to be discarded at end of stream,
+      // not just an exact-cap one.
+      //
+      // Not a continuation: nothing follows it, so it is flagged as a complete
+      // line. Idempotent -- `takePendingLine` clears the buffer, so the
+      // `end`/`close` pair only ever emits once. Safe on dead streams too:
+      // `enqueue` no-ops once the SSE stream is aborted or closed, so a flush
+      // on a teardown path that can no longer write cannot throw and cannot
+      // wedge the drain loop.
+      const flushPendingLine = () => {
+        const trailing = takePendingLine();
+        if (trailing) emitLine(trailing, false);
+      };
+
       // --- docker frame demultiplexing -------------------------------------
       // Payload bytes are fed to the line assembler as they arrive rather than
       // buffered until the frame is complete, so the only per-frame state is a
@@ -647,15 +667,28 @@ export function registerRuntimeRoutes(app: Hono) {
         }
       });
 
+      // `end` is the case that matters: the container stopped producing output
+      // but the client is still attached, so the SSE stream is open and the
+      // trailing fragment can still be delivered. `close` covers the rest
+      // (error, destroy) and is a no-op once `end` has already flushed.
+      logStream.on("end", flushPendingLine);
+      logStream.on("close", flushPendingLine);
+
       logStream.on("error", (err) => {
         console.error("Container logs error:", err);
       });
 
       withSessionCheck(stream, sessionToken, {
         onCleanup: () => {
+          // Flushes rather than discards. F1 only ever runs `onCleanup` with
+          // the stream already aborted -- from the `onAbort` subscriber or the
+          // synchronous `stream.aborted` guard -- so in practice `enqueue`
+          // no-ops here and this just clears the buffer. It is written as a
+          // flush anyway so that the buffer has exactly one disposal path, and
+          // so this stays correct if a teardown route that can still write is
+          // ever added.
+          flushPendingLine();
           writeQueue.length = 0;
-          pendingLine = [];
-          pendingLineChars = 0;
           logStream.destroy();
         },
       });

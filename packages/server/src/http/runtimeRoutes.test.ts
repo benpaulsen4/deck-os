@@ -875,6 +875,55 @@ describe("runtimeRoutes log stream bounds (DOCK-10)", () => {
     return events;
   }
 
+  /**
+   * Collects SSE events until the stream goes quiet for `quietMs`.
+   *
+   * The end-of-stream cases have no sentinel to read towards: the route keeps
+   * the SSE connection open after the Docker log stream ends (it is still
+   * parked on `stream.sleep`), so against code that drops the trailing
+   * fragment the correct observation is "nothing further ever arrives", which
+   * only a quiet period can make. Reading towards a marker would block until
+   * the suite timed out instead of failing on its assertion.
+   */
+  async function collectUntilQuiet(
+    response: Response,
+    { quietMs = 200, maxReads = 50 }: { quietMs?: number; maxReads?: number } = {}
+  ): Promise<SseEvent[]> {
+    const reader = getResponseReader(response);
+    const decoder = new TextDecoder();
+    const events: SseEvent[] = [];
+    let buffer = "";
+
+    try {
+      for (let i = 0; i < maxReads; i += 1) {
+        let timer: NodeJS.Timeout | undefined;
+        const quiet = new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), quietMs);
+        });
+        const result = await Promise.race([reader.read(), quiet]);
+        clearTimeout(timer);
+        if (!result || result.done) break;
+        buffer += decoder.decode(result.value, { stream: true });
+
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop() ?? "";
+        for (const block of blocks) {
+          let event: string | undefined;
+          const dataLines: string[] = [];
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event: ")) event = line.slice(7);
+            else if (line.startsWith("data: ")) dataLines.push(line.slice(6));
+          }
+          events.push({ event, data: dataLines.join("\n") });
+        }
+      }
+    } finally {
+      await reader.cancel();
+    }
+
+    return events;
+  }
+
   function parsedLines(events: SseEvent[]): { line: string; truncated?: boolean }[] {
     return events
       .filter((event) => event.event === "log")
@@ -1003,6 +1052,48 @@ describe("runtimeRoutes log stream bounds (DOCK-10)", () => {
     expect(doubled.reduce((total, payload) => total + payload.line.length, 0)).toBe(
       LOG_LINE_MAX_CHARS * 2
     );
+  });
+
+  test("delivers an exact-cap trailing fragment when the log stream ends", async () => {
+    const logStream = mountLogStream();
+    const app = createApp();
+
+    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    expect(res.status).toBe(200);
+
+    // A container that writes exactly one cap's worth and then stops, with no
+    // trailing newline. The buffer is full and the line is over at the same
+    // instant, and nothing further will ever arrive to push it out -- so the
+    // end of the stream is the only thing that can flush it. Losing it would
+    // be 64 KiB of real output silently dropped.
+    logStream.write(dockerFrame("b".repeat(LOG_LINE_MAX_CHARS)));
+    logStream.end();
+
+    const lines = parsedLines(await collectUntilQuiet(res));
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.line.length).toBe(LOG_LINE_MAX_CHARS);
+    // Nothing continues it, so it is not a continuation.
+    expect(lines[0]?.truncated).toBeUndefined();
+  });
+
+  test("delivers a short unterminated trailing fragment when the log stream ends", async () => {
+    const logStream = mountLogStream();
+    const app = createApp();
+
+    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    expect(res.status).toBe(200);
+
+    // The general case, and a loss that predates any of the buffering work:
+    // a container whose final line has no trailing newline had that line
+    // discarded when the stream ended, whatever its length.
+    logStream.write(dockerFrame("first-line\ntrailing-without-newline"));
+    logStream.end();
+
+    const lines = parsedLines(await collectUntilQuiet(res)).map((entry) => entry.line);
+
+    expect(lines).toContain("first-line");
+    expect(lines).toContain("trailing-without-newline");
   });
 
   test("pauses the docker log stream while queued writes are ahead of the client", async () => {
