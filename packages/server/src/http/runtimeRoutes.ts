@@ -6,6 +6,7 @@ import { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import type Dockerode from "dockerode";
 import { AppIdSchema } from "../lib/schema.js";
+import { ContainerIdSchema } from "../routers/docker.js";
 import { getCurrentVersion } from "../lib/version.js";
 import {
   LOG_HISTORY_SIZE,
@@ -118,7 +119,6 @@ export function registerRuntimeRoutes(app: Hono) {
 
   app.get("/api/metrics/stream", async (c) => {
     const sessionToken = getCookie(c, authService.getAuthCookieName()) ?? null;
-    metricsService.startMetricsPolling();
 
     return streamSSE(c, async (stream) => {
       let metrics = metricsService.getCachedMetrics();
@@ -259,19 +259,28 @@ export function registerRuntimeRoutes(app: Hono) {
       if (error instanceof diskAnalysisService.DiskAnalysisJobNotFoundError) {
         return c.json({ error: error.message }, 404);
       }
-      return c.json(
-        { error: error instanceof Error ? error.message : "Failed to subscribe" },
-        500
-      );
+      console.error("[deckos] Error subscribing to disk analysis job:", error);
+      return c.json({ error: "Failed to subscribe to disk analysis job" }, 500);
     }
 
     return streamSSE(c, async (stream) => {
       let streamClosed = false;
+      // Server-authored data, validated only as a defence against a bug
+      // upstream -- JSON.stringify never mutates, so a failure here reflects
+      // a schema/payload mismatch, not anything a client influenced. A parse
+      // failure on one event is not allowed to be fatal to the stream: it is
+      // logged and the event is dropped, and the caller (whether flushing a
+      // buffered batch or forwarding a live update) carries on to whatever
+      // comes next instead of unsubscribing or tearing down the connection.
       const writeEvent = (event: unknown) => {
-        const payload = DiskAnalysisScanEventSchema.parse(event);
+        const result = DiskAnalysisScanEventSchema.safeParse(event);
+        if (!result.success) {
+          console.error("[deckos] Dropping unparsable disk analysis event:", result.error);
+          return;
+        }
         stream.writeSSE({
-          data: JSON.stringify(payload),
-          event: payload.event,
+          data: JSON.stringify(result.data),
+          event: result.data.event,
           id: Date.now().toString(),
         });
       };
@@ -331,10 +340,8 @@ export function registerRuntimeRoutes(app: Hono) {
       if (err instanceof Error && err.message === "App not found") {
         return c.json({ error: err.message }, 404);
       }
-      return c.json(
-        { error: err instanceof Error ? err.message : "Failed to start pull" },
-        500
-      );
+      console.error("[deckos] Error starting pull job:", err);
+      return c.json({ error: "Failed to start pull" }, 500);
     }
   });
 
@@ -399,6 +406,10 @@ export function registerRuntimeRoutes(app: Hono) {
   app.get("/api/logs/:containerId", async (c) => {
     const sessionToken = getCookie(c, authService.getAuthCookieName()) ?? null;
     const { containerId } = c.req.param();
+    const containerIdResult = ContainerIdSchema.safeParse(containerId);
+    if (!containerIdResult.success) {
+      return c.json({ error: "Invalid container id" }, 400);
+    }
     const tailQuery = c.req.query("tail") || "2000";
     const sinceQuery = c.req.query("since");
     const TailSchema = z.coerce.number().int().min(1).max(LOG_HISTORY_SIZE);
@@ -422,7 +433,7 @@ export function registerRuntimeRoutes(app: Hono) {
     if (!docker) {
       return c.json({ error: "Docker is not available" }, 503);
     }
-    const container = docker.getContainer(containerId);
+    const container = docker.getContainer(containerIdResult.data);
 
     return streamSSE(c, async (stream) => {
       let isTty = false;

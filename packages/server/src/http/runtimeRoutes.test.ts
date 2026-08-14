@@ -123,6 +123,21 @@ describe("runtimeRoutes", () => {
     expect(await res.json()).toEqual({ error: "App not found" });
   });
 
+  test("pull start does not disclose host filesystem layout on unexpected errors", async () => {
+    pullJobsMock.startPullJob.mockRejectedValue(
+      new Error(
+        "ENOENT: no such file or directory, open '/var/lib/deckos/apps/my-app/docker-compose.yml'"
+      )
+    );
+    const app = createApp();
+    const res = await app.request("http://localhost/api/apps/my-app/pull/start", {
+      method: "POST",
+    });
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Failed to start pull" });
+  });
+
   test("pull status returns json snapshot when accept is not SSE", async () => {
     pullJobsMock.getPullJob.mockReturnValue({
       jobId: "job-1",
@@ -203,7 +218,10 @@ describe("runtimeRoutes", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/event-stream");
-    expect(metricsMock.startMetricsPolling).toHaveBeenCalledTimes(1);
+    // Polling is refcounted on metricsService's own subscriber set (see
+    // metrics.ts); calling startMetricsPolling() here before subscribing is a
+    // no-op and was dead weight, not a required call.
+    expect(metricsMock.startMetricsPolling).not.toHaveBeenCalled();
     const reader = getResponseReader(res);
     const first = await reader.read();
     await reader.cancel();
@@ -282,9 +300,11 @@ describe("runtimeRoutes", () => {
     });
   });
 
-  test("disk analysis events endpoint maps unexpected subscription errors to 500", async () => {
+  test("disk analysis events endpoint maps unexpected subscription errors to 500 without leaking host paths", async () => {
     diskAnalysisMock.getJobStreamInitialEvent.mockImplementation(() => {
-      throw new Error("boom");
+      throw new Error(
+        "ENOENT: no such file or directory, open '/var/lib/deckos/disk-analysis/job-1.json'"
+      );
     });
     const app = createApp();
     const res = await app.request(
@@ -298,7 +318,7 @@ describe("runtimeRoutes", () => {
 
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({
-      error: "boom",
+      error: "Failed to subscribe to disk analysis job",
     });
   });
 
@@ -425,18 +445,105 @@ describe("runtimeRoutes", () => {
     expect(payload).toContain('"phase":"completed"');
   });
 
+  test("disk analysis events endpoint skips an unparsable event instead of wedging the stream", async () => {
+    diskAnalysisMock.getJobStreamInitialEvent.mockReturnValue({
+      event: "status",
+      job: {
+        jobId: "11111111-1111-1111-1111-111111111111",
+        mount: { mount: "C:\\", fs: "ntfs" },
+        phase: "scanning",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        progress: {
+          directoriesDiscovered: 1,
+          directoriesCompleted: 0,
+          filesDiscovered: 0,
+          bytesProcessed: 0,
+        },
+        issues: [],
+        limits: {
+          maxWorkers: 2,
+          maxPendingDirectories: 10,
+          maxIndexedNodes: 100,
+        },
+      },
+    });
+    diskAnalysisMock.subscribeToJob.mockImplementationOnce(
+      ((...args: unknown[]) => {
+        const listener = args[1] as (event: unknown) => void;
+        // Malformed: fails DiskAnalysisScanEventSchema entirely (no matching
+        // discriminant). A single bad event must not stop later, valid events
+        // from reaching the client.
+        listener({ event: "not-a-real-event" });
+        listener({
+          event: "status",
+          job: {
+            jobId: "11111111-1111-1111-1111-111111111111",
+            mount: { mount: "C:\\", fs: "ntfs" },
+            phase: "completed",
+            startedAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:01:00.000Z",
+            progress: {
+              directoriesDiscovered: 1,
+              directoriesCompleted: 1,
+              filesDiscovered: 1,
+              bytesProcessed: 128,
+            },
+            issues: [],
+            limits: {
+              maxWorkers: 2,
+              maxPendingDirectories: 10,
+              maxIndexedNodes: 100,
+            },
+          },
+        });
+        return () => undefined;
+      }) as unknown as () => () => undefined
+    );
+    const app = createApp();
+
+    const res = await app.request(
+      "http://localhost/api/disk-analysis/jobs/11111111-1111-1111-1111-111111111111/events?mount=C%3A%5C&fs=ntfs",
+      {
+        headers: {
+          accept: "text/event-stream",
+        },
+      }
+    );
+
+    expect(res.status).toBe(200);
+    const reader = getResponseReader(res);
+    const first = await reader.read();
+    const second = await reader.read();
+    await reader.cancel();
+    const payload = `${new TextDecoder().decode(first.value)}${new TextDecoder().decode(second.value)}`;
+    expect(payload).toContain('"phase":"scanning"');
+    expect(payload).toContain('"phase":"completed"');
+  });
+
   test("logs endpoint validates tail query before docker lookup", async () => {
     const app = createApp();
-    const res = await app.request("http://localhost/api/logs/container-1?tail=0");
+    const res = await app.request("http://localhost/api/logs/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?tail=0");
 
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "Invalid tail parameter" });
     expect(dockerMock.getDockerAsync).not.toHaveBeenCalled();
   });
 
+  test("logs endpoint rejects invalid container ids before touching docker", async () => {
+    const app = createApp();
+    const res = await app.request(
+      "http://localhost/api/logs/not-a-real-container-id?tail=100"
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "Invalid container id" });
+    expect(dockerMock.getDockerAsync).not.toHaveBeenCalled();
+  });
+
   test("logs endpoint returns 503 when docker is unavailable", async () => {
     const app = createApp();
-    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    const res = await app.request("http://localhost/api/logs/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?tail=100");
 
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ error: "Docker is not available" });
@@ -453,7 +560,7 @@ describe("runtimeRoutes", () => {
     });
     const app = createApp();
 
-    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    const res = await app.request("http://localhost/api/logs/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?tail=100");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/event-stream");
 
@@ -682,7 +789,7 @@ describe("runtimeRoutes session lock (AUTH-6)", () => {
     const app = createApp();
 
     vi.useFakeTimers();
-    const res = await app.request("http://localhost/api/logs/container-1?tail=100", {
+    const res = await app.request("http://localhost/api/logs/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?tail=100", {
       headers: { cookie },
     });
     expect(res.status).toBe(200);
@@ -774,7 +881,7 @@ describe("runtimeRoutes session lock (AUTH-6)", () => {
     const app = createApp();
 
     vi.useFakeTimers();
-    const res = await app.request("http://localhost/api/logs/container-1?tail=100", {
+    const res = await app.request("http://localhost/api/logs/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?tail=100", {
       headers: { cookie },
     });
     expect(res.status).toBe(200);
@@ -934,7 +1041,7 @@ describe("runtimeRoutes log stream bounds (DOCK-10)", () => {
     const logStream = mountLogStream();
     const app = createApp();
 
-    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    const res = await app.request("http://localhost/api/logs/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?tail=100");
     expect(res.status).toBe(200);
 
     // Eight frames of one repeated character, no newline anywhere: exactly the
@@ -983,7 +1090,7 @@ describe("runtimeRoutes log stream bounds (DOCK-10)", () => {
     const logStream = mountLogStream();
     const app = createApp();
 
-    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    const res = await app.request("http://localhost/api/logs/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?tail=100");
     expect(res.status).toBe(200);
 
     // The endless-line case flushes at the cap because the cap is reached
@@ -1018,7 +1125,7 @@ describe("runtimeRoutes log stream bounds (DOCK-10)", () => {
     const logStream = mountLogStream();
     const app = createApp();
 
-    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    const res = await app.request("http://localhost/api/logs/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?tail=100");
     expect(res.status).toBe(200);
 
     // `truncated` means "this piece is a mid-line fragment, more is coming".
@@ -1058,7 +1165,7 @@ describe("runtimeRoutes log stream bounds (DOCK-10)", () => {
     const logStream = mountLogStream();
     const app = createApp();
 
-    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    const res = await app.request("http://localhost/api/logs/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?tail=100");
     expect(res.status).toBe(200);
 
     // A container that writes exactly one cap's worth and then stops, with no
@@ -1081,7 +1188,7 @@ describe("runtimeRoutes log stream bounds (DOCK-10)", () => {
     const logStream = mountLogStream();
     const app = createApp();
 
-    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    const res = await app.request("http://localhost/api/logs/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?tail=100");
     expect(res.status).toBe(200);
 
     // The general case, and a loss that predates any of the buffering work:
@@ -1100,7 +1207,7 @@ describe("runtimeRoutes log stream bounds (DOCK-10)", () => {
     const logStream = mountLogStream();
     const app = createApp();
 
-    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    const res = await app.request("http://localhost/api/logs/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?tail=100");
     expect(res.status).toBe(200);
 
     // Above the pause mark but below the hard cap, so this exercises flow
@@ -1137,7 +1244,7 @@ describe("runtimeRoutes log stream bounds (DOCK-10)", () => {
     const logStream = mountLogStream();
     const app = createApp();
 
-    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    const res = await app.request("http://localhost/api/logs/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?tail=100");
     expect(res.status).toBe(200);
 
     // One Docker chunk that expands past the hard cap. The source can only be

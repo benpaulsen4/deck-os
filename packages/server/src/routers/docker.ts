@@ -15,7 +15,7 @@ import { AppIdSchema } from "../lib/schema.js";
  * ownership checks compare ids exactly - accepting the short form `docker ps`
  * prints would validate and then always fail those comparisons.
  */
-const ContainerIdSchema = z.string().regex(/^[0-9a-f]{64}$/, "Invalid container id");
+export const ContainerIdSchema = z.string().regex(/^[0-9a-f]{64}$/, "Invalid container id");
 
 /**
  * Runs `fn` under the app's lock, surfacing a contended lock as CONFLICT rather
