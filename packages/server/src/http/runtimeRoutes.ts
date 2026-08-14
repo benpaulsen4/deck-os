@@ -524,7 +524,15 @@ export function registerRuntimeRoutes(app: Hono) {
           logStream.pause();
         }
 
-        void drain();
+        // Dormant today: `writeSSE` cannot reject here, since Hono's `write`
+        // swallows every writer error and its only throw path is CR/LF
+        // validation on `event`/`id`, both hardcoded safe above. Caught anyway
+        // because this loop is detached -- an unhandled rejection here would
+        // take down the whole process, every route and every other container's
+        // log stream with it, not just this one connection.
+        void drain().catch((err) => {
+          console.error("[deckos] Log stream write queue failed:", err);
+        });
       };
 
       // --- line assembly ---------------------------------------------------
@@ -558,16 +566,26 @@ export function registerRuntimeRoutes(app: Hono) {
       // endless line would otherwise grow this without limit. Flushing (rather
       // than discarding) means the bound costs line framing and never bytes --
       // the client gets every character, marked as a continuation.
+      //
+      // The flush happens on the way *in*, only once there is more content to
+      // add, rather than eagerly the moment the buffer fills. That is what
+      // makes `truncated` honest: a line whose length is an exact multiple of
+      // the cap is full and complete at the same instant, and flushing eagerly
+      // would label the finished line a continuation of something that never
+      // follows. Deferring means a full buffer is only ever declared truncated
+      // once a further character proves the line really does continue -- which
+      // also covers the case where that character arrives in a later chunk, so
+      // a caller-supplied "this range ends at a newline" flag could not.
       const appendPendingLine = (text: string, from: number, to: number) => {
         let offset = from;
         while (offset < to) {
+          if (pendingLineChars >= LOG_LINE_MAX_CHARS) {
+            emitLine(takePendingLine(), true);
+          }
           const take = Math.min(LOG_LINE_MAX_CHARS - pendingLineChars, to - offset);
           pendingLine.push(text.slice(offset, offset + take));
           pendingLineChars += take;
           offset += take;
-          if (pendingLineChars >= LOG_LINE_MAX_CHARS) {
-            emitLine(takePendingLine(), true);
-          }
         }
       };
 

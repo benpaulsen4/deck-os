@@ -922,8 +922,11 @@ describe("runtimeRoutes log stream bounds (DOCK-10)", () => {
     expect(filler.reduce((total, payload) => total + payload.line.length, 0)).toBe(
       frameChars * frameCount
     );
-    // Every piece that is a continuation rather than a real line says so.
-    expect(filler.every((payload) => payload.truncated === true)).toBe(true);
+    // Every piece that is a continuation says so -- and only those. The last
+    // piece is terminated by the newline in the marker frame that follows it,
+    // so it ends a real line and must not claim a continuation.
+    expect(filler.slice(0, -1).every((payload) => payload.truncated === true)).toBe(true);
+    expect(filler.at(-1)?.truncated).toBeUndefined();
     expect(lines.some((payload) => payload.line === "TAIL")).toBe(true);
   });
 
@@ -960,6 +963,46 @@ describe("runtimeRoutes log stream bounds (DOCK-10)", () => {
     // The final piece completes a real line, so it is not a continuation.
     expect(filler.at(-1)?.truncated).toBeUndefined();
     expect(lines.some((payload) => payload.line === "TAIL")).toBe(true);
+  });
+
+  test("does not mark a complete line as truncated when its length is an exact multiple of the cap", async () => {
+    const logStream = mountLogStream();
+    const app = createApp();
+
+    const res = await app.request("http://localhost/api/logs/container-1?tail=100");
+    expect(res.status).toBe(200);
+
+    // `truncated` means "this piece is a mid-line fragment, more is coming".
+    // A line that ends exactly on the cap is the case where the buffer is full
+    // and complete at the same instant, so the flush must not claim a
+    // continuation that never arrives. The other bound tests deliberately land
+    // off the boundary, which is why this needs its own case.
+    logStream.write(dockerFrame(`${"b".repeat(LOG_LINE_MAX_CHARS)}\n`));
+    logStream.write(dockerFrame(`${"c".repeat(LOG_LINE_MAX_CHARS * 2)}\nTAIL\n`));
+
+    const events = await collectSse(res, {
+      until: (collected) =>
+        parsedLines(collected).some((payload) => payload.line === "TAIL"),
+      maxReads: 200,
+    });
+
+    const lines = parsedLines(events);
+
+    // Exactly one cap's worth, complete: one piece, and not a continuation.
+    const single = lines.filter((payload) => payload.line.startsWith("b"));
+    expect(single).toHaveLength(1);
+    expect(single[0]?.line.length).toBe(LOG_LINE_MAX_CHARS);
+    expect(single[0]?.truncated).toBeUndefined();
+
+    // Two caps' worth, complete: the first piece really is a fragment, the
+    // second one ends the line and must not be flagged.
+    const doubled = lines.filter((payload) => payload.line.startsWith("c"));
+    expect(doubled).toHaveLength(2);
+    expect(doubled[0]?.truncated).toBe(true);
+    expect(doubled[1]?.truncated).toBeUndefined();
+    expect(doubled.reduce((total, payload) => total + payload.line.length, 0)).toBe(
+      LOG_LINE_MAX_CHARS * 2
+    );
   });
 
   test("pauses the docker log stream while queued writes are ahead of the client", async () => {
