@@ -6,6 +6,7 @@ import { renderWithAppRouter } from "../../test/helpers/router";
 type MockDirectoryListing = {
   cwd: string;
   parent: string | null;
+  truncated?: boolean;
   entries: Array<{
     name: string;
     path: string;
@@ -13,6 +14,8 @@ type MockDirectoryListing = {
     size: number | null;
     modifiedAt: string;
     createdAt: string;
+    isSymlink?: boolean;
+    linkTarget?: string | null;
   }>;
 };
 
@@ -368,6 +371,64 @@ describe("files route", () => {
     expect(screen.getByText("Selected: 1")).toBeInTheDocument();
     fireEvent.click(screen.getByText("note.txt"));
     expect(await screen.findByText("Back")).toBeInTheDocument();
+  });
+
+  it("badges a symlinked entry and names its target in the row title", async () => {
+    // isSymlink/linkTarget come back on every entry (FILE-3) and were
+    // previously ignored entirely -- a symlinked file looked identical to an
+    // ordinary one.
+    state.listResults[""] = {
+      cwd: "C:\\",
+      parent: null,
+      entries: [
+        {
+          name: "linked.txt",
+          path: "C:\\linked.txt",
+          type: "file",
+          size: 64,
+          modifiedAt: "2026-01-01T00:00:00.000Z",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          isSymlink: true,
+          linkTarget: "C:\\real\\target.txt",
+        },
+      ],
+    };
+
+    renderWithAppRouter({ initialEntries: ["/files"] });
+    await screen.findByText("linked.txt");
+
+    expect(screen.getByText("LINK")).toBeInTheDocument();
+    const row = screen.getByText("linked.txt").closest("tr");
+    expect(row).toHaveAttribute("title", expect.stringContaining("C:\\real\\target.txt"));
+  });
+
+  it("warns when a directory listing is truncated", async () => {
+    // `truncated` comes back on files.list and was previously ignored, so a
+    // directory past MAX_LIST_ENTRIES silently looked complete.
+    state.listResults[""] = {
+      cwd: "C:\\",
+      parent: null,
+      truncated: true,
+      entries: [
+        {
+          name: "note.txt",
+          path: "C:\\note.txt",
+          type: "file",
+          size: 64,
+          modifiedAt: "2026-01-01T00:00:00.000Z",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    };
+
+    renderWithAppRouter({ initialEntries: ["/files"] });
+    expect(await screen.findByText(/more items than can be shown/i)).toBeInTheDocument();
+  });
+
+  it("does not warn when a directory listing is not truncated", async () => {
+    renderWithAppRouter({ initialEntries: ["/files"] });
+    await screen.findByText("note.txt");
+    expect(screen.queryByText(/more items than can be shown/i)).not.toBeInTheDocument();
   });
 
   it("handles upload and confirmation-gated delete flows", async () => {

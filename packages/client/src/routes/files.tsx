@@ -211,6 +211,30 @@ function getPreviewTypeLabel(pathValue: string, mimeType: string): string {
   return `${extension.toUpperCase()} file`;
 }
 
+// `isSymlink` / `linkTarget` come back on every entry (FILE-3). `linkTarget` can
+// still be null for a symlink whose destination doesn't resolve (a broken link).
+function getSymlinkTitle(entry: { isSymlink: boolean; linkTarget: string | null }):
+  | string
+  | undefined {
+  if (!entry.isSymlink) {
+    return undefined;
+  }
+  return entry.linkTarget ? `Symlink → ${entry.linkTarget}` : "Symlink (target unavailable)";
+}
+
+const symlinkBadgeStyle: React.CSSProperties = {
+  marginLeft: "2px",
+  flexShrink: 0,
+  fontSize: "10px",
+  fontWeight: 500,
+  letterSpacing: "0.04em",
+  textTransform: "uppercase",
+  color: "var(--text-secondary)",
+  border: "1px solid var(--border-active)",
+  borderRadius: 2,
+  padding: "0 4px",
+};
+
 type FileListEntry = {
   name: string;
   type: "directory" | "file" | "symlink" | "other";
@@ -913,10 +937,13 @@ function FilesPage() {
         error?: string;
         uploaded?: string[];
       } | null;
-      // The server always names exactly which files landed on disk, on both
-      // success and partial failure (#17). A 33-file upload that writes 32
-      // and 400s still reports `uploaded` with those 32 names -- diff that
-      // against the files we sent to name the ones that didn't.
+      // `uploaded` is populated on every response where at least one file may
+      // have been written to disk (#17): a 33-file upload that writes 32 and
+      // 400s still reports `uploaded` with those 32 names -- diff that against
+      // the files we sent to name the ones that didn't. Requests rejected
+      // before any writing could start (missing destination, wrong
+      // content-type, empty body, no files present) omit `uploaded` instead,
+      // which falls through to the plain error branch below.
       const uploaded = payload?.uploaded;
       if (uploaded) {
         const uploadedSet = new Set(uploaded);
@@ -1383,6 +1410,15 @@ function FilesPage() {
             onChange={handleUploadInputChange}
           />
 
+          {listQuery.data?.truncated && (
+            <div className="files-viewer-warning">
+              <span>
+                This directory has more items than can be shown; the listing is
+                incomplete.
+              </span>
+            </div>
+          )}
+
           {listQuery.error ? (
             <div className="files-error">
               <span>{listQuery.error.message}</span>
@@ -1424,6 +1460,7 @@ function FilesPage() {
                           }
                         }}
                         className={`files-row ${selectedPathSet.has(entry.path) ? "files-row--selected" : ""}`}
+                        title={getSymlinkTitle(entry)}
                         onClick={(event) => handleItemClick(entry, event)}
                         onMouseDown={(event) => {
                           if (event.shiftKey) {
@@ -1444,6 +1481,9 @@ function FilesPage() {
                               ? renderEntryIcon(entry, 14)
                               : renderEntryIcon(entry, 14)}
                             <span>{entry.name}</span>
+                            {entry.isSymlink && (
+                              <span style={symlinkBadgeStyle}>LINK</span>
+                            )}
                           </div>
                         </td>
                         <td>{getEntryTypeLabel(entry)}</td>
@@ -1475,6 +1515,7 @@ function FilesPage() {
                       }
                     }}
                     className={`files-grid-item ${selectedPathSet.has(entry.path) ? "files-grid-item--selected" : ""}`}
+                    title={getSymlinkTitle(entry)}
                     onClick={(event) => handleItemClick(entry, event)}
                     onMouseDown={(event) => {
                       if (event.shiftKey) {
@@ -1490,7 +1531,10 @@ function FilesPage() {
                     }}
                   >
                     <div className="files-grid-icon">{renderEntryIcon(entry, 18)}</div>
-                    <div className="files-grid-name">{entry.name}</div>
+                    <div className="files-grid-name">
+                      {entry.name}
+                      {entry.isSymlink && <span style={symlinkBadgeStyle}>LINK</span>}
+                    </div>
                     <div className="files-grid-meta">{getEntryTypeLabel(entry)}</div>
                   </button>
                 ))
