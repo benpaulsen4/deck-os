@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useTRPC, trpcClient } from "../../../trpc";
 import { AppIcon } from "../../../components/ui/AppIcon";
@@ -32,30 +32,31 @@ function TemplateDetailPage() {
   const [isPulling, setIsPulling] = useState(false);
   const [deployMode, setDeployMode] = useState<"deploy" | "deployStart">("deploy");
 
+  const seededTemplateId = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!tpl) return;
+    if (!tpl || seededTemplateId.current === tpl.id) return;
+    seededTemplateId.current = tpl.id;
 
-    if (!name) setName(tpl.title);
-    if (!description) setDescription(tpl.description || "");
-    if (!icon) setIcon(tpl.icon || "");
+    setName(tpl.title);
+    setDescription(tpl.description || "");
+    setIcon(tpl.icon || "");
 
-    let initialParams: Record<string, string> | null = null;
-    if (!Object.keys(params).length) {
-      initialParams = {};
-      for (const p of tpl.parameters ?? []) {
-        if (p.defaultValue !== undefined) initialParams[p.key] = p.defaultValue;
-        else initialParams[p.key] = "";
-      }
-      setParams(initialParams);
+    const initialParams: Record<string, string> = {};
+    for (const p of tpl.parameters ?? []) {
+      initialParams[p.key] = p.defaultValue ?? "";
     }
+    setParams(initialParams);
 
-    if (!url) {
-      const host = window.location.hostname;
-      const values = { ...(initialParams ?? params), DECKOS_HOST: host };
-      const computed = renderStringTemplate(tpl.webUrlTemplate || "", values);
-      if (computed) setUrl(computed);
-    }
-  }, [tpl, name, description, icon, url, params]);
+    const host = window.location.hostname;
+    const values = { ...initialParams, DECKOS_HOST: host };
+    const computed = renderStringTemplate(tpl.webUrlTemplate || "", values);
+    if (computed) setUrl(computed);
+    // Only the template identity may retrigger seeding. Including the
+    // fields it sets (as the previous version did) is what made the form
+    // fight the user, and re-seeded a brand-new {} forever whenever a
+    // template shipped with no parameters (CLI-2, CLI-3).
+  }, [tpl]);
 
   const renderedCompose = useMemo(() => {
     if (!tpl) return "";
