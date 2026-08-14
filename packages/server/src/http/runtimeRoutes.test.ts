@@ -908,6 +908,44 @@ describe("runtimeRoutes session lock (AUTH-6)", () => {
     // ran rather than leaving the container log source open.
     expect(destroySpy).toHaveBeenCalled();
   });
+
+  test("clears the metrics subscription when the client disconnects while the initial metrics fetch is still pending", async () => {
+    metricsMock.getCachedMetrics.mockReturnValue(null);
+    let resolveOneShot!: () => void;
+    const oneShotPromise = new Promise<undefined>((resolve) => {
+      resolveOneShot = () => resolve(undefined);
+    });
+    metricsMock.getOneShotMetrics.mockReturnValue(oneShotPromise);
+    const unsubscribe = vi.fn();
+    metricsMock.subscribeToMetrics.mockReturnValue(unsubscribe);
+    const app = createApp();
+
+    vi.useFakeTimers();
+    // No cached metrics, so the handler awaits `getOneShotMetrics()` and then a
+    // 100ms settle delay before it ever calls `subscribeToMetrics()`.
+    const res = await app.request("http://localhost/api/metrics/stream");
+    expect(res.status).toBe(200);
+
+    // Disconnect while `getOneShotMetrics()` is still in flight -- this fires
+    // `stream.abort()` before the handler has reached `subscribeToMetrics()`
+    // or registered any cleanup for the subscription it is about to create.
+    const reader = getResponseReader(res);
+    await reader.cancel();
+
+    // Let the deferred one-shot fetch resolve, then the 100ms settle delay, so
+    // the callback resumes past both awaits and reaches `subscribeToMetrics()`
+    // and the (already-aborted) `withSessionCheck()` registration.
+    resolveOneShot();
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(100);
+    await flushMicrotasks();
+
+    // The subscription this handler creates only after those awaits must still
+    // be torn down: `withSessionCheck`'s synchronous `stream.aborted` guard is
+    // the only thing positioned early enough to catch an abort that already
+    // happened by the time `subscribeToMetrics()` runs.
+    expect(unsubscribe).toHaveBeenCalled();
+  });
 });
 
 describe("runtimeRoutes log stream bounds (DOCK-10)", () => {

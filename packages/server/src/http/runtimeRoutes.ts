@@ -166,10 +166,7 @@ export function registerRuntimeRoutes(app: Hono) {
             console.error("[deckos] Error sending keepalive:", error);
           }
         },
-      });
-
-      stream.onAbort(() => {
-        unsubscribe();
+        onCleanup: () => unsubscribe(),
       });
 
       try {

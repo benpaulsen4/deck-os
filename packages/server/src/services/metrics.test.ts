@@ -162,8 +162,10 @@ describe("metrics service", () => {
   test("subscribing starts the poller and an explicit start without subscribers does not", async () => {
     const { metrics, siMock } = await loadMetricsModule();
 
-    // The SSE handler calls startMetricsPolling() before it subscribes, and can
-    // bail out in between; that must not leave a collector running forever.
+    // No production caller remains -- the SSE handler's call was removed once
+    // polling became refcounted on the subscriber set. The export survives as
+    // this lever: an explicit start with no subscribers must stay a no-op,
+    // and only `subscribeToMetrics()` below should actually start the poller.
     metrics.startMetricsPolling();
     await vi.advanceTimersByTimeAsync(100);
     expect(siMock.currentLoad.mock.calls.length).toBe(0);
