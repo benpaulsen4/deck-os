@@ -373,6 +373,10 @@
 
 .files-symlink-badge {
   flex-shrink: 0;
+  /* Table view separates the badge with `.files-entry-button`'s own flex gap,
+     but `.files-grid-name` is not a flex container -- without this the badge
+     renders flush against the filename in grid view. */
+  margin-left: 2px;
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.04em;
