@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithAppRouter } from "../../test/helpers/router";
@@ -27,6 +27,7 @@ const {
   addToastSpy,
   authFetchSpy,
   scrollIntoViewSpy,
+  invalidateQueriesSpy,
   state,
   forcedTextCache,
 } = vi.hoisted(() => ({
@@ -40,6 +41,11 @@ const {
     addToastSpy: vi.fn(),
     authFetchSpy: vi.fn(),
     scrollIntoViewSpy: vi.fn(),
+    // Hoisted (not a fresh vi.fn() per useQueryClient() call) so call counts
+    // accumulate across renders -- it's how tests observe that
+    // refreshDirectory actually ran, since the mocked useQuery below serves
+    // static `state.listResults` regardless of invalidation.
+    invalidateQueriesSpy: vi.fn(async () => {}),
     state: {
       listResults: {
         "": {
@@ -175,7 +181,7 @@ vi.mock("@tanstack/react-query", async () => {
   return {
     ...actual,
     useQueryClient: () => ({
-      invalidateQueries: vi.fn(async () => {}),
+      invalidateQueries: invalidateQueriesSpy,
     }),
     useMutation: (opts: { mutationFn: (...args: unknown[]) => Promise<unknown> }) => ({
       isPending: false,
@@ -244,6 +250,8 @@ describe("files route", () => {
     addToastSpy.mockReset();
     authFetchSpy.mockReset();
     scrollIntoViewSpy.mockReset();
+    invalidateQueriesSpy.mockReset();
+    invalidateQueriesSpy.mockResolvedValue(undefined);
     authFetchSpy.mockResolvedValue({ ok: true, json: async () => ({}) });
     state.listResults = {
       "": {
@@ -379,6 +387,75 @@ describe("files route", () => {
     await waitFor(() => expect(deleteSpy).toHaveBeenCalledWith({ path: "C:\\note.txt" }));
   });
 
+  it("continues past a failed delete, names the failed item, and still refreshes", async () => {
+    // Select five, the third is permission-denied: files 1-2 and 4-5 must
+    // still be attempted (no early exit from the loop), and the listing must
+    // still refresh even though one item failed -- otherwise the table keeps
+    // listing an entry that's already gone from disk.
+    state.listResults[""] = {
+      cwd: "C:\\",
+      parent: null,
+      entries: [1, 2, 3, 4, 5].map((n) => ({
+        name: `file${n}.txt`,
+        path: `C:\\file${n}.txt`,
+        type: "file" as const,
+        size: 10,
+        modifiedAt: "2026-01-01T00:00:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      })),
+    };
+    deleteSpy
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("EACCES"))
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({});
+
+    renderWithAppRouter({ initialEntries: ["/files"] });
+
+    fireEvent.click(await screen.findByText("file1.txt"));
+    fireEvent.click(screen.getByText("file5.txt"), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+
+    await waitFor(() => expect(deleteSpy).toHaveBeenCalledTimes(5));
+    expect(deleteSpy).toHaveBeenNthCalledWith(3, { path: "C:\\file3.txt" });
+    await waitFor(() =>
+      expect(addToastSpy).toHaveBeenCalledWith(
+        "Deleted 4 of 5 item(s); 1 failed: file3.txt",
+        "error"
+      )
+    );
+    expect(invalidateQueriesSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues past a rejected upload response and names the file that didn't land", async () => {
+    // A partial upload failure still returns 400, but the payload's `uploaded`
+    // array names exactly which files did land -- diff that against what was
+    // sent to report which one didn't, and refresh regardless of the status.
+    authFetchSpy.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: "Total upload size exceeded", uploaded: ["a.txt"] }),
+    });
+
+    const { container } = renderWithAppRouter({ initialEntries: ["/files"] });
+    await screen.findByText("Files");
+    const dropTarget = container.querySelector(".files-main") as HTMLElement;
+    const fileA = new File(["a"], "a.txt", { type: "text/plain" });
+    const fileB = new File(["b"], "b.txt", { type: "text/plain" });
+    fireEvent.drop(dropTarget, { dataTransfer: { files: [fileA, fileB] } });
+
+    await waitFor(() => expect(authFetchSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(addToastSpy).toHaveBeenCalledWith(
+        "Uploaded 1 of 2 item(s); 1 failed: b.txt",
+        "error"
+      )
+    );
+    expect(invalidateQueriesSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("validates copy cut paste behaviors including same-path protection", async () => {
     renderWithAppRouter({ initialEntries: ["/files"] });
     fireEvent.click(await screen.findByText("note.txt"));
@@ -391,6 +468,66 @@ describe("files route", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cut" }));
     fireEvent.click(screen.getByRole("button", { name: "Paste" }));
     await waitFor(() => expect(moveSpy).not.toHaveBeenCalled());
+  });
+
+  it("continues past a failed move mid-paste, names the failed item, and still refreshes", async () => {
+    // Cut three files from root, paste into a different folder; the second
+    // move fails. A partially-completed cut must not leave the source files
+    // gone but still listed -- the loop must finish and the listing refresh.
+    state.listResults[""] = {
+      cwd: "C:\\",
+      parent: null,
+      entries: [
+        {
+          name: "dest",
+          path: "C:\\dest",
+          type: "directory" as const,
+          size: null,
+          modifiedAt: "2026-01-01T00:00:00.000Z",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+        ...[1, 2, 3].map((n) => ({
+          name: `file${n}.txt`,
+          path: `C:\\file${n}.txt`,
+          type: "file" as const,
+          size: 10,
+          modifiedAt: "2026-01-01T00:00:00.000Z",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        })),
+      ],
+    };
+    state.listResults["C:\\dest"] = { cwd: "C:\\dest", parent: "C:\\", entries: [] };
+    moveSpy
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("EBUSY"))
+      .mockResolvedValueOnce({});
+
+    const { container } = renderWithAppRouter({ initialEntries: ["/files"] });
+    await screen.findByText("file1.txt");
+    // "dest" is a directory, so it also renders in the sidebar's directory
+    // tree; scope to the main listing panel to find the row for it.
+    const mainPanel = container.querySelector(".files-main") as HTMLElement;
+
+    fireEvent.click(screen.getByText("file1.txt"));
+    fireEvent.click(screen.getByText("file3.txt"), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Cut" }));
+    fireEvent.doubleClick(within(mainPanel).getByText("dest"));
+    await waitFor(() => expect(screen.getByDisplayValue("C:\\dest")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Paste" }));
+
+    await waitFor(() => expect(moveSpy).toHaveBeenCalledTimes(3));
+    expect(moveSpy).toHaveBeenNthCalledWith(2, {
+      sourcePath: "C:\\file2.txt",
+      targetPath: "C:\\dest\\file2.txt",
+    });
+    await waitFor(() =>
+      expect(addToastSpy).toHaveBeenCalledWith(
+        "Pasted 2 of 3 item(s); 1 failed: file2.txt",
+        "error"
+      )
+    );
+    expect(invalidateQueriesSpy).toHaveBeenCalledTimes(1);
   });
 
   it("initializes the directory from a folder deep link", async () => {

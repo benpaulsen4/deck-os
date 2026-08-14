@@ -701,6 +701,22 @@ function FilesPage() {
     addToast(message, "error");
   };
 
+  // Shared by handleDelete, handlePasteClipboard and uploadFiles: all three run
+  // a bulk operation over several items and must report which ones failed by
+  // name rather than just "N failed" -- a user who deletes five files and is
+  // told one failed still has to find it themselves otherwise.
+  const reportBulkOutcome = (verb: string, succeeded: number, failedNames: string[]) => {
+    const total = succeeded + failedNames.length;
+    if (failedNames.length === 0) {
+      addToast(`${verb} ${total} item(s)`, "success");
+      return;
+    }
+    addToast(
+      `${verb} ${succeeded} of ${total} item(s); ${failedNames.length} failed: ${failedNames.join(", ")}`,
+      "error"
+    );
+  };
+
   const handlePathSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = pathInput.trim();
@@ -772,16 +788,27 @@ function FilesPage() {
     if (selectedPaths.length === 0) {
       return;
     }
+    const failed: string[] = [];
     try {
       for (const targetPath of selectedPaths) {
-        await deleteMutation.mutateAsync(targetPath);
+        try {
+          await deleteMutation.mutateAsync(targetPath);
+        } catch {
+          failed.push(getDisplayName(targetPath));
+        }
       }
-      addToast(`Deleted ${selectedPaths.length} item(s)`, "success");
+      reportBulkOutcome("Deleted", selectedPaths.length - failed.length, failed);
       setSelectedPaths([]);
       setDeleteConfirmOpen(false);
-      await refreshDirectory();
-    } catch (error) {
-      withOperationErrorToast(error, "Failed to delete");
+    } finally {
+      // The outcome toast above is already the meaningful signal; a refresh
+      // failure here would otherwise land as a second, confusing toast on
+      // top of it, and a stale listing self-corrects on the next navigation.
+      try {
+        await refreshDirectory();
+      } catch {
+        /* swallow: see comment above */
+      }
     }
   };
 
@@ -801,24 +828,36 @@ function FilesPage() {
       return;
     }
     let pastedCount = 0;
-    for (const sourcePath of clipboard.paths) {
-      const targetPath = joinChildPath(currentPath, getDisplayName(sourcePath));
-      if (normalizePathForCompare(targetPath) === normalizePathForCompare(sourcePath)) {
-        continue;
+    const failed: string[] = [];
+    try {
+      for (const sourcePath of clipboard.paths) {
+        const targetPath = joinChildPath(currentPath, getDisplayName(sourcePath));
+        if (normalizePathForCompare(targetPath) === normalizePathForCompare(sourcePath)) {
+          continue;
+        }
+        try {
+          if (clipboard.mode === "copy") {
+            await copyMutation.mutateAsync({ sourcePath, targetPath });
+          } else {
+            await moveMutation.mutateAsync({ sourcePath, targetPath });
+          }
+          pastedCount += 1;
+        } catch {
+          failed.push(getDisplayName(sourcePath));
+        }
       }
-      if (clipboard.mode === "copy") {
-        await copyMutation.mutateAsync({ sourcePath, targetPath });
-      } else {
-        await moveMutation.mutateAsync({ sourcePath, targetPath });
+      if (clipboard.mode === "cut") {
+        setClipboard(null);
       }
-      pastedCount += 1;
+      setSelectedPaths([]);
+      reportBulkOutcome("Pasted", pastedCount, failed);
+    } finally {
+      try {
+        await refreshDirectory();
+      } catch {
+        /* swallow: see handleDelete */
+      }
     }
-    if (clipboard.mode === "cut") {
-      setClipboard(null);
-    }
-    setSelectedPaths([]);
-    addToast(`Pasted ${pastedCount} item(s)`, "success");
-    await refreshDirectory();
   };
 
   const handleSaveText = async () => {
@@ -870,16 +909,34 @@ function FilesPage() {
           body: formData,
         }
       );
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        throw new Error(payload?.error || "Upload failed");
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string;
+        uploaded?: string[];
+      } | null;
+      // The server always names exactly which files landed on disk, on both
+      // success and partial failure (#17). A 33-file upload that writes 32
+      // and 400s still reports `uploaded` with those 32 names -- diff that
+      // against the files we sent to name the ones that didn't.
+      const uploaded = payload?.uploaded;
+      if (uploaded) {
+        const uploadedSet = new Set(uploaded);
+        const failedNames = files
+          .map((file) => file.name)
+          .filter((name) => !uploadedSet.has(name));
+        reportBulkOutcome("Uploaded", uploaded.length, failedNames);
+      } else if (!response.ok) {
+        addToast(payload?.error || "Upload failed", "error");
+      } else {
+        addToast("Upload complete", "success");
       }
-      addToast("Upload complete", "success");
-      await refreshDirectory();
     } catch (error) {
       withOperationErrorToast(error, "Failed to upload files");
+    } finally {
+      try {
+        await refreshDirectory();
+      } catch {
+        /* swallow: see handleDelete */
+      }
     }
   };
 
