@@ -79,9 +79,9 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      # Regression guard for the dependency overrides in package.json /
-      # pnpm-workspace.yaml: if an override stops matching, the advisory it was
-      # suppressing comes back and this fails.
+      # Regression guard for the dependency overrides in pnpm-workspace.yaml:
+      # if an override stops matching, the advisory it was suppressing comes
+      # back and this fails.
       #
       # Gated at `high` so a newly published low or moderate advisory against
       # some transitive dependency cannot turn main red on an unrelated PR with

@@ -41,6 +41,10 @@ allowBuilds:
   ssh2: false
 
 overrides:
+  # Forward guard, currently inert: the only consumer is protobufjs 7.6.5,
+  # which already asks for ^1.1.1, so nothing in the tree can resolve to the
+  # range this suppresses. Kept so a future transitive edge cannot reintroduce
+  # it silently.
   "@protobufjs/utf8@<=1.1.0": ">=1.1.1"
   "@babel/core": "^7.29.7"
   "@grpc/grpc-js": "^1.14.4"
