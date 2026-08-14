@@ -28,6 +28,7 @@ const {
   authFetchSpy,
   scrollIntoViewSpy,
   state,
+  forcedTextCache,
 } = vi.hoisted(() => ({
     setPinsSpy: vi.fn(async () => ({})),
     mkdirSpy: vi.fn(async () => ({})),
@@ -81,6 +82,17 @@ const {
       meta: { mimeType: "text/plain", size: 2048 },
       text: { content: "hello", truncated: true, readOnlySuggested: true },
     },
+    // Keyed by `state.text` so the `useQuery` mock hands back a stable object
+    // identity across re-renders while forceEditable is true. Without this,
+    // every render would build a fresh `{...state.text, readOnlySuggested:
+    // false}`, and the effect that seeds the editor from `readTextQuery.data`
+    // (keyed on that object identity) would fire on every render, wiping out
+    // any edit the test just made and making the truncation gate impossible
+    // to exercise from a test.
+    forcedTextCache: new WeakMap<
+      { content: string; truncated: boolean; readOnlySuggested: boolean },
+      { content: string; truncated: boolean; readOnlySuggested: false }
+    >(),
   }));
 
 vi.mock("../../hooks/useAuthGate", () => ({
@@ -141,6 +153,21 @@ vi.mock("../../trpc", () => ({
   },
 }));
 
+vi.mock("../../components/ui/CodeEditor", () => ({
+  CodeEditor: (props: {
+    value: string;
+    onChange: (value: string) => void;
+    readonly?: boolean;
+  }) => (
+    <textarea
+      aria-label="file editor"
+      value={props.value}
+      readOnly={props.readonly}
+      onChange={(event) => props.onChange(event.target.value)}
+    />
+  ),
+}));
+
 vi.mock("@tanstack/react-query", async () => {
   const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
     "@tanstack/react-query"
@@ -176,6 +203,18 @@ vi.mock("@tanstack/react-query", async () => {
         return { data: state.meta, isLoading: false };
       }
       if (key === "files.readText") {
+        // Mirror the server: forceEditable clears readOnlySuggested but never
+        // clears truncated (H1) -- a 10 MB file stays truncated regardless of
+        // who is allowed to edit the 2 MB prefix that got read back.
+        const forceEditable = Boolean(maybe.queryKey?.[2]);
+        if (forceEditable && state.text.readOnlySuggested) {
+          let forced = forcedTextCache.get(state.text);
+          if (!forced) {
+            forced = { ...state.text, readOnlySuggested: false };
+            forcedTextCache.set(state.text, forced);
+          }
+          return { data: forced, isLoading: false };
+        }
         return { data: state.text, isLoading: false };
       }
       return { data: null, isFetching: false, isLoading: false, dataUpdatedAt: Date.now() };
@@ -266,6 +305,30 @@ describe("files route", () => {
     expect(await screen.findByText("Enable Editing")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     fireEvent.click(screen.getByText("Enable Editing"));
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("keeps Save disabled while the content is truncated, even after Enable Editing and an edit", async () => {
+    // Open a 10 MB file: the server caps content at 2 MB and sets truncated.
+    // Enable Editing clears readOnlySuggested but NOT truncated -- a save
+    // would fs.writeFile the 2 MB prefix over the whole file, losing 8 MB
+    // with no undo (CLI-1 / CLI-11).
+    state.meta = { mimeType: "text/plain", size: 10 * 1024 * 1024 };
+    state.text = { content: "x".repeat(2048), truncated: true, readOnlySuggested: true };
+
+    renderWithAppRouter({ initialEntries: ["/files"] });
+    fireEvent.doubleClick(await screen.findByText("note.txt"));
+
+    fireEvent.click(await screen.findByText("Enable Editing"));
+
+    // Without a real edit, Save stays disabled for an unrelated reason
+    // (nothing is dirty), which would let a stale truncated-gate bug hide
+    // behind that unrelated disablement. Make an edit so Save's disabled
+    // state is actually driven by the truncation gate.
+    fireEvent.change(screen.getByLabelText("file editor"), {
+      target: { value: "y".repeat(2048) },
+    });
+
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 

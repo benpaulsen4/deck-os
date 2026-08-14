@@ -892,7 +892,12 @@ function FilesPage() {
   if (viewerPath) {
     const sourceUrl = `/api/files/content?path=${encodeURIComponent(viewerPath)}`;
     const readOnlySuggested = !!readTextQuery.data?.readOnlySuggested;
-    const isTextReadonly = readOnlySuggested && !forceEditable;
+    const truncated = !!readTextQuery.data?.truncated;
+    // `truncated` stays in the gate unconditionally: forcing editability only
+    // clears readOnlySuggested (the server's advisory hint), never the fact
+    // that this content is a partial read. Saving a truncated buffer would
+    // write that prefix over the whole file (CLI-1 / CLI-11).
+    const isTextReadonly = (readOnlySuggested && !forceEditable) || truncated;
     const editorLanguage = fileMetaQuery.data
       ? getEditorLanguage(viewerPath, fileMetaQuery.data.mimeType)
       : "plain";
