@@ -2100,7 +2100,19 @@ async function runJob(job: DiskAnalysisJobInternal): Promise<void> {
 
   try {
     const snapshot = await executeScan(job);
-    if (job.controller.signal.aborted) {
+    // `internalFailure` is checked here too, matching the catch block below:
+    // a worker can throw (setting `internalFailure` and aborting the
+    // controller) while a different worker is mid-`stat` on its directory's
+    // last entry, past the per-entry abort check and about to fall through
+    // the fully synchronous finalize block with no abort check of its own.
+    // That worker's `finalizeNode` cascade can still resolve `done` with a
+    // complete snapshot -- `signal.aborted` alone can no longer tell this
+    // branch apart from a genuine cancellation, so without `internalFailure`
+    // a real internal failure is reported as `cancelled` and its finished
+    // snapshot is silently discarded instead of being published through the
+    // normal completed/partial path below, the same way it would be had no
+    // worker failed at all.
+    if (job.controller.signal.aborted && !job.internalFailure) {
       // Cancelled in the narrow window between the last worker finishing and
       // this line. The result is complete, but the client has already been
       // told the job is `cancelled`, and writing the cache here would publish
