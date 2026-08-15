@@ -1059,6 +1059,42 @@ describe("diskAnalysis service", () => {
     await fs.remove(dataDir);
   });
 
+  test("a path longer than the schema's own cap still produces a parseable issue", async () => {
+    // Finding 1 (final whole-branch review round). `getIssueForFsError` mints
+    // issues straight from whatever path `fs.stat` was given, and a directory
+    // tree deeper than PATH_MAX -- a recursive rsync, or a backup written into
+    // itself -- makes that path exceed the 4096-char cap `AbsolutePathSchema`
+    // enforces. `createIssue` is the one place both `getIssueForFsError` and
+    // every other issue site funnel through, so driving the over-length path
+    // through it (rather than through a live scan, which would need a
+    // filesystem path deeper than most OSes allow to create) exercises the
+    // exact clamp this finding is about. The assertion is a real schema parse,
+    // not a `.length` check -- the schema is the thing that was breaking (an
+    // unparseable event wedges the SSE stream open, per `runtimeRoutes.ts`).
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const diskAnalysis = (await loadDiskAnalysisModule(dataDir)) as DiskAnalysisModule & {
+      createIssue: typeof import("./diskAnalysis.js").createIssue;
+    };
+
+    const overLongPath = `/mnt/${"deep-directory-name/".repeat(250)}file.bin`;
+    expect(overLongPath.length).toBeGreaterThan(4096);
+
+    const issue = diskAnalysis.createIssue(
+      "path-inaccessible",
+      overLongPath,
+      `Path inaccessible: ${overLongPath}`
+    );
+
+    expect(() => DiskAnalysisIssueSchema.parse(issue)).not.toThrow();
+    expect(issue.path.length).toBeLessThanOrEqual(4096);
+    // Truncated from the end, not the start: the leading separator survives,
+    // so the clamped path is still recognisably rooted at the same place.
+    expect(issue.path.startsWith("/mnt/deep-directory-name/")).toBe(true);
+
+    await diskAnalysis.__testing.clearState();
+    await fs.remove(dataDir);
+  });
+
   describe("issue array bound and counter (DISK-1)", () => {
     test.skipIf(process.platform === "win32")(
       "progress events carry an issue count, not an unbounded issue array",

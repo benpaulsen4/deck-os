@@ -661,6 +661,32 @@ function truncateMessage(message: string): string {
   return `${message.slice(0, MAX_ISSUE_MESSAGE_LENGTH - 1)}…`;
 }
 
+/**
+ * The schema caps `path` at 4096 characters (`AbsolutePathSchema`, see
+ * `packages/contracts/src/common.ts`). A directory tree deeper than
+ * `PATH_MAX` -- a recursive rsync or a backup written into itself, a common
+ * enough reason someone opens this page at all -- makes `fs.stat(entryPath)`
+ * fail with `ENAMETOOLONG` on an entry path longer than that, and
+ * `getIssueForFsError` mints an issue carrying that over-length string as
+ * `path`, same as an over-long `message` (see `truncateMessage`) but for the
+ * sibling field. Task B4 removed the emit-path zod parse that used to turn
+ * that into a loud, immediate scan failure; without it, the invalid event
+ * instead fails the schema parse on the SSE write path
+ * (`runtimeRoutes.ts`), which unsubscribes the stream mid-scan and leaves
+ * the browser's `EventSource` open with no more events -- and the invalid
+ * snapshot still gets written to the cache, so every subsequent read
+ * quarantines the file and offers a rescan that reproduces the same
+ * failure. Truncated from the end, not the start, so the leading separator
+ * survives and `isAbsolutePath` still passes.
+ */
+const MAX_ISSUE_PATH_LENGTH = 4096;
+
+function truncateIssuePath(issuePath: string): string {
+  return issuePath.length > MAX_ISSUE_PATH_LENGTH
+    ? issuePath.slice(0, MAX_ISSUE_PATH_LENGTH)
+    : issuePath;
+}
+
 export function createIssue(
   code: DiskAnalysisIssue["code"],
   issuePath: string,
@@ -669,7 +695,7 @@ export function createIssue(
 ): DiskAnalysisIssue {
   return {
     code,
-    path: issuePath,
+    path: truncateIssuePath(issuePath),
     message: truncateMessage(message),
     recoverable,
   };
