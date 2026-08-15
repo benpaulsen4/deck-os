@@ -911,6 +911,13 @@ function DiskAnalysisPage() {
               ) : (
                 <div className="disk-analysis-sidebar-empty">Legend data will appear after scanning.</div>
               )}
+              {/* Finding 4, final whole-branch review: a Borg/rsnapshot/`cp -al`
+                  backup directory shares storage between copies, and the tree
+                  has no other way to say so -- without this, the collapsed
+                  count reads like data loss rather than deduplication. */}
+              <div className="disk-analysis-sidebar-empty">
+                Files that share storage with another copy (hardlinks) are counted once, at their first path.
+              </div>
             </section>
           </aside>
 
