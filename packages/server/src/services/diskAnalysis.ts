@@ -103,6 +103,14 @@ type DiskAnalysisJobInternal = {
    * mattered, the array itself can no longer be trusted to answer this.
    */
   partialResultDetected: boolean;
+  /**
+   * Occurrences whose code is in `PARTIAL_RESULT_CODES`, not the full
+   * `issueCount` total -- see `recordIssue`. This is what the client's
+   * "totals are a lower bound" banner quotes; `issueCount` includes codes
+   * like `symlink-skipped` that are deliberately not partiality signals and
+   * can dwarf the codes that are.
+   */
+  partialIssueCount: number;
   limits: DiskAnalysisResourceLimits;
   controller: AbortController;
   createdAtMs: number;
@@ -596,6 +604,7 @@ function getJobState(job: DiskAnalysisJobInternal): DiskAnalysisJobState {
     progress: job.progress,
     issues: job.issues,
     issueCount: job.issueCount,
+    partialIssueCount: job.partialIssueCount,
     limits: job.limits,
   };
 }
@@ -755,6 +764,16 @@ const PARTIAL_RESULT_CODES = new Set([
  *    never silently dropped by the FIFO cap. If the array is already full
  *    when one arrives, the most recently retained recoverable issue is
  *    evicted to make room for it.
+ *
+ * `job.partialIssueCount` is the occurrence-scoped counterpart of
+ * `partialResultDetected`: it only accumulates for codes in
+ * `PARTIAL_RESULT_CODES`, never for a `recoverable: false` issue whose code
+ * is not itself a partial-result code (that flag alone still flips
+ * `partialResultDetected`, but does not inflate this count -- it is not one
+ * of the "totals are a lower bound" codes). This is the number the client's
+ * partial-scan banner quotes; `job.issueCount` above is a different,
+ * larger total that includes non-partiality-signalling codes like
+ * `symlink-skipped`.
  */
 function recordIssue(
   job: DiskAnalysisJobInternal,
@@ -762,9 +781,13 @@ function recordIssue(
   options?: { nodeIssues?: DiskAnalysisIssue[]; occurrences?: number }
 ): void {
   options?.nodeIssues?.push(issue);
-  job.issueCount += options?.occurrences ?? 1;
+  const occurrences = options?.occurrences ?? 1;
+  job.issueCount += occurrences;
 
-  if (PARTIAL_RESULT_CODES.has(issue.code) || issue.recoverable === false) {
+  if (PARTIAL_RESULT_CODES.has(issue.code)) {
+    job.partialIssueCount += occurrences;
+    job.partialResultDetected = true;
+  } else if (issue.recoverable === false) {
     job.partialResultDetected = true;
   }
 
@@ -1672,6 +1695,7 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
         },
         issues: [...job.issues],
         issueCount: job.issueCount,
+        partialIssueCount: job.partialIssueCount,
         // The same flag `runJob` turns into `phase: "partial"` a moment later
         // (`setJobFinalState(job, hasPartialResult(job) ? "partial" : ...)`),
         // recorded on the snapshot so the client can still say "totals are a
@@ -2262,6 +2286,7 @@ async function ensureJob(
       issues: [],
       issueCount: 0,
       partialResultDetected: false,
+      partialIssueCount: 0,
       limits: getLimits(),
       controller: new AbortController(),
       createdAtMs: Date.now(),
@@ -2489,11 +2514,14 @@ export const __testing = {
    * practical -- every foreseeable fs error along that path is already
    * caught and turned into a normal (recoverable) issue by design, so a
    * `recoverable: false` issue in practice only ever comes from the single
-   * scan-failure call site in `runJob`. The stub only needs the three fields
+   * scan-failure call site in `runJob`. The stub only needs the four fields
    * `recordIssue` actually touches.
    */
   recordIssueForTesting(
-    job: Pick<DiskAnalysisJobInternal, "issues" | "issueCount" | "partialResultDetected">,
+    job: Pick<
+      DiskAnalysisJobInternal,
+      "issues" | "issueCount" | "partialResultDetected" | "partialIssueCount"
+    >,
     issue: DiskAnalysisIssue,
     options?: { nodeIssues?: DiskAnalysisIssue[]; occurrences?: number }
   ): void {

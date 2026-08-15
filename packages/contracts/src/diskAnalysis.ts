@@ -128,6 +128,18 @@ const DiskAnalysisJobStateSchema = z.object({
   // it), so this keeps consumers seeing a plain `number` while still
   // parsing input that predates this field.
   issueCount: z.number().int().nonnegative().default(0),
+  // Finding 2, final whole-branch review: `issueCount` above is the total
+  // across every issue code, including `symlink-skipped`, which B1/B5
+  // deliberately excluded from partiality (see `PARTIAL_RESULT_CODES` in the
+  // service) because a dropped symlink is not a lower bound on the totals.
+  // On an unprivileged scan of a real filesystem, symlinks routinely
+  // outnumber the permission-denied directories that actually made the scan
+  // partial by one to three orders of magnitude, so the "totals are a lower
+  // bound" banner needs a count scoped to the codes that actually mean that
+  // -- this is that count. `.default(0)` for the same reason `issueCount`
+  // carries it: a snapshot or job state from before this field existed must
+  // still parse.
+  partialIssueCount: z.number().int().nonnegative().default(0),
   limits: DiskAnalysisResourceLimitsSchema,
 });
 
@@ -163,6 +175,12 @@ const DiskAnalysisSnapshotSchema = z.object({
   // that parse, and the catch quarantines the file as `.corrupt-<epoch>`,
   // discarding a perfectly good cache entry on every upgrade.
   issueCount: z.number().int().nonnegative().default(0),
+  // Same cap-independent, code-scoped count as
+  // `DiskAnalysisJobStateSchema.partialIssueCount` -- see the comment there.
+  // `.default(0)` is load-bearing here for the same reason it is on
+  // `issueCount` two lines up: this schema is parsed on the cache *read*
+  // path against a JSON file that may predate this field.
+  partialIssueCount: z.number().int().nonnegative().default(0),
   // Whether these totals are a lower bound -- the same fact the job reports as
   // `phase: "partial"`, recorded where it can outlive the job.
   //

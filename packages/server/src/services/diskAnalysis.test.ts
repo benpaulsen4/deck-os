@@ -1350,7 +1350,8 @@ describe("diskAnalysis service", () => {
         issues: DiskAnalysisIssue[];
         issueCount: number;
         partialResultDetected: boolean;
-      } = { issues: [], issueCount: 0, partialResultDetected: false };
+        partialIssueCount: number;
+      } = { issues: [], issueCount: 0, partialResultDetected: false, partialIssueCount: 0 };
       const cap = diskAnalysis.__testing.MAX_RETAINED_ISSUES;
       const overfillCount = cap + 50;
       for (let i = 0; i < overfillCount; i += 1) {
@@ -1380,6 +1381,103 @@ describe("diskAnalysis service", () => {
 
       await diskAnalysis.__testing.clearState();
       await fs.remove(dataDir);
+    });
+
+    test("partialIssueCount counts only the codes that actually mean the totals are a lower bound", async () => {
+      // Finding 2, final whole-branch review. `issueCount` totals every code,
+      // including `symlink-skipped` -- deliberately excluded from partiality
+      // (see `PARTIAL_RESULT_CODES`) because a dropped symlink is not a lower
+      // bound on the totals. On an unprivileged scan of a real filesystem,
+      // symlinks routinely outnumber the permission-denied directories that
+      // actually made the scan partial by one to three orders of magnitude,
+      // so a client reading `issueCount` for the "totals are a lower bound"
+      // banner would overstate it by the same margin. This drives a real mix
+      // -- several aggregated symlink-skipped occurrences plus a small number
+      // of permission-denied ones -- through an actual scan (not a hand-built
+      // job object) and asserts `partialIssueCount` reflects only the latter.
+      //
+      // Synthetic (mocked) symlink entries, not real OS symlinks: the walker
+      // only calls `isSymbolicLink()` before skipping one, so this needs no
+      // elevation and runs the same on every platform.
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+      const symlinkParentName = "many-links";
+      const deniedNames = ["denied-a", "denied-b"];
+      await fs.ensureDir(path.join(mountDir, symlinkParentName));
+      for (const name of deniedNames) {
+        await fs.ensureDir(path.join(mountDir, name));
+      }
+
+      type FakeDirent = {
+        name: string;
+        isSymbolicLink: () => boolean;
+        isDirectory: () => boolean;
+        isFile: () => boolean;
+        isBlockDevice: () => boolean;
+        isCharacterDevice: () => boolean;
+        isFIFO: () => boolean;
+        isSocket: () => boolean;
+      };
+      const fakeSymlink = (name: string): FakeDirent => ({
+        name,
+        isSymbolicLink: () => true,
+        isDirectory: () => false,
+        isFile: () => false,
+        isBlockDevice: () => false,
+        isCharacterDevice: () => false,
+        isFIFO: () => false,
+        isSocket: () => false,
+      });
+
+      const symlinkParentResolved = path.resolve(path.join(mountDir, symlinkParentName));
+      const deniedResolved = new Set(
+        deniedNames.map((name) => path.resolve(path.join(mountDir, name)))
+      );
+      const symlinkCount = 25;
+
+      const originalReaddir = fs.readdir.bind(fs);
+      const readdirSpy = vi
+        .spyOn(fs, "readdir")
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .mockImplementation(async (target: any, options: any): Promise<any> => {
+          const targetPath = path.resolve(
+            typeof target === "string" ? target : String(target)
+          );
+          if (targetPath === symlinkParentResolved) {
+            return Array.from({ length: symlinkCount }, (_, index) =>
+              fakeSymlink(`link${index}`)
+            );
+          }
+          if (deniedResolved.has(targetPath)) {
+            const error = new Error("Permission denied") as NodeJS.ErrnoException;
+            error.code = "EACCES";
+            throw error;
+          }
+          return await originalReaddir(target, options);
+        });
+
+      try {
+        const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+        const mount = { mount: mountDir, fs: "testfs" };
+        const start = await diskAnalysis.startScan(mount);
+        const finished = await waitForTerminalJob(diskAnalysis, start.jobId);
+
+        expect(finished?.phase).toBe("partial");
+        // The total spans both codes: 25 aggregated symlink-skipped
+        // occurrences plus one permission-denied occurrence per denied
+        // directory.
+        expect(finished?.issueCount).toBe(symlinkCount + deniedNames.length);
+        // The point of the test: partialIssueCount must not equal
+        // issueCount here -- it only counts the permission-denied
+        // occurrences, not the symlink-skipped ones alongside them.
+        expect(finished?.partialIssueCount).toBe(deniedNames.length);
+
+        await diskAnalysis.__testing.clearState();
+        await fs.remove(dataDir);
+      } finally {
+        readdirSpy.mockRestore();
+        await fs.remove(mountDir);
+      }
     });
   });
 

@@ -697,12 +697,19 @@ function DiskAnalysisPage() {
   const manualScanLabel = cachedSnapshot ? "Start New Scan" : "Start Scan";
   const showToolbarActions = canStartManualScan || issueList.length > 0;
   // B1/B5: a job reaches "partial" when anything made the totals a lower
-  // bound. `issueCount` counts occurrences rather than retained issue objects,
-  // so it is the honest number here -- but it carries `.default(0)` on the
-  // wire so a snapshot cached before the field existed still parses, and that
-  // combination (partial, count 0) is reachable. "0 directories were
-  // unreadable" would contradict the warning it is attached to, so the
-  // count-free wording covers it.
+  // bound. `partialIssueCount` (final whole-branch review, finding 2) is the
+  // count scoped to the codes that actually mean that -- `PARTIAL_RESULT_CODES`
+  // on the server -- not `issueCount`, which totals every code including
+  // `symlink-skipped`, deliberately excluded from partiality because a
+  // dropped symlink is not a lower bound on the totals. On an unprivileged
+  // scan of a real filesystem, symlinks routinely outnumber the
+  // permission-denied directories that actually made the scan partial by one
+  // to three orders of magnitude, so quoting `issueCount` here would have
+  // overstated the banner by the same margin. `partialIssueCount` carries
+  // `.default(0)` on the wire so a snapshot cached before the field existed
+  // still parses, and that combination (partial, count 0) is reachable. "0
+  // directories were unreadable" would contradict the warning it is attached
+  // to, so the count-free wording covers it.
   //
   // Read from two places on purpose. `activeJob.phase` is the only source
   // while a scan is being watched live, but `getMountState` filters
@@ -713,7 +720,9 @@ function DiskAnalysisPage() {
   // finding 2).
   const isPartialResult = activeJob?.phase === "partial" || currentSnapshot?.partial === true;
   const partialIssueCount =
-    activeJob?.phase === "partial" ? activeJob.issueCount : currentSnapshot?.issueCount ?? 0;
+    activeJob?.phase === "partial"
+      ? activeJob.partialIssueCount
+      : (currentSnapshot?.partialIssueCount ?? 0);
   const partialResultMessage =
     partialIssueCount > 0
       ? `${formatCount(partialIssueCount)} directories were unreadable - totals are a lower bound.`

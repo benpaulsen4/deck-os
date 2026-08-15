@@ -335,6 +335,7 @@ describe("disk analysis route", () => {
         },
         issues: [],
         issueCount: 0,
+        partialIssueCount: 0,
         limits: {
           maxWorkers: 4,
           maxPendingDirectories: 1024,
@@ -363,6 +364,7 @@ describe("disk analysis route", () => {
         },
         issues: [],
         issueCount: 0,
+        partialIssueCount: 0,
         partial: false,
       },
     };
@@ -484,6 +486,7 @@ describe("disk analysis route", () => {
         },
         issues: [],
         issueCount: 0,
+        partialIssueCount: 0,
         partial: false,
       },
     };
@@ -585,6 +588,7 @@ describe("disk analysis route", () => {
         },
         issues: [],
         issueCount: 0,
+        partialIssueCount: 0,
         limits: {
           maxWorkers: 4,
           maxPendingDirectories: 1024,
@@ -665,6 +669,7 @@ describe("disk analysis route", () => {
         },
         issues: [],
         issueCount: 0,
+        partialIssueCount: 0,
         partial: false,
       },
     };
@@ -713,6 +718,7 @@ describe("disk analysis route", () => {
         },
         issues: [],
         issueCount: 0,
+        partialIssueCount: 0,
         partial: false,
       },
     };
@@ -785,6 +791,7 @@ describe("disk analysis route", () => {
         },
         issues: [{ code: "permission-denied", path: "C:\\restricted", message: "Denied", recoverable: true }],
         issueCount: 1,
+        partialIssueCount: 1,
         partial: false,
       },
     };
@@ -844,6 +851,7 @@ describe("disk analysis route", () => {
         },
         issues: manyIssues,
         issueCount: manyIssues.length,
+        partialIssueCount: manyIssues.length,
         partial: false,
       },
     };
@@ -1040,6 +1048,7 @@ describe("disk analysis route", () => {
         },
         issues: [],
         issueCount: 0,
+        partialIssueCount: 0,
         partial: false,
       },
     });
@@ -1066,6 +1075,7 @@ describe("disk analysis route", () => {
         ...activeJob,
         phase: "partial",
         issueCount: 12,
+        partialIssueCount: 12,
       },
       snapshot: {
         mount: { mount: "C:\\", fs: "ntfs" },
@@ -1079,6 +1089,7 @@ describe("disk analysis route", () => {
         },
         issues: [],
         issueCount: 12,
+        partialIssueCount: 12,
         partial: true,
       },
     });
@@ -1117,6 +1128,7 @@ describe("disk analysis route", () => {
         totals: { totalBytes: 256, totalFiles: 1, totalDirectories: 1 },
         issues: [],
         issueCount: 12,
+        partialIssueCount: 12,
         partial: true,
       },
     };
@@ -1158,6 +1170,7 @@ describe("disk analysis route", () => {
         totals: { totalBytes: 256, totalFiles: 1, totalDirectories: 1 },
         issues: [],
         issueCount: 0,
+        partialIssueCount: 0,
         partial: true,
       },
     };
@@ -1168,6 +1181,67 @@ describe("disk analysis route", () => {
       await screen.findByText("Some directories were unreadable - totals are a lower bound.")
     ).toBeInTheDocument();
     expect(screen.queryByText(/0 directories were unreadable/)).not.toBeInTheDocument();
+  });
+
+  it("quotes the permission-denied count in the partial banner, not the symlink-inflated total", async () => {
+    // Finding 2, final whole-branch review. The three banner tests above
+    // inject a synthetic `issueCount` with no issue mix behind it, which is
+    // exactly why a banner reading the wrong field went unnoticed: on a
+    // trivial single-value fixture, "the total" and "the partial-signalling
+    // subset" happen to be the same number. This drives a realistic mix --
+    // many aggregated symlink-skipped occurrences (deliberately excluded from
+    // partiality, see `PARTIAL_RESULT_CODES` on the server) plus a small
+    // number of permission-denied ones (the actual reason the scan is
+    // partial) -- and asserts the banner quotes the small, accurate number,
+    // not the large, symlink-inflated total. `issueCount` and
+    // `partialIssueCount` are set the way a real scan would compute them
+    // (`recordIssue` on the server), not hand-picked to make the assertion
+    // trivially pass.
+    const symlinkOccurrences = 340;
+    const permissionDeniedCount = 3;
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      activeJob: null,
+    };
+    state.snapshotEnvelope = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      snapshot: {
+        mount: { mount: "C:\\", fs: "ntfs" },
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        root: makeDirectory("C:\\", [makeFile("C:\\usr-lib.so", 128, "so")]),
+        extensionLegend: [{ extension: "so", colorToken: "disk-ext-1", count: 1, totalBytes: 128 }],
+        totals: { totalBytes: 128, totalFiles: 1, totalDirectories: 1 },
+        issues: Array.from({ length: permissionDeniedCount }, (_, index) => ({
+          code: "permission-denied" as const,
+          path: `C:\\restricted\\folder-${index}`,
+          message: `Permission denied: C:\\restricted\\folder-${index}`,
+          recoverable: true,
+        })),
+        // The total spans both codes -- what `issueCount` is for.
+        issueCount: symlinkOccurrences + permissionDeniedCount,
+        // Only the permission-denied occurrences count toward partiality --
+        // what the banner must read instead.
+        partialIssueCount: permissionDeniedCount,
+        partial: true,
+      },
+    };
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    expect(
+      await screen.findByText("3 directories were unreadable - totals are a lower bound.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/343 directories were unreadable/)).not.toBeInTheDocument();
   });
 
   it("builds the live tree against the server's mount, not the raw search param", async () => {
