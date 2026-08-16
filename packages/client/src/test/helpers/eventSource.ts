@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { waitFor } from "@testing-library/react";
 
 type Listener = (event: Event) => void;
 
@@ -64,6 +65,27 @@ export class MockEventSource {
       throw new Error("No EventSource instance is active");
     }
     return current;
+  }
+
+  /**
+   * Await the instance the component is about to open, then return it.
+   *
+   * `latest()` assumes one already exists. That holds when the test's previous
+   * `await` was itself gated on the stream being open, but not when it waited
+   * on rendered state written by the same handler that sets the stream path:
+   * the text lands in the DOM a render before the effect that constructs the
+   * `EventSource` runs. That gap is invisible on an idle machine and widens
+   * under load -- an instrumented coverage run, or a busy CI box -- so
+   * `latest()` is flaky there rather than wrong. Wait for the instance
+   * instead of assuming it.
+   */
+  static async waitForLatest(): Promise<MockEventSource> {
+    await waitFor(() => {
+      if (MockEventSource.instances.length === 0) {
+        throw new Error("No EventSource instance is active");
+      }
+    });
+    return MockEventSource.latest();
   }
 
   static reset(): void {

@@ -1044,7 +1044,10 @@ describe("disk analysis route", () => {
       "The scan you asked to watch had already finished - this is a new scan that just started.";
     expect(await screen.findByText(notice)).toBeInTheDocument();
 
-    const eventSource = MockEventSource.latest();
+    // The notice and the stream path are set by the same `onSuccess`, so the
+    // text asserted above can render before the effect that opens the stream
+    // has run. Wait for the instance rather than assuming it exists.
+    const eventSource = await MockEventSource.waitForLatest();
     eventSource.dispatchOpen();
     eventSource.dispatchMessage("snapshot", {
       event: "snapshot",
