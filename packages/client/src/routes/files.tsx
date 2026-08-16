@@ -1036,19 +1036,25 @@ function FilesPage() {
                 <div className="files-viewer-warning">
                   <span>
                     {readTextQuery.data?.truncated
-                      ? "File content is truncated for safety."
+                      ? "File content is truncated for safety. Editing is unavailable because only part of the file was loaded."
                       : "Large file opened in read-only mode."}
                   </span>
-                  {readTextQuery.data?.readOnlySuggested && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => setForceEditable(true)}
-                      disabled={forceEditable}
-                    >
-                      Enable Editing
-                    </Button>
-                  )}
+                  {/* Editing a truncated file can never be enabled -- the Save
+                      gate's `|| truncated` term below is unconditional, so a
+                      button here could never succeed. Only offer it for a
+                      large-but-fully-read file, where the click genuinely
+                      works. */}
+                  {!readTextQuery.data?.truncated &&
+                    readTextQuery.data?.readOnlySuggested && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => setForceEditable(true)}
+                        disabled={forceEditable}
+                      >
+                        Enable Editing
+                      </Button>
+                    )}
                 </div>
               )}
               {readTextQuery.isLoading ? (

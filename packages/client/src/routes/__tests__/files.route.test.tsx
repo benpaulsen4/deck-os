@@ -310,37 +310,69 @@ describe("files route", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it("enforces large-text read-only mode until explicit enable editing", async () => {
+  it("never offers Enable Editing for a truncated file, and explains why instead", async () => {
+    // Default fixture state is a truncated file (server caps content and sets
+    // truncated: true). Editing a truncated file can never be enabled -- the
+    // Save gate's `|| truncated` term is unconditional (CLI-1 / CLI-11) -- so
+    // offering a button that could never succeed would just be a no-op click.
+    // There must be no button at all, only an explanation.
     renderWithAppRouter({ initialEntries: ["/files"] });
     fireEvent.doubleClick(await screen.findByText("note.txt"));
-    expect(await screen.findByText("Enable Editing")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    fireEvent.click(screen.getByText("Enable Editing"));
+
+    expect(
+      await screen.findByText(/only part of the file was loaded/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Enable Editing")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
-  it("keeps Save disabled while the content is truncated, even after Enable Editing and an edit", async () => {
+  it("keeps Save disabled while the content is truncated, even after an attempted edit", async () => {
     // Open a 10 MB file: the server caps content at 2 MB and sets truncated.
-    // Enable Editing clears readOnlySuggested but NOT truncated -- a save
-    // would fs.writeFile the 2 MB prefix over the whole file, losing 8 MB
-    // with no undo (CLI-1 / CLI-11).
+    // There is no "Enable Editing" button for a truncated file (see above),
+    // so forceEditable can never become true through the UI here -- the
+    // truncation gate wins unconditionally regardless of dirty state.
     state.meta = { mimeType: "text/plain", size: 10 * 1024 * 1024 };
     state.text = { content: "x".repeat(2048), truncated: true, readOnlySuggested: true };
 
     renderWithAppRouter({ initialEntries: ["/files"] });
     fireEvent.doubleClick(await screen.findByText("note.txt"));
 
-    fireEvent.click(await screen.findByText("Enable Editing"));
+    expect(
+      await screen.findByText(/only part of the file was loaded/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Enable Editing")).not.toBeInTheDocument();
 
-    // Without a real edit, Save stays disabled for an unrelated reason
-    // (nothing is dirty), which would let a stale truncated-gate bug hide
-    // behind that unrelated disablement. Make an edit so Save's disabled
-    // state is actually driven by the truncation gate.
     fireEvent.change(screen.getByLabelText("file editor"), {
       target: { value: "y".repeat(2048) },
     });
 
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("offers Enable Editing for a large-but-not-truncated file, and it actually works", async () => {
+    // 600 KB is over LARGE_TEXT_READONLY_BYTES (512 KB, so readOnlySuggested)
+    // but well under MAX_TEXT_READ_BYTES (2 MB, so not truncated) -- a fully
+    // read large file. Here the click genuinely enables editing and must
+    // keep working, unlike the truncated case above.
+    state.meta = { mimeType: "text/plain", size: 600 * 1024 };
+    state.text = { content: "hello", truncated: false, readOnlySuggested: true };
+
+    renderWithAppRouter({ initialEntries: ["/files"] });
+    fireEvent.doubleClick(await screen.findByText("note.txt"));
+
+    expect(await screen.findByText("Enable Editing")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    fireEvent.click(screen.getByText("Enable Editing"));
+
+    // The button disappears once editing is genuinely enabled (readOnlySuggested
+    // flips to false server-side) -- that's a real transition, not the bug.
+    // An edit now proves Save is actually live, not just disabled-by-default.
+    expect(screen.queryByText("Enable Editing")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("file editor"), {
+      target: { value: "hello world" },
+    });
+    expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled();
   });
 
   it("offers Open as text for a file with no preview, and switches the viewer", async () => {
