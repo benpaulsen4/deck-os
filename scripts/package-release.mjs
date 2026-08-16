@@ -42,6 +42,17 @@ await rm(serverDeployDest, { recursive: true, force: true });
 await mkdir(dirname(serverDeployDest), { recursive: true });
 await rename(serverDeploySrc, serverDeployDest);
 
+// Check this *after* the move, not before. `@deckos/contracts` is a workspace
+// package, so it can be linked to a path outside the deploy directory -- and
+// such a link still resolves before the move, because it points back into the
+// live repo. Only once the tree is relocated into the staging directory does
+// it dangle, producing a tarball that looks complete (`tar -tzf` still lists
+// the path) but whose server cannot resolve its contracts at runtime. The
+// built server is `tsc` output rather than a bundle, so those imports are
+// still live. `access` follows symlinks, so this fails the release build
+// instead of the user's install.
+await access(join(serverDeployDest, "node_modules", "@deckos", "contracts", "package.json"));
+
 await copy("packages/client/dist", "packages/client/dist");
 
 await writeFile(join(stagingDir, "VERSION"), `${version}\n`, "utf-8");
