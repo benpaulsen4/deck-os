@@ -1295,13 +1295,7 @@ function FilesPage() {
               <Button
                 type="button"
                 variant="secondary"
-                onClick={async () => {
-                  try {
-                    await handlePasteClipboard();
-                  } catch (error) {
-                    withOperationErrorToast(error, "Failed to paste");
-                  }
-                }}
+                onClick={handlePasteClipboard}
                 disabled={!clipboard || !currentPath}
               >
                 <Clipboard size={14} />
