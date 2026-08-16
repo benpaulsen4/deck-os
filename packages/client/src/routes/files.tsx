@@ -211,6 +211,17 @@ function getPreviewTypeLabel(pathValue: string, mimeType: string): string {
   return `${extension.toUpperCase()} file`;
 }
 
+// `isSymlink` / `linkTarget` come back on every entry (FILE-3). `linkTarget` can
+// still be null for a symlink whose destination doesn't resolve (a broken link).
+function getSymlinkTitle(entry: { isSymlink: boolean; linkTarget: string | null }):
+  | string
+  | undefined {
+  if (!entry.isSymlink) {
+    return undefined;
+  }
+  return entry.linkTarget ? `Symlink → ${entry.linkTarget}` : "Symlink (target unavailable)";
+}
+
 type FileListEntry = {
   name: string;
   type: "directory" | "file" | "symlink" | "other";
@@ -701,6 +712,22 @@ function FilesPage() {
     addToast(message, "error");
   };
 
+  // Shared by handleDelete, handlePasteClipboard and uploadFiles: all three run
+  // a bulk operation over several items and must report which ones failed by
+  // name rather than just "N failed" -- a user who deletes five files and is
+  // told one failed still has to find it themselves otherwise.
+  const reportBulkOutcome = (verb: string, succeeded: number, failedNames: string[]) => {
+    const total = succeeded + failedNames.length;
+    if (failedNames.length === 0) {
+      addToast(`${verb} ${total} item(s)`, "success");
+      return;
+    }
+    addToast(
+      `${verb} ${succeeded} of ${total} item(s); ${failedNames.length} failed: ${failedNames.join(", ")}`,
+      "error"
+    );
+  };
+
   const handlePathSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = pathInput.trim();
@@ -772,16 +799,34 @@ function FilesPage() {
     if (selectedPaths.length === 0) {
       return;
     }
+    // Track failures by full path (not just display name) so the selection can
+    // be narrowed to exactly the items that need retrying: a total failure
+    // must leave the selection unchanged, and a total success must clear it.
+    const failedPaths: string[] = [];
     try {
       for (const targetPath of selectedPaths) {
-        await deleteMutation.mutateAsync(targetPath);
+        try {
+          await deleteMutation.mutateAsync(targetPath);
+        } catch {
+          failedPaths.push(targetPath);
+        }
       }
-      addToast(`Deleted ${selectedPaths.length} item(s)`, "success");
-      setSelectedPaths([]);
+      reportBulkOutcome(
+        "Deleted",
+        selectedPaths.length - failedPaths.length,
+        failedPaths.map((path) => getDisplayName(path))
+      );
+      setSelectedPaths(failedPaths);
       setDeleteConfirmOpen(false);
-      await refreshDirectory();
-    } catch (error) {
-      withOperationErrorToast(error, "Failed to delete");
+    } finally {
+      // The outcome toast above is already the meaningful signal; a refresh
+      // failure here would otherwise land as a second, confusing toast on
+      // top of it, and a stale listing self-corrects on the next navigation.
+      try {
+        await refreshDirectory();
+      } catch {
+        /* swallow: see comment above */
+      }
     }
   };
 
@@ -801,24 +846,36 @@ function FilesPage() {
       return;
     }
     let pastedCount = 0;
-    for (const sourcePath of clipboard.paths) {
-      const targetPath = joinChildPath(currentPath, getDisplayName(sourcePath));
-      if (normalizePathForCompare(targetPath) === normalizePathForCompare(sourcePath)) {
-        continue;
+    const failed: string[] = [];
+    try {
+      for (const sourcePath of clipboard.paths) {
+        const targetPath = joinChildPath(currentPath, getDisplayName(sourcePath));
+        if (normalizePathForCompare(targetPath) === normalizePathForCompare(sourcePath)) {
+          continue;
+        }
+        try {
+          if (clipboard.mode === "copy") {
+            await copyMutation.mutateAsync({ sourcePath, targetPath });
+          } else {
+            await moveMutation.mutateAsync({ sourcePath, targetPath });
+          }
+          pastedCount += 1;
+        } catch {
+          failed.push(getDisplayName(sourcePath));
+        }
       }
-      if (clipboard.mode === "copy") {
-        await copyMutation.mutateAsync({ sourcePath, targetPath });
-      } else {
-        await moveMutation.mutateAsync({ sourcePath, targetPath });
+      if (clipboard.mode === "cut") {
+        setClipboard(null);
       }
-      pastedCount += 1;
+      setSelectedPaths([]);
+      reportBulkOutcome("Pasted", pastedCount, failed);
+    } finally {
+      try {
+        await refreshDirectory();
+      } catch {
+        /* swallow: see handleDelete */
+      }
     }
-    if (clipboard.mode === "cut") {
-      setClipboard(null);
-    }
-    setSelectedPaths([]);
-    addToast(`Pasted ${pastedCount} item(s)`, "success");
-    await refreshDirectory();
   };
 
   const handleSaveText = async () => {
@@ -870,16 +927,56 @@ function FilesPage() {
           body: formData,
         }
       );
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as {
-          error?: string;
-        } | null;
-        throw new Error(payload?.error || "Upload failed");
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string;
+        uploaded?: string[];
+      } | null;
+      // `uploaded` is populated on every response where at least one file may
+      // have been written to disk (#17): a 33-file upload that writes 32 and
+      // 400s still reports `uploaded` with those 32 names -- diff that against
+      // the files we sent to name the ones that didn't. Requests rejected
+      // before any writing could start (missing destination, wrong
+      // content-type, empty body, no files present) omit `uploaded` instead,
+      // which falls through to the plain error branch below.
+      //
+      // `uploaded` names only the successes, in the order their parts were
+      // parsed, and drops an entry for every failure rather than leaving a
+      // gap -- so it is shorter than `files` on any partial failure and
+      // `uploaded[i]` does not line up with `files[i]` (verified against
+      // filesRoutes.ts: the server filters out the failed slots before
+      // responding). A plain Set-membership diff also collapses duplicate
+      // file names, so a real failure for one of two identically-named files
+      // could be reported as a full success. Walk both lists in lockstep
+      // instead: `uploaded` is an order-preserving subsequence of `files`, so
+      // while the next uploaded name matches the file under the cursor that
+      // file succeeded and both cursors advance; otherwise that file failed
+      // and only the file cursor advances. This keeps correct aggregate
+      // counts and failure names even when names repeat.
+      const uploaded = payload?.uploaded;
+      if (uploaded) {
+        const failedNames: string[] = [];
+        let uploadedIndex = 0;
+        for (const file of files) {
+          if (uploadedIndex < uploaded.length && uploaded[uploadedIndex] === file.name) {
+            uploadedIndex += 1;
+          } else {
+            failedNames.push(file.name);
+          }
+        }
+        reportBulkOutcome("Uploaded", uploaded.length, failedNames);
+      } else if (!response.ok) {
+        addToast(payload?.error || "Upload failed", "error");
+      } else {
+        addToast("Upload complete", "success");
       }
-      addToast("Upload complete", "success");
-      await refreshDirectory();
     } catch (error) {
       withOperationErrorToast(error, "Failed to upload files");
+    } finally {
+      try {
+        await refreshDirectory();
+      } catch {
+        /* swallow: see handleDelete */
+      }
     }
   };
 
@@ -892,7 +989,12 @@ function FilesPage() {
   if (viewerPath) {
     const sourceUrl = `/api/files/content?path=${encodeURIComponent(viewerPath)}`;
     const readOnlySuggested = !!readTextQuery.data?.readOnlySuggested;
-    const isTextReadonly = readOnlySuggested && !forceEditable;
+    const truncated = !!readTextQuery.data?.truncated;
+    // `truncated` stays in the gate unconditionally: forcing editability only
+    // clears readOnlySuggested (the server's advisory hint), never the fact
+    // that this content is a partial read. Saving a truncated buffer would
+    // write that prefix over the whole file (CLI-1 / CLI-11).
+    const isTextReadonly = (readOnlySuggested && !forceEditable) || truncated;
     const editorLanguage = fileMetaQuery.data
       ? getEditorLanguage(viewerPath, fileMetaQuery.data.mimeType)
       : "plain";
@@ -934,19 +1036,25 @@ function FilesPage() {
                 <div className="files-viewer-warning">
                   <span>
                     {readTextQuery.data?.truncated
-                      ? "File content is truncated for safety."
+                      ? "File content is truncated for safety. Editing is unavailable because only part of the file was loaded."
                       : "Large file opened in read-only mode."}
                   </span>
-                  {readTextQuery.data?.readOnlySuggested && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => setForceEditable(true)}
-                      disabled={forceEditable}
-                    >
-                      Enable Editing
-                    </Button>
-                  )}
+                  {/* Editing a truncated file can never be enabled -- the Save
+                      gate's `|| truncated` term below is unconditional, so a
+                      button here could never succeed. Only offer it for a
+                      large-but-fully-read file, where the click genuinely
+                      works. */}
+                  {!readTextQuery.data?.truncated &&
+                    readTextQuery.data?.readOnlySuggested && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => setForceEditable(true)}
+                        disabled={forceEditable}
+                      >
+                        Enable Editing
+                      </Button>
+                    )}
                 </div>
               )}
               {readTextQuery.isLoading ? (
@@ -1219,13 +1327,7 @@ function FilesPage() {
               <Button
                 type="button"
                 variant="secondary"
-                onClick={async () => {
-                  try {
-                    await handlePasteClipboard();
-                  } catch (error) {
-                    withOperationErrorToast(error, "Failed to paste");
-                  }
-                }}
+                onClick={handlePasteClipboard}
                 disabled={!clipboard || !currentPath}
               >
                 <Clipboard size={14} />
@@ -1321,6 +1423,15 @@ function FilesPage() {
             onChange={handleUploadInputChange}
           />
 
+          {listQuery.data?.truncated && (
+            <div className="files-viewer-warning">
+              <span>
+                This directory has more items than can be shown; the listing is
+                incomplete.
+              </span>
+            </div>
+          )}
+
           {listQuery.error ? (
             <div className="files-error">
               <span>{listQuery.error.message}</span>
@@ -1362,6 +1473,7 @@ function FilesPage() {
                           }
                         }}
                         className={`files-row ${selectedPathSet.has(entry.path) ? "files-row--selected" : ""}`}
+                        title={getSymlinkTitle(entry)}
                         onClick={(event) => handleItemClick(entry, event)}
                         onMouseDown={(event) => {
                           if (event.shiftKey) {
@@ -1382,6 +1494,9 @@ function FilesPage() {
                               ? renderEntryIcon(entry, 14)
                               : renderEntryIcon(entry, 14)}
                             <span>{entry.name}</span>
+                            {entry.isSymlink && (
+                              <span className="files-symlink-badge">LINK</span>
+                            )}
                           </div>
                         </td>
                         <td>{getEntryTypeLabel(entry)}</td>
@@ -1413,6 +1528,7 @@ function FilesPage() {
                       }
                     }}
                     className={`files-grid-item ${selectedPathSet.has(entry.path) ? "files-grid-item--selected" : ""}`}
+                    title={getSymlinkTitle(entry)}
                     onClick={(event) => handleItemClick(entry, event)}
                     onMouseDown={(event) => {
                       if (event.shiftKey) {
@@ -1428,7 +1544,10 @@ function FilesPage() {
                     }}
                   >
                     <div className="files-grid-icon">{renderEntryIcon(entry, 18)}</div>
-                    <div className="files-grid-name">{entry.name}</div>
+                    <div className="files-grid-name">
+                      {entry.name}
+                      {entry.isSymlink && <span className="files-symlink-badge">LINK</span>}
+                    </div>
                     <div className="files-grid-meta">{getEntryTypeLabel(entry)}</div>
                   </button>
                 ))

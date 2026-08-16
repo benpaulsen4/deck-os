@@ -1,13 +1,9 @@
-import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import * as dockerService from "./services/docker.js";
 import { ensureAuthStoragePermissions } from "./services/auth.js";
 import { pruneDiskAnalysisCache } from "./services/diskAnalysis.js";
-import { registerAuthRoutes } from "./http/authRoutes.js";
-import { registerFilesRoutes } from "./http/filesRoutes.js";
-import { registerRuntimeRoutes } from "./http/runtimeRoutes.js";
-import { registerSecurityMiddleware } from "./http/securityMiddleware.js";
+import { createServerApp } from "./http/appWiring.js";
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -64,7 +60,7 @@ process.on("unhandledRejection", (reason) => {
   scheduleFatalExit("unhandledRejection", reason);
 });
 
-const app = new Hono();
+const app = createServerApp();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -72,14 +68,6 @@ const isProduction = process.env.NODE_ENV === "production";
 const clientDistPath = isProduction
   ? join(__dirname, "../../client/dist")
   : join(__dirname, "../../../client/dist");
-
-// Registration order matters: Hono runs handlers in the order they are added,
-// so this must precede every route it protects.
-registerSecurityMiddleware(app);
-
-registerAuthRoutes(app);
-registerRuntimeRoutes(app);
-registerFilesRoutes(app);
 
 if (isProduction) {
   app.use("*", serveStatic({ root: clientDistPath }));

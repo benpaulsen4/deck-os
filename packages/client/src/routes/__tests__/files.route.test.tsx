@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithAppRouter } from "../../test/helpers/router";
@@ -6,6 +6,7 @@ import { renderWithAppRouter } from "../../test/helpers/router";
 type MockDirectoryListing = {
   cwd: string;
   parent: string | null;
+  truncated?: boolean;
   entries: Array<{
     name: string;
     path: string;
@@ -13,6 +14,8 @@ type MockDirectoryListing = {
     size: number | null;
     modifiedAt: string;
     createdAt: string;
+    isSymlink?: boolean;
+    linkTarget?: string | null;
   }>;
 };
 
@@ -27,7 +30,9 @@ const {
   addToastSpy,
   authFetchSpy,
   scrollIntoViewSpy,
+  invalidateQueriesSpy,
   state,
+  forcedTextCache,
 } = vi.hoisted(() => ({
     setPinsSpy: vi.fn(async () => ({})),
     mkdirSpy: vi.fn(async () => ({})),
@@ -39,6 +44,11 @@ const {
     addToastSpy: vi.fn(),
     authFetchSpy: vi.fn(),
     scrollIntoViewSpy: vi.fn(),
+    // Hoisted (not a fresh vi.fn() per useQueryClient() call) so call counts
+    // accumulate across renders -- it's how tests observe that
+    // refreshDirectory actually ran, since the mocked useQuery below serves
+    // static `state.listResults` regardless of invalidation.
+    invalidateQueriesSpy: vi.fn(async () => {}),
     state: {
       listResults: {
         "": {
@@ -81,6 +91,17 @@ const {
       meta: { mimeType: "text/plain", size: 2048 },
       text: { content: "hello", truncated: true, readOnlySuggested: true },
     },
+    // Keyed by `state.text` so the `useQuery` mock hands back a stable object
+    // identity across re-renders while forceEditable is true. Without this,
+    // every render would build a fresh `{...state.text, readOnlySuggested:
+    // false}`, and the effect that seeds the editor from `readTextQuery.data`
+    // (keyed on that object identity) would fire on every render, wiping out
+    // any edit the test just made and making the truncation gate impossible
+    // to exercise from a test.
+    forcedTextCache: new WeakMap<
+      { content: string; truncated: boolean; readOnlySuggested: boolean },
+      { content: string; truncated: boolean; readOnlySuggested: false }
+    >(),
   }));
 
 vi.mock("../../hooks/useAuthGate", () => ({
@@ -141,6 +162,21 @@ vi.mock("../../trpc", () => ({
   },
 }));
 
+vi.mock("../../components/ui/CodeEditor", () => ({
+  CodeEditor: (props: {
+    value: string;
+    onChange: (value: string) => void;
+    readonly?: boolean;
+  }) => (
+    <textarea
+      aria-label="file editor"
+      value={props.value}
+      readOnly={props.readonly}
+      onChange={(event) => props.onChange(event.target.value)}
+    />
+  ),
+}));
+
 vi.mock("@tanstack/react-query", async () => {
   const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
     "@tanstack/react-query"
@@ -148,7 +184,7 @@ vi.mock("@tanstack/react-query", async () => {
   return {
     ...actual,
     useQueryClient: () => ({
-      invalidateQueries: vi.fn(async () => {}),
+      invalidateQueries: invalidateQueriesSpy,
     }),
     useMutation: (opts: { mutationFn: (...args: unknown[]) => Promise<unknown> }) => ({
       isPending: false,
@@ -176,6 +212,18 @@ vi.mock("@tanstack/react-query", async () => {
         return { data: state.meta, isLoading: false };
       }
       if (key === "files.readText") {
+        // Mirror the server: forceEditable clears readOnlySuggested but never
+        // clears truncated (H1) -- a 10 MB file stays truncated regardless of
+        // who is allowed to edit the 2 MB prefix that got read back.
+        const forceEditable = Boolean(maybe.queryKey?.[2]);
+        if (forceEditable && state.text.readOnlySuggested) {
+          let forced = forcedTextCache.get(state.text);
+          if (!forced) {
+            forced = { ...state.text, readOnlySuggested: false };
+            forcedTextCache.set(state.text, forced);
+          }
+          return { data: forced, isLoading: false };
+        }
         return { data: state.text, isLoading: false };
       }
       return { data: null, isFetching: false, isLoading: false, dataUpdatedAt: Date.now() };
@@ -205,6 +253,8 @@ describe("files route", () => {
     addToastSpy.mockReset();
     authFetchSpy.mockReset();
     scrollIntoViewSpy.mockReset();
+    invalidateQueriesSpy.mockReset();
+    invalidateQueriesSpy.mockResolvedValue(undefined);
     authFetchSpy.mockResolvedValue({ ok: true, json: async () => ({}) });
     state.listResults = {
       "": {
@@ -260,13 +310,69 @@ describe("files route", () => {
     consoleErrorSpy.mockRestore();
   });
 
-  it("enforces large-text read-only mode until explicit enable editing", async () => {
+  it("never offers Enable Editing for a truncated file, and explains why instead", async () => {
+    // Default fixture state is a truncated file (server caps content and sets
+    // truncated: true). Editing a truncated file can never be enabled -- the
+    // Save gate's `|| truncated` term is unconditional (CLI-1 / CLI-11) -- so
+    // offering a button that could never succeed would just be a no-op click.
+    // There must be no button at all, only an explanation.
     renderWithAppRouter({ initialEntries: ["/files"] });
     fireEvent.doubleClick(await screen.findByText("note.txt"));
+
+    expect(
+      await screen.findByText(/only part of the file was loaded/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Enable Editing")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("keeps Save disabled while the content is truncated, even after an attempted edit", async () => {
+    // Open a 10 MB file: the server caps content at 2 MB and sets truncated.
+    // There is no "Enable Editing" button for a truncated file (see above),
+    // so forceEditable can never become true through the UI here -- the
+    // truncation gate wins unconditionally regardless of dirty state.
+    state.meta = { mimeType: "text/plain", size: 10 * 1024 * 1024 };
+    state.text = { content: "x".repeat(2048), truncated: true, readOnlySuggested: true };
+
+    renderWithAppRouter({ initialEntries: ["/files"] });
+    fireEvent.doubleClick(await screen.findByText("note.txt"));
+
+    expect(
+      await screen.findByText(/only part of the file was loaded/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Enable Editing")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("file editor"), {
+      target: { value: "y".repeat(2048) },
+    });
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("offers Enable Editing for a large-but-not-truncated file, and it actually works", async () => {
+    // 600 KB is over LARGE_TEXT_READONLY_BYTES (512 KB, so readOnlySuggested)
+    // but well under MAX_TEXT_READ_BYTES (2 MB, so not truncated) -- a fully
+    // read large file. Here the click genuinely enables editing and must
+    // keep working, unlike the truncated case above.
+    state.meta = { mimeType: "text/plain", size: 600 * 1024 };
+    state.text = { content: "hello", truncated: false, readOnlySuggested: true };
+
+    renderWithAppRouter({ initialEntries: ["/files"] });
+    fireEvent.doubleClick(await screen.findByText("note.txt"));
+
     expect(await screen.findByText("Enable Editing")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
     fireEvent.click(screen.getByText("Enable Editing"));
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    // The button disappears once editing is genuinely enabled (readOnlySuggested
+    // flips to false server-side) -- that's a real transition, not the bug.
+    // An edit now proves Save is actually live, not just disabled-by-default.
+    expect(screen.queryByText("Enable Editing")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("file editor"), {
+      target: { value: "hello world" },
+    });
+    expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled();
   });
 
   it("offers Open as text for a file with no preview, and switches the viewer", async () => {
@@ -299,6 +405,64 @@ describe("files route", () => {
     expect(await screen.findByText("Back")).toBeInTheDocument();
   });
 
+  it("badges a symlinked entry and names its target in the row title", async () => {
+    // isSymlink/linkTarget come back on every entry (FILE-3) and were
+    // previously ignored entirely -- a symlinked file looked identical to an
+    // ordinary one.
+    state.listResults[""] = {
+      cwd: "C:\\",
+      parent: null,
+      entries: [
+        {
+          name: "linked.txt",
+          path: "C:\\linked.txt",
+          type: "file",
+          size: 64,
+          modifiedAt: "2026-01-01T00:00:00.000Z",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          isSymlink: true,
+          linkTarget: "C:\\real\\target.txt",
+        },
+      ],
+    };
+
+    renderWithAppRouter({ initialEntries: ["/files"] });
+    await screen.findByText("linked.txt");
+
+    expect(screen.getByText("LINK")).toBeInTheDocument();
+    const row = screen.getByText("linked.txt").closest("tr");
+    expect(row).toHaveAttribute("title", expect.stringContaining("C:\\real\\target.txt"));
+  });
+
+  it("warns when a directory listing is truncated", async () => {
+    // `truncated` comes back on files.list and was previously ignored, so a
+    // directory past MAX_LIST_ENTRIES silently looked complete.
+    state.listResults[""] = {
+      cwd: "C:\\",
+      parent: null,
+      truncated: true,
+      entries: [
+        {
+          name: "note.txt",
+          path: "C:\\note.txt",
+          type: "file",
+          size: 64,
+          modifiedAt: "2026-01-01T00:00:00.000Z",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    };
+
+    renderWithAppRouter({ initialEntries: ["/files"] });
+    expect(await screen.findByText(/more items than can be shown/i)).toBeInTheDocument();
+  });
+
+  it("does not warn when a directory listing is not truncated", async () => {
+    renderWithAppRouter({ initialEntries: ["/files"] });
+    await screen.findByText("note.txt");
+    expect(screen.queryByText(/more items than can be shown/i)).not.toBeInTheDocument();
+  });
+
   it("handles upload and confirmation-gated delete flows", async () => {
     const { container } = renderWithAppRouter({ initialEntries: ["/files"] });
     await screen.findByText("Files");
@@ -316,6 +480,156 @@ describe("files route", () => {
     await waitFor(() => expect(deleteSpy).toHaveBeenCalledWith({ path: "C:\\note.txt" }));
   });
 
+  it("continues past a failed delete, names the failed item, and still refreshes", async () => {
+    // Select five, the third is permission-denied: files 1-2 and 4-5 must
+    // still be attempted (no early exit from the loop), and the listing must
+    // still refresh even though one item failed -- otherwise the table keeps
+    // listing an entry that's already gone from disk.
+    state.listResults[""] = {
+      cwd: "C:\\",
+      parent: null,
+      entries: [1, 2, 3, 4, 5].map((n) => ({
+        name: `file${n}.txt`,
+        path: `C:\\file${n}.txt`,
+        type: "file" as const,
+        size: 10,
+        modifiedAt: "2026-01-01T00:00:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      })),
+    };
+    deleteSpy
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("EACCES"))
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({});
+
+    renderWithAppRouter({ initialEntries: ["/files"] });
+
+    fireEvent.click(await screen.findByText("file1.txt"));
+    fireEvent.click(screen.getByText("file5.txt"), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+
+    await waitFor(() => expect(deleteSpy).toHaveBeenCalledTimes(5));
+    expect(deleteSpy).toHaveBeenNthCalledWith(3, { path: "C:\\file3.txt" });
+    await waitFor(() =>
+      expect(addToastSpy).toHaveBeenCalledWith(
+        "Deleted 4 of 5 item(s); 1 failed: file3.txt",
+        "error"
+      )
+    );
+    expect(invalidateQueriesSpy).toHaveBeenCalledTimes(1);
+
+    // Only the item that actually failed should still be selected -- the four
+    // that succeeded are gone from disk and must not linger in the selection.
+    expect(screen.getByText("Selected: 1")).toBeInTheDocument();
+    expect(screen.getByText("file3.txt").closest("tr")).toHaveClass(
+      "files-row--selected"
+    );
+    expect(screen.getByText("file1.txt").closest("tr")).not.toHaveClass(
+      "files-row--selected"
+    );
+  });
+
+  it("leaves the selection untouched when every delete in the batch fails", async () => {
+    state.listResults[""] = {
+      cwd: "C:\\",
+      parent: null,
+      entries: [1, 2].map((n) => ({
+        name: `file${n}.txt`,
+        path: `C:\\file${n}.txt`,
+        type: "file" as const,
+        size: 10,
+        modifiedAt: "2026-01-01T00:00:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      })),
+    };
+    deleteSpy
+      .mockRejectedValueOnce(new Error("EACCES"))
+      .mockRejectedValueOnce(new Error("EACCES"));
+
+    renderWithAppRouter({ initialEntries: ["/files"] });
+
+    fireEvent.click(await screen.findByText("file1.txt"));
+    fireEvent.click(screen.getByText("file2.txt"), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+
+    await waitFor(() => expect(deleteSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(addToastSpy).toHaveBeenCalledWith(
+        "Deleted 0 of 2 item(s); 2 failed: file1.txt, file2.txt",
+        "error"
+      )
+    );
+
+    expect(screen.getByText("Selected: 2")).toBeInTheDocument();
+    expect(screen.getByText("file1.txt").closest("tr")).toHaveClass(
+      "files-row--selected"
+    );
+    expect(screen.getByText("file2.txt").closest("tr")).toHaveClass(
+      "files-row--selected"
+    );
+  });
+
+  it("continues past a rejected upload response and names the file that didn't land", async () => {
+    // A partial upload failure still returns 400, but the payload's `uploaded`
+    // array names exactly which files did land -- diff that against what was
+    // sent to report which one didn't, and refresh regardless of the status.
+    authFetchSpy.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: "Total upload size exceeded", uploaded: ["a.txt"] }),
+    });
+
+    const { container } = renderWithAppRouter({ initialEntries: ["/files"] });
+    await screen.findByText("Files");
+    const dropTarget = container.querySelector(".files-main") as HTMLElement;
+    const fileA = new File(["a"], "a.txt", { type: "text/plain" });
+    const fileB = new File(["b"], "b.txt", { type: "text/plain" });
+    fireEvent.drop(dropTarget, { dataTransfer: { files: [fileA, fileB] } });
+
+    await waitFor(() => expect(authFetchSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(addToastSpy).toHaveBeenCalledWith(
+        "Uploaded 1 of 2 item(s); 1 failed: b.txt",
+        "error"
+      )
+    );
+    expect(invalidateQueriesSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("correctly reports a partial failure when two uploaded files share a name", async () => {
+    // The server's `uploaded` array is a compacted list of successes -- it
+    // drops an entry for each failure instead of leaving a gap, so it is
+    // shorter than the request whenever anything failed. A Set-based diff
+    // collapses both same-named entries into one membership test, so one
+    // real failure was previously reported as a full success. Only one of
+    // the two "dup.txt" files actually landed.
+    authFetchSpy.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: "Disk full", uploaded: ["dup.txt"] }),
+    });
+
+    const { container } = renderWithAppRouter({ initialEntries: ["/files"] });
+    await screen.findByText("Files");
+    const dropTarget = container.querySelector(".files-main") as HTMLElement;
+    const fileOne = new File(["a"], "dup.txt", { type: "text/plain" });
+    const fileTwo = new File(["b"], "dup.txt", { type: "text/plain" });
+    fireEvent.drop(dropTarget, { dataTransfer: { files: [fileOne, fileTwo] } });
+
+    await waitFor(() => expect(authFetchSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(addToastSpy).toHaveBeenCalledWith(
+        "Uploaded 1 of 2 item(s); 1 failed: dup.txt",
+        "error"
+      )
+    );
+    expect(invalidateQueriesSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("validates copy cut paste behaviors including same-path protection", async () => {
     renderWithAppRouter({ initialEntries: ["/files"] });
     fireEvent.click(await screen.findByText("note.txt"));
@@ -328,6 +642,66 @@ describe("files route", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cut" }));
     fireEvent.click(screen.getByRole("button", { name: "Paste" }));
     await waitFor(() => expect(moveSpy).not.toHaveBeenCalled());
+  });
+
+  it("continues past a failed move mid-paste, names the failed item, and still refreshes", async () => {
+    // Cut three files from root, paste into a different folder; the second
+    // move fails. A partially-completed cut must not leave the source files
+    // gone but still listed -- the loop must finish and the listing refresh.
+    state.listResults[""] = {
+      cwd: "C:\\",
+      parent: null,
+      entries: [
+        {
+          name: "dest",
+          path: "C:\\dest",
+          type: "directory" as const,
+          size: null,
+          modifiedAt: "2026-01-01T00:00:00.000Z",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+        ...[1, 2, 3].map((n) => ({
+          name: `file${n}.txt`,
+          path: `C:\\file${n}.txt`,
+          type: "file" as const,
+          size: 10,
+          modifiedAt: "2026-01-01T00:00:00.000Z",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        })),
+      ],
+    };
+    state.listResults["C:\\dest"] = { cwd: "C:\\dest", parent: "C:\\", entries: [] };
+    moveSpy
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("EBUSY"))
+      .mockResolvedValueOnce({});
+
+    const { container } = renderWithAppRouter({ initialEntries: ["/files"] });
+    await screen.findByText("file1.txt");
+    // "dest" is a directory, so it also renders in the sidebar's directory
+    // tree; scope to the main listing panel to find the row for it.
+    const mainPanel = container.querySelector(".files-main") as HTMLElement;
+
+    fireEvent.click(screen.getByText("file1.txt"));
+    fireEvent.click(screen.getByText("file3.txt"), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Cut" }));
+    fireEvent.doubleClick(within(mainPanel).getByText("dest"));
+    await waitFor(() => expect(screen.getByDisplayValue("C:\\dest")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Paste" }));
+
+    await waitFor(() => expect(moveSpy).toHaveBeenCalledTimes(3));
+    expect(moveSpy).toHaveBeenNthCalledWith(2, {
+      sourcePath: "C:\\file2.txt",
+      targetPath: "C:\\dest\\file2.txt",
+    });
+    await waitFor(() =>
+      expect(addToastSpy).toHaveBeenCalledWith(
+        "Pasted 2 of 3 item(s); 1 failed: file2.txt",
+        "error"
+      )
+    );
+    expect(invalidateQueriesSpy).toHaveBeenCalledTimes(1);
   });
 
   it("initializes the directory from a folder deep link", async () => {

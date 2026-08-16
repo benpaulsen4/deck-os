@@ -512,8 +512,8 @@ async function runPollCycle(): Promise<void> {
  * Polling exists only to feed subscribers, so its lifetime is refcounted on the
  * subscriber set: started on the 0->1 transition and stopped on 1->0. Starting
  * it with nobody listening would leak a 2-second collector for the lifetime of
- * the process, which is exactly what an SSE handler that fails between its
- * `startMetricsPolling()` and its `subscribeToMetrics()` call used to do.
+ * the process, which is exactly what an SSE handler that started the poller up
+ * front and then failed before reaching `subscribeToMetrics()` used to do.
  */
 function syncPollingWithSubscribers(): void {
   if (metricsSubscribers.size === 0) {
@@ -526,15 +526,6 @@ function syncPollingWithSubscribers(): void {
   pollInterval = setInterval(() => {
     void runPollCycle();
   }, POLL_INTERVAL_MS);
-}
-
-/**
- * Retained for `http/runtimeRoutes.ts`, which calls this before subscribing.
- * Polling is refcounted on the subscriber set now, so this is a no-op until a
- * subscriber exists and the call can be removed by that file's owner.
- */
-export function startMetricsPolling(): void {
-  syncPollingWithSubscribers();
 }
 
 export function stopMetricsPolling(): void {
