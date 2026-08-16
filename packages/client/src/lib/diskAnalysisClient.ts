@@ -734,6 +734,23 @@ export function describeScanStartError(error: unknown): string {
   }
 }
 
+const GENERIC_CANCEL_SCAN_FAILURE = "Failed to cancel scan";
+
+/**
+ * Turn a rejected `cancelScan` into something a user can act on.
+ *
+ * Unlike `startScan`, the router never maps `cancelScan` to a FORBIDDEN or
+ * CONFLICT code (`packages/server/src/routers/diskAnalysis.ts` -- it has no
+ * try/catch at all; `{ success: false }` is how it reports "nothing to
+ * cancel", not a thrown error). A rejection here is transport- or
+ * auth-level, so this stays generic rather than borrowing
+ * `describeScanStartError`'s path-specific wording.
+ */
+export function describeCancelScanError(error: unknown): string {
+  const detail = getErrorMessage(error).trim();
+  return detail || GENERIC_CANCEL_SCAN_FAILURE;
+}
+
 /**
  * How often `getMountState` should be refetched while a job is running, and
  * whether it should be refetched at all.

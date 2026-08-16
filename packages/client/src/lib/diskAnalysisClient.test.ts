@@ -4,6 +4,7 @@ import {
   createPresentationTree,
   createSnapshotPresentationTree,
   createSyntheticLiveRoot,
+  describeCancelScanError,
   describeScanStartError,
   findNodeByPath,
   getEventMountIdentity,
@@ -296,6 +297,17 @@ describe("diskAnalysisClient", () => {
 
     expect(describeScanStartError(new Error("socket hang up"))).toBe("socket hang up");
     expect(describeScanStartError(null)).toBe("Failed to start disk analysis scan");
+  });
+
+  it("describes a genuine cancelScan failure without inventing scan-start wording", () => {
+    // cancelScan has no FORBIDDEN/CONFLICT mapping on the server (it never
+    // throws -- see packages/server/src/routers/diskAnalysis.ts) so a
+    // rejection here is always transport/auth level, not a refused path or a
+    // busy scanner. Reusing describeScanStartError's wording for it would
+    // claim "This path cannot be scanned" for an error that has nothing to do
+    // with the path.
+    expect(describeCancelScanError(new Error("socket hang up"))).toBe("socket hang up");
+    expect(describeCancelScanError(null)).toBe("Failed to cancel scan");
   });
 
   it("keeps a POSIX bucket path POSIX even when a directory name contains a backslash", () => {

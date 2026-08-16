@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithAppRouter } from "../../test/helpers/router";
 import {
@@ -41,6 +41,7 @@ type DiskTreeNode = {
 
 const {
   startScanSpy,
+  cancelScanSpy,
   addToastSpy,
   invalidateQueriesSpy,
   emitUnauthorizedEventSpy,
@@ -53,6 +54,7 @@ const {
     streamPath:
       "/api/disk-analysis/jobs/11111111-1111-1111-1111-111111111111/events?mount=C%3A%5C&fs=ntfs",
   })),
+  cancelScanSpy: vi.fn(async () => ({ success: true })),
   addToastSpy: vi.fn(),
   invalidateQueriesSpy: vi.fn(async () => {}),
   emitUnauthorizedEventSpy: vi.fn(),
@@ -134,6 +136,7 @@ vi.mock("../../trpc", () => ({
   trpcClient: {
     diskAnalysis: {
       startScan: { mutate: startScanSpy },
+      cancelScan: { mutate: cancelScanSpy },
     },
     files: {
       setPins: { mutate: vi.fn(async () => ({})) },
@@ -160,17 +163,28 @@ vi.mock("@tanstack/react-query", async () => {
       mutationFn: (...args: unknown[]) => Promise<unknown>;
       onSuccess?: (...args: unknown[]) => void;
       onError?: (...args: unknown[]) => void;
-    }) => ({
-      isPending: false,
-      mutate: async (...args: unknown[]) => {
-        try {
-          const result = await opts.mutationFn(...args);
-          opts.onSuccess?.(result, ...args);
-        } catch (error) {
-          opts.onError?.(error, ...args);
-        }
-      },
-    }),
+    }) => {
+      // A real `useState`, not a hardcoded `false`: this hook is called from
+      // inside the real component's render, so it can hold real state across
+      // re-renders the same way the actual `useMutation` does. Without this,
+      // "disabled while a mutation is in flight" has nothing to assert
+      // against -- every call would report `isPending: false` forever.
+      const [isPending, setIsPending] = useState(false);
+      return {
+        isPending,
+        mutate: async (...args: unknown[]) => {
+          setIsPending(true);
+          try {
+            const result = await opts.mutationFn(...args);
+            opts.onSuccess?.(result, ...args);
+          } catch (error) {
+            opts.onError?.(error, ...args);
+          } finally {
+            setIsPending(false);
+          }
+        },
+      };
+    },
     useQuery: (arg: unknown) => {
       const maybe = arg as { queryKey?: unknown[] };
       const key = maybe.queryKey?.[0];
@@ -304,6 +318,8 @@ describe("disk analysis route", () => {
     installEventSourceMock();
     resetEventSourceMocks();
     startScanSpy.mockClear();
+    cancelScanSpy.mockClear();
+    cancelScanSpy.mockResolvedValue({ success: true });
     addToastSpy.mockClear();
     invalidateQueriesSpy.mockClear();
     emitUnauthorizedEventSpy.mockClear();
@@ -1431,5 +1447,89 @@ describe("disk analysis route", () => {
     // in its CSS shorthand-property cloning code, unrelated to this fix).
     expect(screen.getByText("2 / 4 directories")).toBeInTheDocument();
     expect(document.querySelector('[aria-label^="View Issues"]')).not.toBeNull();
+  });
+
+  it("shows Cancel Scan only while a scan is actually running, and hides it once idle", async () => {
+    // Reuses the beforeEach fixture, which already seeds a "scanning" active
+    // job -- the same signal `getMountStatePollIntervalMs` and "Watch Running
+    // Scan" key off, per the review comment.
+    const { unmount } = renderWithAppRouter({
+      initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"],
+    });
+
+    expect(await screen.findByRole("button", { name: "Cancel Scan" })).toBeInTheDocument();
+    unmount();
+
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      activeJob: null,
+    };
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    expect(await screen.findByRole("button", { name: "Start New Scan" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Cancel Scan/i })).not.toBeInTheDocument();
+  });
+
+  it("cancels the running job by its own mount and job id, not a stale or guessed one", async () => {
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel Scan" }));
+
+    await waitFor(() =>
+      expect(cancelScanSpy).toHaveBeenCalledWith({
+        mount: { mount: "C:\\", fs: "ntfs" },
+        jobId: "11111111-1111-1111-1111-111111111111",
+      })
+    );
+  });
+
+  it("treats cancelScan({ success: false }) as the normal already-finished race, not an error", async () => {
+    // Per the review comment: the job being gone or the id not matching by
+    // the time the request lands is a normal race (B7's job-id-mismatch
+    // stance for startScan, applied the same way here), not a failure worth
+    // a scary error toast.
+    cancelScanSpy.mockResolvedValueOnce({ success: false });
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel Scan" }));
+
+    await waitFor(() => expect(cancelScanSpy).toHaveBeenCalledTimes(1));
+    expect(addToastSpy).not.toHaveBeenCalledWith(expect.any(String), "error");
+    expect(addToastSpy).toHaveBeenCalledWith("That scan had already finished.", "info");
+  });
+
+  it("disables Cancel Scan while the cancel request is in flight, so a double-click cannot fire twice", async () => {
+    let resolveCancel: (value: { success: boolean }) => void = () => {
+      throw new Error("resolveCancel called before assignment");
+    };
+    cancelScanSpy.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCancel = resolve;
+        })
+    );
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    const cancelButton = await screen.findByRole("button", { name: "Cancel Scan" });
+    expect(cancelButton).toBeEnabled();
+    fireEvent.click(cancelButton);
+
+    // The same element, re-checked after the click -- its accessible name may
+    // change while pending, so this asserts on the captured reference rather
+    // than re-querying by name.
+    await waitFor(() => expect(cancelButton).toBeDisabled());
+    fireEvent.click(cancelButton);
+    expect(cancelScanSpy).toHaveBeenCalledTimes(1);
+
+    resolveCancel({ success: true });
+    await waitFor(() => expect(cancelButton).toBeEnabled());
   });
 });

@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, ArrowLeft, PanelLeft, Play } from "lucide-react";
+import { AlertTriangle, ArrowLeft, PanelLeft, Play, X } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { useToastStore } from "../stores/toast";
 import { emitUnauthorizedEvent, fetchAuthStatus } from "../lib/auth";
@@ -18,6 +18,7 @@ import {
   createSnapshotPresentationTree,
   createSyntheticLiveRoot,
   deriveLegendFromSnapshot,
+  describeCancelScanError,
   describeScanStartError,
   getEventMountIdentity,
   formatBytes,
@@ -187,9 +188,42 @@ function DiskAnalysisPage() {
     },
   });
 
+  const cancelScanMutation = useMutation({
+    mutationFn: async (input: { mount: DiskAnalysisMountIdentity; jobId: string }) =>
+      await trpcClient.diskAnalysis.cancelScan.mutate(input),
+    onSuccess: (result: { success: boolean }) => {
+      if (!result.success) {
+        // Not an error: the job the button captured at click time had
+        // already finished (or been superseded) by the time the request
+        // landed on the server -- `diskAnalysisService.cancelScan` reports
+        // that as `{ success: false }`, the same "the world moved on"
+        // outcome `onSuccess` above already treats as informational rather
+        // than a failure for a mismatched `startScan` join.
+        addToast("That scan had already finished.", "info");
+        return;
+      }
+      // A successful cancel does not end the job synchronously -- the
+      // service sets phase `cancelled` and the worker still has to unwind
+      // out of `readdir` (the "still winding down" guard below exists for
+      // exactly this window). So there is nothing further to do here: the
+      // existing SSE stream and `getMountStatePollIntervalMs` polling will
+      // observe the terminal phase on their own. Forcing a refetch from
+      // here would be a second, redundant path into that same wind-down
+      // window.
+    },
+    onError: (error: unknown) => {
+      addToast(describeCancelScanError(error), "error");
+    },
+  });
+
   const cachedSnapshot = snapshotQuery.data?.snapshot ?? null;
   const mountState = mountStateQuery.data ?? null;
   const activeJob = liveJob ?? mountState?.activeJob ?? null;
+  // The one signal for "a scan is actually running right now", reused by
+  // `canWatchRunningScan`, the live-vs-cached presentation budget below, and
+  // the Cancel Scan button -- rather than each inventing its own notion of
+  // "running" against `activeJob`.
+  const isJobActive = activeJob?.phase === "queued" || activeJob?.phase === "scanning";
   const diskAnalysisQueriesSettled =
     !mountStateQuery.isLoading &&
     !mountStateQuery.isFetching &&
@@ -330,10 +364,9 @@ function DiskAnalysisPage() {
     setLiveSnapshot(cachedSnapshot);
     setLiveRoot(createSnapshotPresentationTree(cachedSnapshot.root, LIVE_PRESENTATION_OPTIONS));
   }, [activeJob, cachedSnapshot, liveSnapshot, mountState]);
-  const livePresentationOptions =
-    activeJob?.phase === "queued" || activeJob?.phase === "scanning"
-      ? LIVE_SCANNING_PRESENTATION_OPTIONS
-      : LIVE_PRESENTATION_OPTIONS;
+  const livePresentationOptions = isJobActive
+    ? LIVE_SCANNING_PRESENTATION_OPTIONS
+    : LIVE_PRESENTATION_OPTIONS;
 
   useEffect(() => {
     if (!streamPath || !mount) {
@@ -690,12 +723,9 @@ function DiskAnalysisPage() {
   // being in flight so a job that ended without a snapshot event does not get
   // advertised as watchable, and on there being no stream already open.
   const canWatchRunningScan =
-    !!mount &&
-    !streamPath &&
-    !startScanMutation.isPending &&
-    (activeJob?.phase === "queued" || activeJob?.phase === "scanning");
+    !!mount && !streamPath && !startScanMutation.isPending && isJobActive;
   const manualScanLabel = cachedSnapshot ? "Start New Scan" : "Start Scan";
-  const showToolbarActions = canStartManualScan || issueList.length > 0;
+  const showToolbarActions = canStartManualScan || issueList.length > 0 || isJobActive;
   // B1/B5: a job reaches "partial" when anything made the totals a lower
   // bound. `partialIssueCount` (final whole-branch review, finding 2) is the
   // count scoped to the codes that actually mean that -- `PARTIAL_RESULT_CODES`
@@ -733,6 +763,13 @@ function DiskAnalysisPage() {
       to: "/files",
       search: getNodeNavigationSearch(node),
     });
+  };
+
+  const handleCancelScan = () => {
+    if (!activeJob || cancelScanMutation.isPending) {
+      return;
+    }
+    cancelScanMutation.mutate({ mount: activeJob.mount, jobId: activeJob.jobId });
   };
 
   if (!mount) {
@@ -787,6 +824,22 @@ function DiskAnalysisPage() {
                     </span>
                     <span className="disk-analysis-toolbar__label disk-analysis-toolbar__label--compact">
                       {startScanMutation.isPending ? "..." : "Scan"}
+                    </span>
+                  </Button>
+                ) : null}
+                {isJobActive ? (
+                  <Button
+                    variant="secondary"
+                    aria-label={cancelScanMutation.isPending ? "Cancelling Scan" : "Cancel Scan"}
+                    onClick={handleCancelScan}
+                    disabled={cancelScanMutation.isPending}
+                  >
+                    <X size={14} />
+                    <span className="disk-analysis-toolbar__label disk-analysis-toolbar__label--full">
+                      {cancelScanMutation.isPending ? "CANCELLING..." : "Cancel Scan"}
+                    </span>
+                    <span className="disk-analysis-toolbar__label disk-analysis-toolbar__label--compact">
+                      {cancelScanMutation.isPending ? "..." : "Cancel"}
                     </span>
                   </Button>
                 ) : null}
