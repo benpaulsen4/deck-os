@@ -938,12 +938,31 @@ function FilesPage() {
       // before any writing could start (missing destination, wrong
       // content-type, empty body, no files present) omit `uploaded` instead,
       // which falls through to the plain error branch below.
+      //
+      // `uploaded` names only the successes, in the order their parts were
+      // parsed, and drops an entry for every failure rather than leaving a
+      // gap -- so it is shorter than `files` on any partial failure and
+      // `uploaded[i]` does not line up with `files[i]` (verified against
+      // filesRoutes.ts: the server filters out the failed slots before
+      // responding). A plain Set-membership diff also collapses duplicate
+      // file names, so a real failure for one of two identically-named files
+      // could be reported as a full success. Walk both lists in lockstep
+      // instead: `uploaded` is an order-preserving subsequence of `files`, so
+      // while the next uploaded name matches the file under the cursor that
+      // file succeeded and both cursors advance; otherwise that file failed
+      // and only the file cursor advances. This keeps correct aggregate
+      // counts and failure names even when names repeat.
       const uploaded = payload?.uploaded;
       if (uploaded) {
-        const uploadedSet = new Set(uploaded);
-        const failedNames = files
-          .map((file) => file.name)
-          .filter((name) => !uploadedSet.has(name));
+        const failedNames: string[] = [];
+        let uploadedIndex = 0;
+        for (const file of files) {
+          if (uploadedIndex < uploaded.length && uploaded[uploadedIndex] === file.name) {
+            uploadedIndex += 1;
+          } else {
+            failedNames.push(file.name);
+          }
+        }
         reportBulkOutcome("Uploaded", uploaded.length, failedNames);
       } else if (!response.ok) {
         addToast(payload?.error || "Upload failed", "error");

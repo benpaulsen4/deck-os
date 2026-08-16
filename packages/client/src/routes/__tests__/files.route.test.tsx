@@ -568,6 +568,36 @@ describe("files route", () => {
     expect(invalidateQueriesSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("correctly reports a partial failure when two uploaded files share a name", async () => {
+    // The server's `uploaded` array is a compacted list of successes -- it
+    // drops an entry for each failure instead of leaving a gap, so it is
+    // shorter than the request whenever anything failed. A Set-based diff
+    // collapses both same-named entries into one membership test, so one
+    // real failure was previously reported as a full success. Only one of
+    // the two "dup.txt" files actually landed.
+    authFetchSpy.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: "Disk full", uploaded: ["dup.txt"] }),
+    });
+
+    const { container } = renderWithAppRouter({ initialEntries: ["/files"] });
+    await screen.findByText("Files");
+    const dropTarget = container.querySelector(".files-main") as HTMLElement;
+    const fileOne = new File(["a"], "dup.txt", { type: "text/plain" });
+    const fileTwo = new File(["b"], "dup.txt", { type: "text/plain" });
+    fireEvent.drop(dropTarget, { dataTransfer: { files: [fileOne, fileTwo] } });
+
+    await waitFor(() => expect(authFetchSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(addToastSpy).toHaveBeenCalledWith(
+        "Uploaded 1 of 2 item(s); 1 failed: dup.txt",
+        "error"
+      )
+    );
+    expect(invalidateQueriesSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("validates copy cut paste behaviors including same-path protection", async () => {
     renderWithAppRouter({ initialEntries: ["/files"] });
     fireEvent.click(await screen.findByText("note.txt"));
