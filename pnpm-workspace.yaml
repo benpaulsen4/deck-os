@@ -1,20 +1,50 @@
-# Dependency overrides are declared TWICE, on purpose.
+# Dependency overrides live here and nowhere else.
 #
-# pnpm 9 (the version pinned by `packageManager`, and the one CI resolves)
-# reads them from the root package.json under `pnpm.overrides`. pnpm 10+ no
-# longer reads that field at all -- it warns and ignores it -- and reads the
-# top-level `overrides` key below instead.
+# They were previously declared twice, because pnpm 9 read them only from
+# package.json `pnpm.overrides` and pnpm 10+ reads them only from here. The
+# `packageManager` pin is now pnpm 11, so the package.json copy is gone along
+# with the script that kept the two in sync.
 #
-# Declaring both means a contributor running either generation gets the same
-# resolutions. If they diverge, a plain `pnpm install` on pnpm 10+ quietly
-# rewrites pnpm-lock.yaml without the pins and reintroduces every advisory
-# they exist to suppress. `pnpm audit` in CI is the backstop.
-#
-# ANY CHANGE HERE MUST BE MIRRORED IN package.json `pnpm.overrides`.
+# `pnpm audit` in CI is the backstop: if an override stops applying, the
+# advisory it suppresses comes back and the build fails.
 packages:
   - "packages/*"
 
+# pnpm 10 stopped running dependency lifecycle scripts by default; pnpm 11
+# then removed onlyBuiltDependencies / onlyBuiltDependenciesFile /
+# neverBuiltDependencies / ignoredBuiltDependencies / ignoreDepScripts
+# entirely, replacing all of them with this single map. Every package with a
+# build script needs an explicit yes/no here or install refuses to proceed at
+# all. Decided per package by checking what the script actually does:
+#   esbuild        true  - postinstall fetches the platform binary. Without
+#                           approval here, vite and vitest fail at run time
+#                           with a missing-binary error that does not look
+#                           like a dependency problem.
+#   cpu-features   false - optional native accel for ssh2's crypto; its own
+#                           install script is non-fatal on failure, and it
+#                           does not build cleanly against current Node/MSVC
+#                           headers in this environment.
+#   ssh2           false - optional native crypto binding; install.js logs
+#                           and exits 0 on build failure, falling back to the
+#                           pure-JS implementation either way.
+#   msw            false - postinstall only acts when package.json declares
+#                           `msw.workerDirectory`, which this repo does not;
+#                           tests use msw/node (setupServer), not the browser
+#                           worker.
+#   protobufjs     false - postinstall only prints a version-scheme warning;
+#                           no build output depends on it.
+allowBuilds:
+  cpu-features: false
+  esbuild: true
+  msw: false
+  protobufjs: false
+  ssh2: false
+
 overrides:
+  # Forward guard, currently inert: the only consumer is protobufjs 7.6.5,
+  # which already asks for ^1.1.1, so nothing in the tree can resolve to the
+  # range this suppresses. Kept so a future transitive edge cannot reintroduce
+  # it silently.
   "@protobufjs/utf8@<=1.1.0": ">=1.1.1"
   "@babel/core": "^7.29.7"
   "@grpc/grpc-js": "^1.14.4"
@@ -24,6 +54,7 @@ overrides:
   "flatted": "^3.4.2"
   "follow-redirects": "^1.16.0"
   "hono": "^4.12.34"
+  "nanoid": ">=3.3.18"
   "postcss": ">=8.5.18"
   "shell-quote": ">=1.9.0"
   "undici": "^7.29.0"

@@ -56,12 +56,6 @@ jobs:
       - name: Check systemd unit hardening is self-consistent
         run: bash scripts/check-unit-hardening.sh
 
-      # Same problem for the override maps in package.json and
-      # pnpm-workspace.yaml. Node is preinstalled on the runner image and this
-      # script has no dependencies, so it needs no pnpm install.
-      - name: Check dependency overrides are in sync
-        run: node scripts/check-overrides-sync.mjs
-
   quality-and-tests:
     runs-on: ubuntu-24.04
     permissions:
@@ -85,9 +79,9 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      # Regression guard for the dependency overrides in package.json /
-      # pnpm-workspace.yaml: if an override stops matching, the advisory it was
-      # suppressing comes back and this fails.
+      # Regression guard for the dependency overrides in pnpm-workspace.yaml:
+      # if an override stops matching, the advisory it was suppressing comes
+      # back and this fails.
       #
       # Gated at `high` so a newly published low or moderate advisory against
       # some transitive dependency cannot turn main red on an unrelated PR with
