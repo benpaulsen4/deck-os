@@ -285,7 +285,9 @@ function DiskAnalysisPage() {
 
   /**
    * The one path into `startScan`, shared by "Start Scan", "Scan This Mount"
-   * and "Watch Running Scan".
+   * and "Watch Running Scan". There is deliberately no effect anywhere in
+   * this component that calls it automatically — every scan start is a
+   * user-initiated click.
    *
    * The three buttons differ in what they promise the user, not in what they
    * do: the server decides whether this joins the job already running on the
@@ -299,31 +301,6 @@ function DiskAnalysisPage() {
       resetLiveState: true,
     });
   };
-
-  /*
-   * DISK-3, client half — there is deliberately no effect here.
-   *
-   * Two auto-start effects have now been removed from this spot. The first
-   * fired on `mountState.cache.state === "missing"`, so opening the page with
-   * nothing cached committed the box to a full filesystem walk. The second
-   * (B7 review round 1, finding 1) only fired when `mountState.activeJob`
-   * reported a scan already running, on the reasoning that joining work
-   * already underway starts nothing — but `mountState` describes the state at
-   * *query* time. A normally completing job deletes its `unsettledJobIdByMount`
-   * entry as soon as `runJob` resolves (`services/diskAnalysis.ts`, the
-   * `.finally()` in `startJobRun`), so a job that finished during the round
-   * trip left `startScan` with nothing to join and a clear path to starting a
-   * brand-new walk. The "still winding down" guard covers *cancelled* jobs
-   * whose workers are stuck in `readdir`; it does not cover this. The window
-   * was a network round trip plus a render, and it reopened on every
-   * navigation back, because `hasRequestedLive` resets with `mountKey`.
-   *
-   * So there is no automatic entry into `startScan` at all any more. A running
-   * scan is offered as a "Watch Running Scan" button in the empty state
-   * instead, which makes that race the user's own deliberate action — and
-   * `onSuccess` tells them when the job it reached is not the one they clicked
-   * to watch.
-   */
 
   useEffect(() => {
     if (cachedSnapshot) {
