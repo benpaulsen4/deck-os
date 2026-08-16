@@ -651,11 +651,17 @@ function DiskAnalysisPage() {
     () =>
       resolveHoveredNode(
         currentRoot,
-        // The unpruned tree behind the view, so a hover that lands on
-        // something pruning dropped can still be resolved. Each of these is
-        // indexed lazily and only on a miss, which in practice means never:
-        // the treemap only ever emits paths it drew, and it draws
-        // `currentRoot`.
+        // The unpruned tree behind the view, for a real miss case: during an
+        // active scan `currentRoot` is a fresh `createPresentationTree` output
+        // republished every merge (~`LIVE_MERGE_PUBLISH_MS`), and its keep/drop
+        // decision per node is that node's byte share of the *running* total
+        // (`minShareByDepth`). A directory kept -- and hovered -- in one
+        // publish can drop below its depth's threshold in the next as more
+        // data streams in, and gets folded into "Everything Else". `hoveredPath`
+        // only changes on an actual pointer/keyboard event, so it can still
+        // name that now-pruned path until the next one arrives. This is where
+        // that lookup is served from, instead of falling through to the
+        // whole-tree fallback below.
         activeView === "live" ? liveRawRootRef.current : cachedSnapshot?.root ?? null,
         hoveredPath,
         cachedRootForView
