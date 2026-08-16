@@ -989,7 +989,10 @@ describe("disk analysis route", () => {
     const notice =
       "The scan you asked to watch had already finished - this is a new scan that just started.";
     expect(await screen.findByText(notice)).toBeInTheDocument();
-    await waitFor(() => expect(addToastSpy).toHaveBeenCalledWith(notice, "info"));
+    // Notice only, no toast -- the sidebar notice is next to the stream
+    // status it describes and self-clears when that stream ends (see
+    // "clears the mismatch notice once the stream it describes ends" below).
+    expect(addToastSpy).not.toHaveBeenCalledWith(notice, "info");
   });
 
   it("clears the mismatch notice once the stream it describes ends", async () => {

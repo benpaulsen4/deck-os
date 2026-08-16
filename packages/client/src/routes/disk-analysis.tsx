@@ -171,10 +171,13 @@ function DiskAnalysisPage() {
       setStreamPath(result.streamPath);
       setStreamError(null);
       if (expectedJobId && expectedJobId !== result.jobId) {
-        const notice =
-          "The scan you asked to watch had already finished - this is a new scan that just started.";
-        setStreamNotice(notice);
-        addToast(notice, "info");
+        // Notice only, no toast: this sits next to the stream status it
+        // describes, self-clears when that stream ends (`endStream` below),
+        // and can't be missed by someone watching this sidebar for a scan
+        // they just started.
+        setStreamNotice(
+          "The scan you asked to watch had already finished - this is a new scan that just started."
+        );
         return;
       }
       setStreamNotice(null);
@@ -898,11 +901,10 @@ function DiskAnalysisPage() {
               <SidebarStat label="Job" value={liveStatus} />
               <SidebarStat label="Generated" value={formatRelativeGeneratedAt(generatedAt)} />
               {streamError ? <SidebarStat label="Stream" value={streamError} tone="bad" /> : null}
-              {/* Same tone as the toast this text is also shown in ("info", not
-                  an error) -- attaching to a different scan than expected is a
-                  fact worth surfacing, not a failure. `SidebarStat` has no
-                  "info" tone of its own, so this omits `tone` for the default,
-                  neutral styling rather than the alarming "bad" one. */}
+              {/* Neutral tone, not "bad" -- attaching to a different scan than
+                  expected is a fact worth surfacing, not a failure.
+                  `SidebarStat` has no "info" tone of its own, so this omits
+                  `tone` for the default, neutral styling. */}
               {streamNotice ? <SidebarStat label="Scan" value={streamNotice} /> : null}
             </div>
 
