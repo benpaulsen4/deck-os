@@ -75,7 +75,24 @@ jobs:
         shell: bash
         run: |
           rm -rf dist/server-deploy
-          pnpm --filter @deckos/server deploy dist/server-deploy --prod
+          # `pnpm deploy` refuses to run from pnpm 10 onward unless the
+          # workspace opts into injected workspace packages. The flag is set
+          # per-invocation rather than in pnpm-workspace.yaml on purpose:
+          # enabling it repo-wide would make every workspace dependency a
+          # copy instead of a symlink during development, so an edit to
+          # `packages/contracts` would stop reaching the server until the
+          # next install.
+          #
+          # Injection is also what makes the artifact self-contained.
+          # `--legacy` would satisfy pnpm just as well, but it links
+          # `@deckos/contracts` to `../../../../packages/contracts` -- a path
+          # outside the deploy directory. `scripts/package-release.mjs` then
+          # moves that directory into the tarball staging area, leaving a
+          # dangling symlink and a server that cannot resolve its own
+          # contracts at runtime. The built server is `tsc` output, not a
+          # bundle, so those imports are still live at runtime.
+          pnpm --filter @deckos/server deploy dist/server-deploy --prod \
+            --config.inject-workspace-packages=true
 
       - name: Package release
         run: node scripts/package-release.mjs
