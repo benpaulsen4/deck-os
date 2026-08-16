@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route } from "../apps/$appId";
+import { APP_BUSY_TITLE } from "../../hooks/useTRPCErrors";
 
 const { addToastSpy, navigateSpy, deleteSpy, removeContainerSpy, state } = vi.hoisted(() => ({
   addToastSpy: vi.fn(),
@@ -33,6 +34,13 @@ const { addToastSpy, navigateSpy, deleteSpy, removeContainerSpy, state } = vi.ho
         status: string;
       }>;
     },
+    // Names which lifecycle mutation (in the fixed hook-call order $appId.tsx
+    // declares them) should report isPending: true, so a test can drive
+    // isAppBusy from a mutation *other than* removeUnknownContainer -- the
+    // scenario #18 fixed for start/stop/restart/delete but H4 had to close
+    // for the remove-unknown-container button (a start left in flight while
+    // the button is clicked, not the removal itself).
+    busyMutationLabel: null as string | null,
   },
 }));
 
@@ -71,36 +79,49 @@ vi.mock("../../stores/toast", () => ({
   useToastStore: () => ({ addToast: addToastSpy }),
 }));
 
-vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({
-    invalidateQueries: vi.fn(async () => {}),
-  }),
-  useQuery: (input: unknown) => {
-    const maybe = input as { queryKey?: unknown[] };
-    if (Array.isArray(maybe.queryKey) && maybe.queryKey[0] === "stackStatus") {
-      return { data: state.stackData, isLoading: false };
-    }
-    return { data: state.appData, isLoading: false, error: null, isError: false };
-  },
-  useMutation: (opts: {
-    mutationFn: (...args: unknown[]) => Promise<unknown>;
-    onSuccess?: (...args: unknown[]) => void;
-    onError?: (...args: unknown[]) => void;
-    onSettled?: (...args: unknown[]) => void;
-  }) => ({
-    isPending: false,
-    mutate: async (...args: unknown[]) => {
-      try {
-        const result = await opts.mutationFn(...args);
-        opts.onSuccess?.(result, ...args);
-      } catch (error) {
-        opts.onError?.(error, ...args);
-      } finally {
-        opts.onSettled?.();
+vi.mock("@tanstack/react-query", () => {
+  // $appId.tsx declares its five lifecycle mutations via useMutation in this
+  // fixed order on every render (unconditional hook calls), so a call-index
+  // counter reliably identifies which one a given call is -- letting a test
+  // mark e.g. "start" pending without a mutationKey to match on.
+  const mutationOrder = ["start", "stop", "restart", "removeContainer", "delete"];
+  let mutationCallIndex = 0;
+
+  return {
+    useQueryClient: () => ({
+      invalidateQueries: vi.fn(async () => {}),
+    }),
+    useQuery: (input: unknown) => {
+      const maybe = input as { queryKey?: unknown[] };
+      if (Array.isArray(maybe.queryKey) && maybe.queryKey[0] === "stackStatus") {
+        return { data: state.stackData, isLoading: false };
       }
+      return { data: state.appData, isLoading: false, error: null, isError: false };
     },
-  }),
-}));
+    useMutation: (opts: {
+      mutationFn: (...args: unknown[]) => Promise<unknown>;
+      onSuccess?: (...args: unknown[]) => void;
+      onError?: (...args: unknown[]) => void;
+      onSettled?: (...args: unknown[]) => void;
+    }) => {
+      const label = mutationOrder[mutationCallIndex % mutationOrder.length];
+      mutationCallIndex += 1;
+      return {
+        isPending: state.busyMutationLabel === label,
+        mutate: async (...args: unknown[]) => {
+          try {
+            const result = await opts.mutationFn(...args);
+            opts.onSuccess?.(result, ...args);
+          } catch (error) {
+            opts.onError?.(error, ...args);
+          } finally {
+            opts.onSettled?.();
+          }
+        },
+      };
+    },
+  };
+});
 
 function getRouteComponent() {
   const component = Route.options.component;
@@ -119,6 +140,7 @@ describe("apps detail route", () => {
     vi.spyOn(Route, "useParams").mockReturnValue({ appId: "missing-app" } as never);
     state.appData = undefined;
     state.stackData = { running: 0, containers: [] };
+    state.busyMutationLabel = null;
   });
 
   it("shows not found state safely", () => {
@@ -247,5 +269,46 @@ describe("apps detail route", () => {
       })
     );
     expect(addToastSpy).toHaveBeenCalledWith("Unknown container removed", "success");
+  });
+
+  it("disables and titles the remove-unknown-container button while a different lifecycle mutation is pending", () => {
+    // #18 gated START/STOP/RESTART/DELETE on isAppBusy; H4 threads the same
+    // isAppBusy into ContainerTable as `appBusy` so REMOVE doesn't take a
+    // CONFLICT while e.g. a start is in flight. Mark "start" pending (not
+    // "removeContainer") so this only passes if the parent's isAppBusy is
+    // genuinely reaching the button, not just the button's own pending state.
+    state.appData = {
+      id: "app-1",
+      metadata: { name: "A", description: "D", icon: "", url: "https://example.com" },
+    };
+    state.stackData = {
+      running: 0,
+      containers: [
+        {
+          id: "cid-unknown",
+          names: ["/orphaned-web"],
+          image: "nginx:latest",
+          imageId: "img-1",
+          created: 1,
+          state: {
+            status: "created",
+            running: false,
+            paused: false,
+            restarting: false,
+            dead: false,
+            pid: 0,
+          },
+          status: "Created",
+        },
+      ],
+    };
+    state.busyMutationLabel = "start";
+
+    const Component = getRouteComponent();
+    render(<Component />);
+
+    const removeButton = screen.getByRole("button", { name: "REMOVE" });
+    expect(removeButton).toBeDisabled();
+    expect(removeButton).toHaveAttribute("title", APP_BUSY_TITLE);
   });
 });

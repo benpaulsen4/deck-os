@@ -298,6 +298,7 @@ function AppDetailPage() {
                 <ContainerTable
                   containers={stackStatus?.containers || []}
                   removingContainerId={removingContainerId}
+                  appBusy={isAppBusy}
                   onRemoveUnknownContainer={(container) => {
                     setRemoveContainerTarget({
                       id: container.id,

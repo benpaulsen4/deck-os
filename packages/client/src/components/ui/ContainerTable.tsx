@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { trpcClient } from "../../trpc";
 import { Button } from "./Button";
+import { APP_BUSY_TITLE } from "../../hooks/useTRPCErrors";
 
 interface ContainerInfo {
   id: string;
@@ -40,12 +41,21 @@ interface ContainerTableProps {
   containers: ContainerInfo[];
   onRemoveUnknownContainer?: (container: ContainerInfo) => void;
   removingContainerId?: string | null;
+  /**
+   * Mirrors the parent's isAppBusy: the app-lifecycle procedures serialise work
+   * per app, so removing an unknown container can take a CONFLICT the same way
+   * start/stop/restart/delete can. #18 gated that group; this closes the gap
+   * for the remove button, which previously disabled only on its own pending
+   * state.
+   */
+  appBusy?: boolean;
 }
 
 export function ContainerTable({
   containers,
   onRemoveUnknownContainer,
   removingContainerId = null,
+  appBusy = false,
 }: ContainerTableProps) {
   const [containerStats, setContainerStats] = useState<
     Record<string, { cpu: number; memory: number; memoryBytes: number }>
@@ -201,6 +211,8 @@ export function ContainerTable({
     return <div style={emptyStyle}>No containers</div>;
   }
 
+  const busyTitle = appBusy ? APP_BUSY_TITLE : undefined;
+
   return (
     <div className="container-table-scroll">
       <table className="container-table" style={tableStyle}>
@@ -307,7 +319,8 @@ export function ContainerTable({
                       <Button
                         variant="danger"
                         onClick={() => onRemoveUnknownContainer(container)}
-                        disabled={removingContainerId === container.id}
+                        disabled={removingContainerId === container.id || appBusy}
+                        title={busyTitle}
                         style={{ minHeight: "32px", padding: "6px 12px", fontSize: "var(--text-xs)" }}
                       >
                         {removingContainerId === container.id ? "REMOVING" : "REMOVE"}
