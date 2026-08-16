@@ -26,6 +26,7 @@ const DiskAnalysisIssueCodeSchema = z.enum([
   "path-not-found",
   "symlink-skipped",
   "partial-scan",
+  "nested-mount-skipped",
   "unknown",
 ]);
 
@@ -113,7 +114,32 @@ const DiskAnalysisJobStateSchema = z.object({
   startedAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
   progress: DiskAnalysisProgressSchema,
+  // Bounded to a display-sized cap by the service (currently 100 entries),
+  // independent of how many problems the scan actually encountered -- see
+  // `issueCount`. Progress events in particular carry this empty; the
+  // populated array belongs on status/snapshot events.
   issues: z.array(DiskAnalysisIssueSchema).default([]),
+  // Total problems encountered, not issue objects retained: many occurrences
+  // (e.g. symlinks skipped under one directory) can aggregate into a single
+  // issue object, so this can exceed `issues.length` once the array is
+  // capped. This is the number the UI shows -- "how much did the scan miss".
+  // `.default(0)`, not bare -- z.infer's *output* type for a defaulted field
+  // is still required (see `issues` two lines up: every consumer supplies
+  // it), so this keeps consumers seeing a plain `number` while still
+  // parsing input that predates this field.
+  issueCount: z.number().int().nonnegative().default(0),
+  // Finding 2, final whole-branch review: `issueCount` above is the total
+  // across every issue code, including `symlink-skipped`, which B1/B5
+  // deliberately excluded from partiality (see `PARTIAL_RESULT_CODES` in the
+  // service) because a dropped symlink is not a lower bound on the totals.
+  // On an unprivileged scan of a real filesystem, symlinks routinely
+  // outnumber the permission-denied directories that actually made the scan
+  // partial by one to three orders of magnitude, so the "totals are a lower
+  // bound" banner needs a count scoped to the codes that actually mean that
+  // -- this is that count. `.default(0)` for the same reason `issueCount`
+  // carries it: a snapshot or job state from before this field existed must
+  // still parse.
+  partialIssueCount: z.number().int().nonnegative().default(0),
   limits: DiskAnalysisResourceLimitsSchema,
 });
 
@@ -135,6 +161,40 @@ const DiskAnalysisSnapshotSchema = z.object({
     totalDirectories: z.number().int().nonnegative(),
   }),
   issues: z.array(DiskAnalysisIssueSchema).default([]),
+  // Same cap-independent count as DiskAnalysisJobStateSchema.issueCount --
+  // once a job is pruned (FINISHED_JOB_TTL), the cached snapshot is the only
+  // surviving record of a scan, and `issues.length` alone under-reports a
+  // truncated array with no indication it was truncated.
+  //
+  // `.default(0)` is load-bearing here, not just symmetry with the job-state
+  // field above: this schema is parsed on the cache *read* path
+  // (`readPersistedCache`) against a JSON file that may have been written by
+  // an older version of this service -- a snapshot from before this field
+  // existed (including this branch's own prior commit) has no
+  // `snapshot.issueCount` at all. A bare (non-defaulted) field would fail
+  // that parse, and the catch quarantines the file as `.corrupt-<epoch>`,
+  // discarding a perfectly good cache entry on every upgrade.
+  issueCount: z.number().int().nonnegative().default(0),
+  // Same cap-independent, code-scoped count as
+  // `DiskAnalysisJobStateSchema.partialIssueCount` -- see the comment there.
+  // `.default(0)` is load-bearing here for the same reason it is on
+  // `issueCount` two lines up: this schema is parsed on the cache *read*
+  // path against a JSON file that may predate this field.
+  partialIssueCount: z.number().int().nonnegative().default(0),
+  // Whether these totals are a lower bound -- the same fact the job reports as
+  // `phase: "partial"`, recorded where it can outlive the job.
+  //
+  // `DiskAnalysisMountStateSchema.activeJob` only ever carries a queued or
+  // scanning job (the service filters on `isActivePhase`), so a job in the
+  // terminal `"partial"` phase is visible *only* to the client that watched it
+  // get there over SSE. Without this flag the "totals are a lower bound"
+  // warning vanished on the next page load, which is most of the times anyone
+  // looks at a scan.
+  //
+  // `.default(false)` for exactly the reason `issueCount` above is
+  // `.default(0)`: this schema is parsed on the cache read path against files
+  // older versions of the service wrote.
+  partial: z.boolean().default(false),
 });
 
 const DiskAnalysisSnapshotEnvelopeSchema = z.object({

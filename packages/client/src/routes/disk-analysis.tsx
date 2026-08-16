@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, ArrowLeft, PanelLeft, Play } from "lucide-react";
+import { AlertTriangle, ArrowLeft, PanelLeft, Play, X } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { useToastStore } from "../stores/toast";
 import { emitUnauthorizedEvent, fetchAuthStatus } from "../lib/auth";
@@ -15,12 +15,17 @@ import {
 } from "@deckos/contracts";
 import {
   createPresentationTree,
+  createSnapshotPresentationTree,
   createSyntheticLiveRoot,
   deriveLegendFromSnapshot,
+  describeCancelScanError,
+  describeScanStartError,
+  getEventMountIdentity,
   formatBytes,
   formatCount,
   formatRelativeGeneratedAt,
   getMountLabel,
+  getMountStatePollIntervalMs,
   getNodeNavigationSearch,
   integrateBranchIntoTree,
   resolveHoveredNode,
@@ -84,6 +89,7 @@ function DiskAnalysisPage() {
   const [liveJob, setLiveJob] = useState<DiskAnalysisJobState | null>(null);
   const [streamPath, setStreamPath] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [streamNotice, setStreamNotice] = useState<string | null>(null);
   const [hoveredPath, setHoveredPath] = useState<string | null>(null);
   const [isIssuesModalOpen, setIsIssuesModalOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(true);
@@ -91,6 +97,8 @@ function DiskAnalysisPage() {
   const [hasRequestedLive, setHasRequestedLive] = useState(false);
   const requestedStreamKeyRef = useRef<string | null>(null);
   const liveRawRootRef = useRef<DiskAnalysisTreemapNode | null>(null);
+  /** The job id a pending `startScan` was meant to join, or null if it was a fresh scan. */
+  const expectedJobIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     setLiveRoot(null);
@@ -98,12 +106,14 @@ function DiskAnalysisPage() {
     setLiveJob(null);
     setStreamPath(null);
     setStreamError(null);
+    setStreamNotice(null);
     setHoveredPath(null);
     setIsIssuesModalOpen(false);
     setMobileSidebarOpen(true);
     setHasRequestedLive(false);
     requestedStreamKeyRef.current = null;
     liveRawRootRef.current = null;
+    expectedJobIdRef.current = null;
   }, [mountKey]);
 
   useEffect(() => {
@@ -131,6 +141,11 @@ function DiskAnalysisPage() {
   const mountStateQuery = useQuery(
     trpc.diskAnalysis.getMountState.queryOptions(mount ?? { mount: "", fs: "" }, {
       enabled: !!mount,
+      // See `getMountStatePollIntervalMs` -- keeps `canWatchRunningScan`
+      // truthful while a job is actually running, and stops polling the
+      // instant one isn't, so a page left open never grows a timer that
+      // outlives the scan it was watching for.
+      refetchInterval: (query) => getMountStatePollIntervalMs(query.state.data ?? null),
     })
   );
   const snapshotQuery = useQuery(
@@ -145,20 +160,73 @@ function DiskAnalysisPage() {
         mount: input,
       }),
     onSuccess: (result) => {
+      // The job this request meant to join, recorded at click time. `startScan`
+      // joins an active job for the mount and starts a new one otherwise, and
+      // the client does not get to assume which happened: if the job settled
+      // during the round trip the server will have answered with a different,
+      // freshly started scan. Streaming that silently, under a button that said
+      // "watch the running scan", is the one thing worse than the extra scan.
+      const expectedJobId = expectedJobIdRef.current;
+      expectedJobIdRef.current = null;
       setStreamPath(result.streamPath);
       setStreamError(null);
+      if (expectedJobId && expectedJobId !== result.jobId) {
+        // Notice only, no toast: this sits next to the stream status it
+        // describes, self-clears when that stream ends (`endStream` below),
+        // and can't be missed by someone watching this sidebar for a scan
+        // they just started.
+        setStreamNotice(
+          "The scan you asked to watch had already finished - this is a new scan that just started."
+        );
+        return;
+      }
+      setStreamNotice(null);
     },
     onError: (error: unknown) => {
-      const message =
-        error instanceof Error ? error.message : "Failed to start disk analysis scan";
+      // A refused path and a busy scanner are different answers -- see
+      // `describeScanStartError` and the router's `mapDiskAnalysisError`.
+      const message = describeScanStartError(error);
       setStreamError(message);
       addToast(message, "error");
+    },
+  });
+
+  const cancelScanMutation = useMutation({
+    mutationFn: async (input: { mount: DiskAnalysisMountIdentity; jobId: string }) =>
+      await trpcClient.diskAnalysis.cancelScan.mutate(input),
+    onSuccess: (result: { success: boolean }) => {
+      if (!result.success) {
+        // Not an error: the job the button captured at click time had
+        // already finished (or been superseded) by the time the request
+        // landed on the server -- `diskAnalysisService.cancelScan` reports
+        // that as `{ success: false }`, the same "the world moved on"
+        // outcome `onSuccess` above already treats as informational rather
+        // than a failure for a mismatched `startScan` join.
+        addToast("That scan had already finished.", "info");
+        return;
+      }
+      // A successful cancel does not end the job synchronously -- the
+      // service sets phase `cancelled` and the worker still has to unwind
+      // out of `readdir` (the "still winding down" guard below exists for
+      // exactly this window). So there is nothing further to do here: the
+      // existing SSE stream and `getMountStatePollIntervalMs` polling will
+      // observe the terminal phase on their own. Forcing a refetch from
+      // here would be a second, redundant path into that same wind-down
+      // window.
+    },
+    onError: (error: unknown) => {
+      addToast(describeCancelScanError(error), "error");
     },
   });
 
   const cachedSnapshot = snapshotQuery.data?.snapshot ?? null;
   const mountState = mountStateQuery.data ?? null;
   const activeJob = liveJob ?? mountState?.activeJob ?? null;
+  // The one signal for "a scan is actually running right now", reused by
+  // `canWatchRunningScan`, the live-vs-cached presentation budget below, and
+  // the Cancel Scan button -- rather than each inventing its own notion of
+  // "running" against `activeJob`.
+  const isJobActive = activeJob?.phase === "queued" || activeJob?.phase === "scanning";
   const diskAnalysisQueriesSettled =
     !mountStateQuery.isLoading &&
     !mountStateQuery.isFetching &&
@@ -170,6 +238,7 @@ function DiskAnalysisPage() {
     setLiveSnapshot(null);
     setLiveJob(null);
     setStreamError(null);
+    setStreamNotice(null);
     requestedStreamKeyRef.current = null;
     liveRawRootRef.current = null;
   };
@@ -186,6 +255,9 @@ function DiskAnalysisPage() {
       return;
     }
     requestedStreamKeyRef.current = requestKey;
+    // Null when there is nothing to join, which is the "start a new scan" case
+    // and has no expectation to disappoint. See `onSuccess`.
+    expectedJobIdRef.current = mountState?.activeJob?.jobId ?? null;
     startScanMutation.mutate(mount);
   };
 
@@ -214,6 +286,17 @@ function DiskAnalysisPage() {
     }
   };
 
+  /**
+   * The one path into `startScan`, shared by "Start Scan", "Scan This Mount"
+   * and "Watch Running Scan". There is deliberately no effect anywhere in
+   * this component that calls it automatically — every scan start is a
+   * user-initiated click.
+   *
+   * The three buttons differ in what they promise the user, not in what they
+   * do: the server decides whether this joins the job already running on the
+   * mount or starts a new one, and `onSuccess` reports back when that decision
+   * was not the one the button implied.
+   */
   const startManualScan = () => {
     setHasRequestedLive(true);
     setViewMode("live");
@@ -221,47 +304,6 @@ function DiskAnalysisPage() {
       resetLiveState: true,
     });
   };
-
-  const hasTerminalLiveResult =
-    !!liveSnapshot ||
-    !!liveRoot ||
-    liveJob?.phase === "completed" ||
-    liveJob?.phase === "partial" ||
-    liveJob?.phase === "failed" ||
-    liveJob?.phase === "cancelled";
-
-  useEffect(() => {
-    if (!mount || !mountState) {
-      return;
-    }
-    if (!diskAnalysisQueriesSettled) {
-      return;
-    }
-    if (mountState.cache.state !== "missing") {
-      return;
-    }
-    if (hasRequestedLive) {
-      return;
-    }
-    if (hasTerminalLiveResult) {
-      return;
-    }
-    setHasRequestedLive(true);
-    setViewMode("live");
-    requestLiveStream({
-      resetLiveState: true,
-    });
-  }, [
-    mount,
-    mountState,
-    mountState?.cache.state,
-    mountState?.activeJob?.jobId,
-    mountKey,
-    streamPath,
-    diskAnalysisQueriesSettled,
-    hasRequestedLive,
-    hasTerminalLiveResult,
-  ]);
 
   useEffect(() => {
     if (cachedSnapshot) {
@@ -300,12 +342,11 @@ function DiskAnalysisPage() {
 
     liveRawRootRef.current = cachedSnapshot.root;
     setLiveSnapshot(cachedSnapshot);
-    setLiveRoot(createPresentationTree(cachedSnapshot.root, LIVE_PRESENTATION_OPTIONS));
+    setLiveRoot(createSnapshotPresentationTree(cachedSnapshot.root, LIVE_PRESENTATION_OPTIONS));
   }, [activeJob, cachedSnapshot, liveSnapshot, mountState]);
-  const livePresentationOptions =
-    activeJob?.phase === "queued" || activeJob?.phase === "scanning"
-      ? LIVE_SCANNING_PRESENTATION_OPTIONS
-      : LIVE_PRESENTATION_OPTIONS;
+  const livePresentationOptions = isJobActive
+    ? LIVE_SCANNING_PRESENTATION_OPTIONS
+    : LIVE_PRESENTATION_OPTIONS;
 
   useEffect(() => {
     if (!streamPath || !mount) {
@@ -318,6 +359,39 @@ function DiskAnalysisPage() {
     const pendingBranches = new Map<string, DiskAnalysisTreemapNode>();
     const queuedBranches: DiskAnalysisTreemapNode[] = [];
     let pendingJob: DiskAnalysisJobState | null = null;
+    // Progress events carry an empty `issues` array by design (see
+    // packages/server/src/services/diskAnalysis.ts -- only `issueCount`
+    // travels on the ~500ms progress cadence; the populated, capped array
+    // belongs to status/snapshot events). Overwriting the last known
+    // (populated) array with `[]` on every tick blanked the live issues
+    // panel for the whole scan and, combined with the modal-close effect
+    // below, force-closed an open Scan Issues modal out from under the user
+    // reading it. This tracks the last array a status/snapshot event
+    // actually populated, so progress events can keep showing it.
+    //
+    // Seeded from `mountState?.activeJob?.issues` as well as `liveJob?.issues`:
+    // attaching to a job that was already scanning before this connection
+    // opened has no prior "status" event to seed from -- the only source of
+    // truth for what's showing right now is the mount-state snapshot the
+    // page loaded with.
+    let lastKnownIssues: DiskAnalysisJobState["issues"] =
+      liveJob?.issues ?? mountState?.activeJob?.issues ?? [];
+    // The mount identity the *server* is using, which is the only one the
+    // streamed paths agree with.
+    //
+    // Every path in the tree descends from `path.resolve(mount)`, while
+    // `mount` here is parsed straight out of the `?mount=` search param. When
+    // those two strings differ, no branch ever equals the root, so
+    // `buildAncestorChain` walks past it to `/` and hangs the whole live tree
+    // under a phantom node one level too deep. A trailing separator is the
+    // easiest way to see it, but `.`/`..` segments, doubled separators and
+    // Windows drive-letter case do it too -- and none of them can be undone
+    // client-side, because `path.resolve` needs a cwd and a platform the
+    // browser does not have. So rather than guess, take the identity the
+    // server puts on its own events: `job.mount`/`branch.mount` are
+    // `ensureJob`'s resolved mount. Seeded from the mount-state query for the
+    // window before the first event lands.
+    let liveMount: DiskAnalysisMountIdentity = mountState?.activeJob?.mount ?? mount;
     let mergeRoot = liveRawRootRef.current;
     let lastPublishedAtMs = 0;
     const source = new EventSource(streamPath);
@@ -347,13 +421,13 @@ function DiskAnalysisPage() {
         }
 
         const mergeStartedAt = performance.now();
-        let nextRoot = mergeRoot ?? createSyntheticLiveRoot(mount);
+        let nextRoot = mergeRoot ?? createSyntheticLiveRoot(liveMount);
         while (queuedBranches.length > 0) {
           const branch = queuedBranches.shift();
           if (!branch) {
             continue;
           }
-          nextRoot = integrateBranchIntoTree(nextRoot, mount, branch);
+          nextRoot = integrateBranchIntoTree(nextRoot, liveMount, branch);
           if (performance.now() - mergeStartedAt >= 12) {
             break;
           }
@@ -411,6 +485,16 @@ function DiskAnalysisPage() {
       flushTimer = window.setTimeout(flushPending, LIVE_EVENT_BATCH_MS);
     };
 
+    // Whatever ends this stream -- a terminal status/progress event or a
+    // snapshot event, the two places that call `setStreamPath(null)` below --
+    // must also retire the mismatch notice describing it. Without this it
+    // outlived the scan it was reporting on (B7 review round 2, finding 4;
+    // round 3 found the fix only covered one of the two endings).
+    const endStream = () => {
+      setStreamPath(null);
+      setStreamNotice(null);
+    };
+
     const handleEvent = (event: Event) => {
       if (disposed) {
         return;
@@ -418,8 +502,18 @@ function DiskAnalysisPage() {
       try {
         const messageEvent = event as MessageEvent<string>;
         const parsed = DiskAnalysisScanEventSchema.parse(JSON.parse(messageEvent.data));
+        // One assignment, at the entry point, for every event shape that names
+        // a mount -- the per-shape discrimination lives in (and is tested as)
+        // `getEventMountIdentity`. A keepalive names none, so the last known
+        // identity stands.
+        liveMount = getEventMountIdentity(parsed) ?? liveMount;
         if (parsed.event === "status" || parsed.event === "progress") {
-          pendingJob = parsed.job;
+          if (parsed.event === "status") {
+            lastKnownIssues = parsed.job.issues;
+            pendingJob = parsed.job;
+          } else {
+            pendingJob = { ...parsed.job, issues: lastKnownIssues };
+          }
           if (
             parsed.job.phase === "completed" ||
             parsed.job.phase === "partial" ||
@@ -436,7 +530,7 @@ function DiskAnalysisPage() {
                 queryKey: snapshotQueryKey,
               });
             }
-            setStreamPath(null);
+            endStream();
             return;
           }
           scheduleFlush();
@@ -454,6 +548,7 @@ function DiskAnalysisPage() {
             mergeTimer = null;
           }
           queuedBranches.length = 0;
+          lastKnownIssues = parsed.job.issues;
           setLiveJob(parsed.job);
           setLiveSnapshot(parsed.snapshot);
           mergeRoot = parsed.snapshot.root;
@@ -461,7 +556,7 @@ function DiskAnalysisPage() {
           lastPublishedAtMs = performance.now();
           publishPresentation(parsed.snapshot.root);
           requestedStreamKeyRef.current = null;
-          setStreamPath(null);
+          endStream();
           void queryClient.invalidateQueries({
             queryKey: mountStateQueryKey,
           });
@@ -522,11 +617,25 @@ function DiskAnalysisPage() {
         : cachedSnapshot
           ? "cached"
           : ("live" satisfies ViewMode);
+  // DISK-15: pruning used to reach only the in-progress tree, so a cached or
+  // just-completed snapshot went to the treemap whole. Both memos are keyed on
+  // the root object, which is also what the hover index caches against -- for
+  // a tree under the node budget `createSnapshotPresentationTree` returns that
+  // very object, so nothing downstream sees a new identity and nothing is
+  // re-indexed.
+  const cachedRootForView = useMemo(
+    () => createSnapshotPresentationTree(cachedSnapshot?.root ?? null, LIVE_PRESENTATION_OPTIONS),
+    [cachedSnapshot?.root]
+  );
+  const liveSnapshotRootForView = useMemo(
+    () => createSnapshotPresentationTree(liveSnapshot?.root ?? null, LIVE_PRESENTATION_OPTIONS),
+    [liveSnapshot?.root]
+  );
   const liveRootForView =
     activeJob?.phase === "queued" || activeJob?.phase === "scanning"
       ? liveRoot
-      : liveSnapshot?.root ?? liveRoot;
-  const currentRoot = activeView === "cached" ? cachedSnapshot?.root ?? null : liveRootForView;
+      : liveSnapshotRootForView ?? liveRoot;
+  const currentRoot = activeView === "cached" ? cachedRootForView : liveRootForView;
   const currentSnapshot = activeView === "cached" ? cachedSnapshot : liveSnapshot;
   const legend =
     activeView === "cached"
@@ -542,11 +651,22 @@ function DiskAnalysisPage() {
     () =>
       resolveHoveredNode(
         currentRoot,
-        activeView === "live" ? liveRawRootRef.current : currentRoot,
+        // The unpruned tree behind the view, for a real miss case: during an
+        // active scan `currentRoot` is a fresh `createPresentationTree` output
+        // republished every merge (~`LIVE_MERGE_PUBLISH_MS`), and its keep/drop
+        // decision per node is that node's byte share of the *running* total
+        // (`minShareByDepth`). A directory kept -- and hovered -- in one
+        // publish can drop below its depth's threshold in the next as more
+        // data streams in, and gets folded into "Everything Else". `hoveredPath`
+        // only changes on an actual pointer/keyboard event, so it can still
+        // name that now-pruned path until the next one arrives. This is where
+        // that lookup is served from, instead of falling through to the
+        // whole-tree fallback below.
+        activeView === "live" ? liveRawRootRef.current : cachedSnapshot?.root ?? null,
         hoveredPath,
-        cachedSnapshot?.root ?? null
+        cachedRootForView
       ),
-    [activeView, cachedSnapshot?.root, currentRoot, hoveredPath]
+    [activeView, cachedRootForView, cachedSnapshot?.root, currentRoot, hoveredPath]
   );
   const issueList = useMemo(() => {
     if (activeView === "live" && activeJob) {
@@ -585,14 +705,57 @@ function DiskAnalysisPage() {
   const processedBytes = activeJob?.progress.bytesProcessed ?? totals?.totalBytes ?? 0;
   const canStartManualScan =
     !!mount && diskAnalysisQueriesSettled && !mountState?.activeJob;
+  // Offered in place of the deleted attach effect. Gated on the job still
+  // being in flight so a job that ended without a snapshot event does not get
+  // advertised as watchable, and on there being no stream already open.
+  const canWatchRunningScan =
+    !!mount && !streamPath && !startScanMutation.isPending && isJobActive;
   const manualScanLabel = cachedSnapshot ? "Start New Scan" : "Start Scan";
-  const showToolbarActions = canStartManualScan || issueList.length > 0;
+  const showToolbarActions = canStartManualScan || issueList.length > 0 || isJobActive;
+  // B1/B5: a job reaches "partial" when anything made the totals a lower
+  // bound. `partialIssueCount` (final whole-branch review, finding 2) is the
+  // count scoped to the codes that actually mean that -- `PARTIAL_RESULT_CODES`
+  // on the server -- not `issueCount`, which totals every code including
+  // `symlink-skipped`, deliberately excluded from partiality because a
+  // dropped symlink is not a lower bound on the totals. On an unprivileged
+  // scan of a real filesystem, symlinks routinely outnumber the
+  // permission-denied directories that actually made the scan partial by one
+  // to three orders of magnitude, so quoting `issueCount` here would have
+  // overstated the banner by the same margin. `partialIssueCount` carries
+  // `.default(0)` on the wire so a snapshot cached before the field existed
+  // still parses, and that combination (partial, count 0) is reachable. "0
+  // directories were unreadable" would contradict the warning it is attached
+  // to, so the count-free wording covers it.
+  //
+  // Read from two places on purpose. `activeJob.phase` is the only source
+  // while a scan is being watched live, but `getMountState` filters
+  // `activeJob` to queued/scanning jobs, so the terminal "partial" phase is
+  // visible *only* to the client that saw it arrive over SSE. On every
+  // subsequent page load -- and after the job is pruned entirely -- the
+  // snapshot's own `partial` flag is what is left (B7 review round 1,
+  // finding 2).
+  const isPartialResult = activeJob?.phase === "partial" || currentSnapshot?.partial === true;
+  const partialIssueCount =
+    activeJob?.phase === "partial"
+      ? activeJob.partialIssueCount
+      : (currentSnapshot?.partialIssueCount ?? 0);
+  const partialResultMessage =
+    partialIssueCount > 0
+      ? `${formatCount(partialIssueCount)} directories were unreadable - totals are a lower bound.`
+      : "Some directories were unreadable - totals are a lower bound.";
 
   const openInFiles = (node: DiskAnalysisTreemapNode) => {
     void navigate({
       to: "/files",
       search: getNodeNavigationSearch(node),
     });
+  };
+
+  const handleCancelScan = () => {
+    if (!activeJob || cancelScanMutation.isPending) {
+      return;
+    }
+    cancelScanMutation.mutate({ mount: activeJob.mount, jobId: activeJob.jobId });
   };
 
   if (!mount) {
@@ -647,6 +810,22 @@ function DiskAnalysisPage() {
                     </span>
                     <span className="disk-analysis-toolbar__label disk-analysis-toolbar__label--compact">
                       {startScanMutation.isPending ? "..." : "Scan"}
+                    </span>
+                  </Button>
+                ) : null}
+                {isJobActive ? (
+                  <Button
+                    variant="secondary"
+                    aria-label={cancelScanMutation.isPending ? "Cancelling Scan" : "Cancel Scan"}
+                    onClick={handleCancelScan}
+                    disabled={cancelScanMutation.isPending}
+                  >
+                    <X size={14} />
+                    <span className="disk-analysis-toolbar__label disk-analysis-toolbar__label--full">
+                      {cancelScanMutation.isPending ? "CANCELLING..." : "Cancel Scan"}
+                    </span>
+                    <span className="disk-analysis-toolbar__label disk-analysis-toolbar__label--compact">
+                      {cancelScanMutation.isPending ? "..." : "Cancel"}
                     </span>
                   </Button>
                 ) : null}
@@ -728,7 +907,19 @@ function DiskAnalysisPage() {
               <SidebarStat label="Job" value={liveStatus} />
               <SidebarStat label="Generated" value={formatRelativeGeneratedAt(generatedAt)} />
               {streamError ? <SidebarStat label="Stream" value={streamError} tone="bad" /> : null}
+              {/* Neutral tone, not "bad" -- attaching to a different scan than
+                  expected is a fact worth surfacing, not a failure.
+                  `SidebarStat` has no "info" tone of its own, so this omits
+                  `tone` for the default, neutral styling. */}
+              {streamNotice ? <SidebarStat label="Scan" value={streamNotice} /> : null}
             </div>
+
+            {isPartialResult ? (
+              <div className="disk-analysis-partial" role="status">
+                <AlertTriangle size={14} aria-hidden="true" />
+                <span>{partialResultMessage}</span>
+              </div>
+            ) : null}
 
             {activeJob ? (
               <div className="disk-analysis-progress">
@@ -767,6 +958,13 @@ function DiskAnalysisPage() {
               ) : (
                 <div className="disk-analysis-sidebar-empty">Legend data will appear after scanning.</div>
               )}
+              {/* Finding 4, final whole-branch review: a Borg/rsnapshot/`cp -al`
+                  backup directory shares storage between copies, and the tree
+                  has no other way to say so -- without this, the collapsed
+                  count reads like data loss rather than deduplication. */}
+              <div className="disk-analysis-sidebar-empty">
+                Files that share storage with another copy (hardlinks) are counted once, at their first path.
+              </div>
             </section>
           </aside>
 
@@ -795,6 +993,23 @@ function DiskAnalysisPage() {
                 onHoverNode={setHoveredPath}
                 onOpenNode={openInFiles}
               />
+            ) : canWatchRunningScan ? (
+              // Replaces the deleted attach effect. The page will not join a
+              // running scan by itself -- see the DISK-3 note above the view
+              // mode effects -- so the offer is a button.
+              <div className="disk-analysis-empty">
+                <div className="disk-analysis-empty__title">A scan is already running</div>
+                <div className="disk-analysis-empty__body">
+                  This mount is being scanned right now. Watching joins the scan already running
+                  and streams the directories as workers finish them.
+                </div>
+                <Button onClick={startManualScan} disabled={startScanMutation.isPending}>
+                  <Play size={14} />
+                  <span>
+                    {startScanMutation.isPending ? "STARTING..." : "Watch Running Scan"}
+                  </span>
+                </Button>
+              </div>
             ) : activeJob ? (
               <div className="disk-analysis-empty">
                 <div className="disk-analysis-empty__title">Assembling live tree</div>
@@ -803,12 +1018,23 @@ function DiskAnalysisPage() {
                 </div>
               </div>
             ) : (
+              // Nothing cached, nothing running. Since the page no longer
+              // starts a scan by itself, this is where the user is offered
+              // one -- the same action as the toolbar button, named
+              // differently so both remain unambiguous to anyone (or any test)
+              // resolving them by accessible name.
               <div className="disk-analysis-empty">
-                <div className="disk-analysis-empty__title">No analysis data available</div>
+                <div className="disk-analysis-empty__title">No analysis data yet</div>
                 <div className="disk-analysis-empty__body">
-                  Start a scan from Settings or refresh the page to request the latest mount
-                  status.
+                  Nothing has been scanned for this mount. Scanning walks the whole filesystem,
+                  so it only runs when you ask for it.
                 </div>
+                {canStartManualScan ? (
+                  <Button onClick={startManualScan} disabled={startScanMutation.isPending}>
+                    <Play size={14} />
+                    <span>{startScanMutation.isPending ? "STARTING..." : "Scan This Mount"}</span>
+                  </Button>
+                ) : null}
               </div>
             )}
           </section>

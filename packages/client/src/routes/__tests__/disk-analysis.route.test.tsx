@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithAppRouter } from "../../test/helpers/router";
 import {
@@ -41,6 +41,7 @@ type DiskTreeNode = {
 
 const {
   startScanSpy,
+  cancelScanSpy,
   addToastSpy,
   invalidateQueriesSpy,
   emitUnauthorizedEventSpy,
@@ -53,6 +54,7 @@ const {
     streamPath:
       "/api/disk-analysis/jobs/11111111-1111-1111-1111-111111111111/events?mount=C%3A%5C&fs=ntfs",
   })),
+  cancelScanSpy: vi.fn(async () => ({ success: true })),
   addToastSpy: vi.fn(),
   invalidateQueriesSpy: vi.fn(async () => {}),
   emitUnauthorizedEventSpy: vi.fn(),
@@ -134,6 +136,7 @@ vi.mock("../../trpc", () => ({
   trpcClient: {
     diskAnalysis: {
       startScan: { mutate: startScanSpy },
+      cancelScan: { mutate: cancelScanSpy },
     },
     files: {
       setPins: { mutate: vi.fn(async () => ({})) },
@@ -160,17 +163,28 @@ vi.mock("@tanstack/react-query", async () => {
       mutationFn: (...args: unknown[]) => Promise<unknown>;
       onSuccess?: (...args: unknown[]) => void;
       onError?: (...args: unknown[]) => void;
-    }) => ({
-      isPending: false,
-      mutate: async (...args: unknown[]) => {
-        try {
-          const result = await opts.mutationFn(...args);
-          opts.onSuccess?.(result, ...args);
-        } catch (error) {
-          opts.onError?.(error, ...args);
-        }
-      },
-    }),
+    }) => {
+      // A real `useState`, not a hardcoded `false`: this hook is called from
+      // inside the real component's render, so it can hold real state across
+      // re-renders the same way the actual `useMutation` does. Without this,
+      // "disabled while a mutation is in flight" has nothing to assert
+      // against -- every call would report `isPending: false` forever.
+      const [isPending, setIsPending] = useState(false);
+      return {
+        isPending,
+        mutate: async (...args: unknown[]) => {
+          setIsPending(true);
+          try {
+            const result = await opts.mutationFn(...args);
+            opts.onSuccess?.(result, ...args);
+          } catch (error) {
+            opts.onError?.(error, ...args);
+          } finally {
+            setIsPending(false);
+          }
+        },
+      };
+    },
     useQuery: (arg: unknown) => {
       const maybe = arg as { queryKey?: unknown[] };
       const key = maybe.queryKey?.[0];
@@ -304,6 +318,8 @@ describe("disk analysis route", () => {
     installEventSourceMock();
     resetEventSourceMocks();
     startScanSpy.mockClear();
+    cancelScanSpy.mockClear();
+    cancelScanSpy.mockResolvedValue({ success: true });
     addToastSpy.mockClear();
     invalidateQueriesSpy.mockClear();
     emitUnauthorizedEventSpy.mockClear();
@@ -334,6 +350,8 @@ describe("disk analysis route", () => {
           bytesProcessed: 128,
         },
         issues: [],
+        issueCount: 0,
+        partialIssueCount: 0,
         limits: {
           maxWorkers: 4,
           maxPendingDirectories: 1024,
@@ -361,6 +379,9 @@ describe("disk analysis route", () => {
           totalDirectories: 2,
         },
         issues: [],
+        issueCount: 0,
+        partialIssueCount: 0,
+        partial: false,
       },
     };
     state.fileLists = {
@@ -480,6 +501,9 @@ describe("disk analysis route", () => {
           totalDirectories: 2,
         },
         issues: [],
+        issueCount: 0,
+        partialIssueCount: 0,
+        partial: false,
       },
     };
 
@@ -579,6 +603,8 @@ describe("disk analysis route", () => {
           bytesProcessed: 1024,
         },
         issues: [],
+        issueCount: 0,
+        partialIssueCount: 0,
         limits: {
           maxWorkers: 4,
           maxPendingDirectories: 1024,
@@ -589,6 +615,12 @@ describe("disk analysis route", () => {
     state.snapshotEnvelope = null;
 
     renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    // B7 review round 1, finding 1: this used to assert that the page had
+    // already called `startScan` by itself on load. It no longer does -- see
+    // "never joins a running scan without a click" below -- so the stream this
+    // test needs is opened the way a user opens it.
+    fireEvent.click(await screen.findByRole("button", { name: "Watch Running Scan" }));
 
     await waitFor(() => expect(startScanSpy).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
@@ -613,6 +645,7 @@ describe("disk analysis route", () => {
           totalDirectories: 1,
         },
         issues: [],
+        issueCount: 0,
       },
     });
 
@@ -651,6 +684,9 @@ describe("disk analysis route", () => {
           totalDirectories: 2,
         },
         issues: [],
+        issueCount: 0,
+        partialIssueCount: 0,
+        partial: false,
       },
     };
 
@@ -697,6 +733,9 @@ describe("disk analysis route", () => {
           totalDirectories: 2,
         },
         issues: [],
+        issueCount: 0,
+        partialIssueCount: 0,
+        partial: false,
       },
     };
 
@@ -767,6 +806,9 @@ describe("disk analysis route", () => {
           totalDirectories: 2,
         },
         issues: [{ code: "permission-denied", path: "C:\\restricted", message: "Denied", recoverable: true }],
+        issueCount: 1,
+        partialIssueCount: 1,
+        partial: false,
       },
     };
 
@@ -824,6 +866,9 @@ describe("disk analysis route", () => {
           totalDirectories: 1,
         },
         issues: manyIssues,
+        issueCount: manyIssues.length,
+        partialIssueCount: manyIssues.length,
+        partial: false,
       },
     };
 
@@ -848,5 +893,649 @@ describe("disk analysis route", () => {
     expect(
       screen.getByText("Permission denied: C:\\restricted\\folder-204")
     ).toBeInTheDocument();
+  });
+
+  it("never starts a scan on its own when the cache is missing", async () => {
+    // DISK-3, client half. B6 removed the server-side auto-start that
+    // `getMountState` used to perform; this effect was the other half of it --
+    // merely opening the page with no cached snapshot committed the box to a
+    // full filesystem walk, and re-committed it on every navigation. Scanning
+    // is an explicit action now, so the empty state has to offer it.
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "missing",
+      },
+      activeJob: null,
+    };
+    state.snapshotEnvelope = null;
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    expect(await screen.findByText("No analysis data yet")).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(startScanSpy).not.toHaveBeenCalled();
+    expect(MockEventSource.instances).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Scan This Mount" }));
+
+    expect(startScanSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+  });
+
+  it("never joins a running scan without a click", async () => {
+    // B7 review round 1, finding 1 (CRITICAL). Gating the old attach effect on
+    // `mountState.activeJob` described the state at *query* time. A normally
+    // completing job clears its `unsettledJobIdByMount` entry the instant
+    // `runJob` resolves, so if it finished during the round trip the mutation
+    // landed on a server with no job to join -- and `startScan` started a
+    // brand-new full filesystem walk, from a page load, on every navigation
+    // back. There is now no code path into `startScan` that a click does not
+    // begin. Reinstating the effect fails this test on the first two
+    // assertions after the render.
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "missing",
+      },
+      activeJob: {
+        ...getActiveJob(),
+        phase: "scanning",
+      },
+    };
+    state.snapshotEnvelope = null;
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    expect(await screen.findByText("A scan is already running")).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(startScanSpy).not.toHaveBeenCalled();
+    expect(MockEventSource.instances).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Watch Running Scan" }));
+
+    expect(startScanSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+  });
+
+  it("says so when the scan it attached to is not the one it meant to watch", async () => {
+    // B7 review round 1, finding 3. Even with the click in place, the job the
+    // page meant to join can settle during the round trip and the server can
+    // answer with a different, freshly started one. Accepting whatever
+    // `streamPath` came back means silently streaming a scan the user did not
+    // ask for, presented as the one they clicked to watch.
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "missing",
+      },
+      activeJob: {
+        ...getActiveJob(),
+        phase: "scanning",
+      },
+    };
+    state.snapshotEnvelope = null;
+    startScanSpy.mockResolvedValueOnce({
+      jobId: "22222222-2222-2222-2222-222222222222",
+      phase: "queued",
+      streamPath:
+        "/api/disk-analysis/jobs/22222222-2222-2222-2222-222222222222/events?mount=C%3A%5C&fs=ntfs",
+    });
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Watch Running Scan" }));
+
+    const notice =
+      "The scan you asked to watch had already finished - this is a new scan that just started.";
+    expect(await screen.findByText(notice)).toBeInTheDocument();
+    // Notice only, no toast -- the sidebar notice is next to the stream
+    // status it describes and self-clears when that stream ends (see
+    // "clears the mismatch notice once the stream it describes ends" below).
+    expect(addToastSpy).not.toHaveBeenCalledWith(notice, "info");
+  });
+
+  it("clears the mismatch notice once the stream it describes ends", async () => {
+    // B7 review round 2, finding 4; round 3 found the round-2 fix incomplete.
+    // The server emits `snapshot` immediately before the terminal `status`,
+    // synchronously on the same connection, for a normally completing scan
+    // (`services/diskAnalysis.ts`). The client's `snapshot` handler calls
+    // `setStreamPath(null)`, which tears the SSE effect down --
+    // `removeEventListener` plus `source.close()` -- before the browser ever
+    // dispatches the already-queued `status` event (per the EventSource
+    // spec, a queued event only fires while `readyState !== CLOSED`, and
+    // `close()` sets that synchronously). So `snapshot` is the event that
+    // actually ends the stream for every completed or partial scan; a fix
+    // that only cleared the notice in the terminal status/progress branch
+    // never fired in that common case, and only cleared it for `cancelled`
+    // / `failed` jobs, which skip `snapshot` and go straight to a terminal
+    // `status`.
+    //
+    // `MockEventSource.dispatchMessage` calls listeners synchronously with
+    // no task-queue semantics, so dispatching `snapshot` immediately
+    // followed by `status` here would not reproduce that teardown
+    // faithfully -- both would run against the same closure before React
+    // ever gets to tear the effect down, which the mock would tolerate but
+    // a real browser would not. So this asserts on the state after
+    // `snapshot` alone, which is the event that genuinely ends the stream.
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "missing",
+      },
+      activeJob: {
+        ...getActiveJob(),
+        phase: "scanning",
+      },
+    };
+    state.snapshotEnvelope = null;
+    const newJobId = "44444444-4444-4444-4444-444444444444";
+    startScanSpy.mockResolvedValueOnce({
+      jobId: newJobId,
+      phase: "queued",
+      streamPath: `/api/disk-analysis/jobs/${newJobId}/events?mount=C%3A%5C&fs=ntfs`,
+    });
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Watch Running Scan" }));
+
+    const notice =
+      "The scan you asked to watch had already finished - this is a new scan that just started.";
+    expect(await screen.findByText(notice)).toBeInTheDocument();
+
+    // The notice and the stream path are set by the same `onSuccess`, so the
+    // text asserted above can render before the effect that opens the stream
+    // has run. Wait for the instance rather than assuming it exists.
+    const eventSource = await MockEventSource.waitForLatest();
+    eventSource.dispatchOpen();
+    eventSource.dispatchMessage("snapshot", {
+      event: "snapshot",
+      job: {
+        ...getActiveJob(),
+        jobId: newJobId,
+        phase: "completed",
+      },
+      snapshot: {
+        mount: { mount: "C:\\", fs: "ntfs" },
+        generatedAt: "2026-04-27T02:00:00.000Z",
+        root: makeDirectory("C:\\", [makeFile("C:\\done.txt", 128, "txt")]),
+        extensionLegend: [
+          { extension: "txt", colorToken: "disk-ext-1", count: 1, totalBytes: 128 },
+        ],
+        totals: {
+          totalBytes: 128,
+          totalFiles: 1,
+          totalDirectories: 1,
+        },
+        issues: [],
+        issueCount: 0,
+        partialIssueCount: 0,
+        partial: false,
+      },
+    });
+
+    await waitFor(() => expect(screen.queryByText(notice)).not.toBeInTheDocument());
+  });
+
+  it("warns that a partial scan's totals are a lower bound", async () => {
+    // Driven through the path that actually fires. `getMountState` filters
+    // `activeJob` to queued/scanning jobs, so a job in the terminal "partial"
+    // phase only ever reaches a client over SSE -- building one into the
+    // mount-state fixture asserts a shape the server cannot emit.
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Live" }));
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+    const eventSource = MockEventSource.latest();
+    eventSource.dispatchOpen();
+    const activeJob = getActiveJob();
+    eventSource.dispatchMessage("snapshot", {
+      event: "snapshot",
+      job: {
+        ...activeJob,
+        phase: "partial",
+        issueCount: 12,
+        partialIssueCount: 12,
+      },
+      snapshot: {
+        mount: { mount: "C:\\", fs: "ntfs" },
+        generatedAt: "2026-04-27T01:00:00.000Z",
+        root: makeDirectory("C:\\", [makeFile("C:\\done.txt", 128, "txt")]),
+        extensionLegend: [{ extension: "txt", colorToken: "disk-ext-1", count: 1, totalBytes: 128 }],
+        totals: {
+          totalBytes: 128,
+          totalFiles: 1,
+          totalDirectories: 1,
+        },
+        issues: [],
+        issueCount: 12,
+        partialIssueCount: 12,
+        partial: true,
+      },
+    });
+
+    expect(
+      await screen.findByText("12 directories were unreadable - totals are a lower bound.")
+    ).toBeInTheDocument();
+  });
+
+  it("still warns about a partial scan after the job is gone and only the cache remains", async () => {
+    // B7 review round 1, finding 2. The job is pruned ten minutes after it
+    // finishes, and `getMountState` never reports a terminal job anyway, so
+    // keying the banner on `activeJob.phase` lost the warning on the very next
+    // page load. The snapshot carries the fact now.
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      activeJob: null,
+    };
+    state.snapshotEnvelope = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      snapshot: {
+        mount: { mount: "C:\\", fs: "ntfs" },
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        root: makeDirectory("C:\\", [makeFile("C:\\partial.log", 256, "log")]),
+        extensionLegend: [{ extension: "log", colorToken: "disk-ext-1", count: 1, totalBytes: 256 }],
+        totals: { totalBytes: 256, totalFiles: 1, totalDirectories: 1 },
+        issues: [],
+        issueCount: 12,
+        partialIssueCount: 12,
+        partial: true,
+      },
+    };
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    expect(
+      await screen.findByText("12 directories were unreadable - totals are a lower bound.")
+    ).toBeInTheDocument();
+  });
+
+  it("still reads sensibly when a partial snapshot reports no issue count", async () => {
+    // `issueCount` carries `.default(0)` on the snapshot schema so a file
+    // cached before that field existed still loads -- and reports 0, alongside
+    // a `partial` flag that is genuinely true. "0 directories were unreadable"
+    // next to a lower-bound warning is a contradiction, so the count-free
+    // wording has to cover it.
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      activeJob: null,
+    };
+    state.snapshotEnvelope = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      snapshot: {
+        mount: { mount: "C:\\", fs: "ntfs" },
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        root: makeDirectory("C:\\", [makeFile("C:\\partial.log", 256, "log")]),
+        extensionLegend: [{ extension: "log", colorToken: "disk-ext-1", count: 1, totalBytes: 256 }],
+        totals: { totalBytes: 256, totalFiles: 1, totalDirectories: 1 },
+        issues: [],
+        issueCount: 0,
+        partialIssueCount: 0,
+        partial: true,
+      },
+    };
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    expect(
+      await screen.findByText("Some directories were unreadable - totals are a lower bound.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/0 directories were unreadable/)).not.toBeInTheDocument();
+  });
+
+  it("quotes the permission-denied count in the partial banner, not the symlink-inflated total", async () => {
+    // Finding 2, final whole-branch review. The three banner tests above
+    // inject a synthetic `issueCount` with no issue mix behind it, which is
+    // exactly why a banner reading the wrong field went unnoticed: on a
+    // trivial single-value fixture, "the total" and "the partial-signalling
+    // subset" happen to be the same number. This drives a realistic mix --
+    // many aggregated symlink-skipped occurrences (deliberately excluded from
+    // partiality, see `PARTIAL_RESULT_CODES` on the server) plus a small
+    // number of permission-denied ones (the actual reason the scan is
+    // partial) -- and asserts the banner quotes the small, accurate number,
+    // not the large, symlink-inflated total. `issueCount` and
+    // `partialIssueCount` are set the way a real scan would compute them
+    // (`recordIssue` on the server), not hand-picked to make the assertion
+    // trivially pass.
+    const symlinkOccurrences = 340;
+    const permissionDeniedCount = 3;
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      activeJob: null,
+    };
+    state.snapshotEnvelope = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      snapshot: {
+        mount: { mount: "C:\\", fs: "ntfs" },
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        root: makeDirectory("C:\\", [makeFile("C:\\usr-lib.so", 128, "so")]),
+        extensionLegend: [{ extension: "so", colorToken: "disk-ext-1", count: 1, totalBytes: 128 }],
+        totals: { totalBytes: 128, totalFiles: 1, totalDirectories: 1 },
+        issues: Array.from({ length: permissionDeniedCount }, (_, index) => ({
+          code: "permission-denied" as const,
+          path: `C:\\restricted\\folder-${index}`,
+          message: `Permission denied: C:\\restricted\\folder-${index}`,
+          recoverable: true,
+        })),
+        // The total spans both codes -- what `issueCount` is for.
+        issueCount: symlinkOccurrences + permissionDeniedCount,
+        // Only the permission-denied occurrences count toward partiality --
+        // what the banner must read instead.
+        partialIssueCount: permissionDeniedCount,
+        partial: true,
+      },
+    };
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    expect(
+      await screen.findByText("3 directories were unreadable - totals are a lower bound.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/343 directories were unreadable/)).not.toBeInTheDocument();
+  });
+
+  it("builds the live tree against the server's mount, not the raw search param", async () => {
+    // The server resolves the mount before it names the root or any branch;
+    // `?mount=` carries whatever was in the URL. `/data//media` and
+    // `/data/media` are the same directory to `path.resolve` and different
+    // strings to the client, so without adopting the identity off the events
+    // no branch matches the root, `buildAncestorChain` walks up to `/`, and
+    // the whole tree is re-parented under a chain of phantom directories.
+    //
+    // B7 review round 2, finding 1: the previous version of this fixture
+    // seeded `liveMount` from `mountState.activeJob.mount`, which was
+    // *already* the resolved path -- so `liveMount` was correct before any
+    // event arrived, and the test passed with or without the adoption line
+    // at the SSE handler's entry point. This version starts with no active
+    // job at all, the shape the adoption exists for: the seed is the raw,
+    // unresolved search param, and only the branch event's `mount` field can
+    // make the tree line up.
+    //
+    // Asserted at the top-left corner of the canvas, where the outermost
+    // drawable is: with the fix that is the real `/data/media/videos`; with
+    // the phantom chain it is a synthetic `/` wrapping three more levels.
+    const serverMount = { mount: "/data/media", fs: "ext4" };
+    state.mountState = {
+      mount: { mount: "/data//media", fs: "ext4" },
+      cache: {
+        state: "missing",
+      },
+      activeJob: null,
+    };
+    state.snapshotEnvelope = null;
+    startScanSpy.mockResolvedValueOnce({
+      jobId: "33333333-3333-3333-3333-333333333333",
+      phase: "scanning",
+      streamPath:
+        "/api/disk-analysis/jobs/33333333-3333-3333-3333-333333333333/events?mount=%2Fdata%2F%2Fmedia&fs=ext4",
+    });
+
+    renderWithAppRouter({
+      initialEntries: ["/disk-analysis?mount=%2Fdata%2F%2Fmedia&fs=ext4"],
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Scan This Mount" }));
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+    const eventSource = MockEventSource.latest();
+    eventSource.dispatchOpen();
+    eventSource.dispatchMessage("branch", {
+      event: "branch",
+      jobId: "33333333-3333-3333-3333-333333333333",
+      mount: serverMount,
+      branch: makeDirectory("/data/media/videos", [
+        makeFile("/data/media/videos/clip.mp4", 512, "mp4"),
+      ]),
+    });
+
+    const treemap = await screen.findByRole("img", { name: "Disk usage treemap" });
+    fireEvent.mouseMove(treemap, { clientX: 4, clientY: 4 });
+
+    expect(await screen.findByText("/data/media/videos")).toBeInTheDocument();
+    expect(screen.queryByText("/data//media")).not.toBeInTheDocument();
+  });
+
+  it("separates a path that cannot be scanned from a scanner that is busy", async () => {
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "missing",
+      },
+      activeJob: null,
+    };
+    state.snapshotEnvelope = null;
+    startScanSpy.mockRejectedValueOnce({
+      message: "Disk analysis refuses to scan C:\\",
+      data: { code: "FORBIDDEN" },
+    });
+
+    const refused = renderWithAppRouter({
+      initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"],
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Scan This Mount" }));
+
+    await waitFor(() =>
+      expect(addToastSpy).toHaveBeenCalledWith(
+        "This path cannot be scanned: Disk analysis refuses to scan C:\\",
+        "error"
+      )
+    );
+    refused.unmount();
+
+    addToastSpy.mockClear();
+    startScanSpy.mockRejectedValueOnce({
+      message: "A previous scan of C:\\ is still winding down",
+      data: { code: "CONFLICT" },
+    });
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Scan This Mount" }));
+
+    await waitFor(() =>
+      expect(addToastSpy).toHaveBeenCalledWith(
+        "Something else is scanning right now - try again shortly. A previous scan of C:\\ is still winding down",
+        "error"
+      )
+    );
+  });
+
+  it("does not blank the live issues panel on progress ticks", async () => {
+    // B5 review round 1, finding 2: progress events carry an empty `issues`
+    // array by design (see packages/server/src/services/diskAnalysis.ts --
+    // only issueCount travels on the live cadence). Treating status and
+    // progress events identically wiped the live issues list on every
+    // ~500ms tick, which (via the effect that closes the Scan Issues modal
+    // whenever the list is empty) force-closed it out from under a user
+    // reading it.
+    //
+    // The issue is seeded on the base mount state so it is showing the
+    // instant the live view renders (before any SSE event), then a single
+    // "progress" event is dispatched -- mirroring the "switches from stale
+    // cache to live mode" test's dispatch pattern above, which is the
+    // pattern proven not to trip the SSE connection effect's unrelated
+    // re-subscription behaviour.
+    const baseActiveJob = getActiveJob();
+    const baseMountState = state.mountState;
+    if (!baseMountState) {
+      throw new Error("Expected mount state from beforeEach");
+    }
+    state.mountState = {
+      ...baseMountState,
+      activeJob: {
+        ...baseActiveJob,
+        issues: [
+          {
+            code: "permission-denied",
+            path: "C:\\restricted",
+            message: "Permission denied: C:\\restricted",
+            recoverable: true,
+          },
+        ],
+        issueCount: 1,
+      },
+    };
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Live" }));
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    const eventSource = MockEventSource.latest();
+    eventSource.dispatchOpen();
+
+    await screen.findByRole("button", { name: /View Issues/i });
+
+    eventSource.dispatchMessage("progress", {
+      event: "progress",
+      job: {
+        ...baseActiveJob,
+        phase: "scanning",
+        issues: [],
+        issueCount: 7,
+        progress: {
+          ...baseActiveJob.progress,
+          directoriesCompleted: baseActiveJob.progress.directoriesCompleted + 1,
+        },
+      },
+    });
+
+    // Let the batched flush (a real setTimeout(0) inside the component, see
+    // scheduleFlush in disk-analysis.tsx) settle before asserting anything.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // A value that only the progress event carries, proving the flush above
+    // actually applied the new job state rather than this being a no-op --
+    // and, critically, that the issues button (and the count backing it)
+    // survived that same flush instead of being blanked by the progress
+    // event's empty `issues` array. The array being wiped is exactly what
+    // drives the "close the modal when there are no issues" effect, so a
+    // button that is still here is the same signal as a modal that would
+    // still be here.
+    //
+    // Queried via a raw aria-label match rather than a second getByRole
+    // accessible-name computation: re-computing the accessible name for this
+    // specific button a second time, after the progress-bar width and the
+    // directories-completed text have both changed underneath it, trips an
+    // unrelated jsdom internal bug in this dependency version (a crash deep
+    // in its CSS shorthand-property cloning code, unrelated to this fix).
+    expect(screen.getByText("2 / 4 directories")).toBeInTheDocument();
+    expect(document.querySelector('[aria-label^="View Issues"]')).not.toBeNull();
+  });
+
+  it("shows Cancel Scan only while a scan is actually running, and hides it once idle", async () => {
+    // Reuses the beforeEach fixture, which already seeds a "scanning" active
+    // job -- the same signal `getMountStatePollIntervalMs` and "Watch Running
+    // Scan" key off, per the review comment.
+    const { unmount } = renderWithAppRouter({
+      initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"],
+    });
+
+    expect(await screen.findByRole("button", { name: "Cancel Scan" })).toBeInTheDocument();
+    unmount();
+
+    state.mountState = {
+      mount: { mount: "C:\\", fs: "ntfs" },
+      cache: {
+        state: "fresh",
+        generatedAt: "2026-04-27T00:00:00.000Z",
+        staleAt: "2026-04-28T00:00:00.000Z",
+      },
+      activeJob: null,
+    };
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    expect(await screen.findByRole("button", { name: "Start New Scan" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Cancel Scan/i })).not.toBeInTheDocument();
+  });
+
+  it("cancels the running job by its own mount and job id, not a stale or guessed one", async () => {
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel Scan" }));
+
+    await waitFor(() =>
+      expect(cancelScanSpy).toHaveBeenCalledWith({
+        mount: { mount: "C:\\", fs: "ntfs" },
+        jobId: "11111111-1111-1111-1111-111111111111",
+      })
+    );
+  });
+
+  it("treats cancelScan({ success: false }) as the normal already-finished race, not an error", async () => {
+    // Per the review comment: the job being gone or the id not matching by
+    // the time the request lands is a normal race (B7's job-id-mismatch
+    // stance for startScan, applied the same way here), not a failure worth
+    // a scary error toast.
+    cancelScanSpy.mockResolvedValueOnce({ success: false });
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel Scan" }));
+
+    await waitFor(() => expect(cancelScanSpy).toHaveBeenCalledTimes(1));
+    expect(addToastSpy).not.toHaveBeenCalledWith(expect.any(String), "error");
+    expect(addToastSpy).toHaveBeenCalledWith("That scan had already finished.", "info");
+  });
+
+  it("disables Cancel Scan while the cancel request is in flight, so a double-click cannot fire twice", async () => {
+    let resolveCancel: (value: { success: boolean }) => void = () => {
+      throw new Error("resolveCancel called before assignment");
+    };
+    cancelScanSpy.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCancel = resolve;
+        })
+    );
+
+    renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
+
+    const cancelButton = await screen.findByRole("button", { name: "Cancel Scan" });
+    expect(cancelButton).toBeEnabled();
+    fireEvent.click(cancelButton);
+
+    // The same element, re-checked after the click -- its accessible name may
+    // change while pending, so this asserts on the captured reference rather
+    // than re-querying by name.
+    await waitFor(() => expect(cancelButton).toBeDisabled());
+    fireEvent.click(cancelButton);
+    expect(cancelScanSpy).toHaveBeenCalledTimes(1);
+
+    resolveCancel({ success: true });
+    await waitFor(() => expect(cancelButton).toBeEnabled());
   });
 });

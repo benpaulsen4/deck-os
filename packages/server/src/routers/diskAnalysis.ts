@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
   DiskAnalysisCancelScanInputSchema,
@@ -8,7 +9,16 @@ import {
   DiskAnalysisStartScanResultSchema,
 } from "@deckos/contracts";
 import { protectedProcedure, router } from "../trpc/trpc.js";
+import { mapDiskAnalysisError } from "../lib/diskAnalysisErrors.js";
 import * as diskAnalysisService from "../services/diskAnalysis.js";
+
+function toTrpcError(error: unknown, fallbackMessage: string): TRPCError {
+  const mapped = mapDiskAnalysisError(error, fallbackMessage);
+  return new TRPCError({
+    code: mapped.trpcCode,
+    message: mapped.message,
+  });
+}
 
 export const diskAnalysisRouter = router({
   getMountState: protectedProcedure
@@ -27,7 +37,11 @@ export const diskAnalysisRouter = router({
     .input(DiskAnalysisStartScanInputSchema)
     .output(DiskAnalysisStartScanResultSchema)
     .mutation(async ({ input }) => {
-      return await diskAnalysisService.startScan(input.mount);
+      try {
+        return await diskAnalysisService.startScan(input.mount);
+      } catch (error) {
+        throw toTrpcError(error, "Failed to start disk analysis scan");
+      }
     }),
   cancelScan: protectedProcedure
     .input(DiskAnalysisCancelScanInputSchema)

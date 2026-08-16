@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import * as dockerService from "./services/docker.js";
 import { ensureAuthStoragePermissions } from "./services/auth.js";
+import { pruneDiskAnalysisCache } from "./services/diskAnalysis.js";
 import { createServerApp } from "./http/appWiring.js";
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
@@ -11,6 +12,14 @@ dockerService.getDocker();
 
 // Tighten permissions on a pre-existing (pre-upgrade) passcode file at startup.
 void ensureAuthStoragePermissions();
+
+// DISK-11: the disk-analysis cache was never pruned, so stale entries and
+// `.corrupt-*` quarantine files accumulated indefinitely. Once per process
+// startup, not on every scan (see diskAnalysis.ts for what this can and
+// cannot delete).
+void pruneDiskAnalysisCache().catch((error) => {
+  console.error("[deckos] Failed to prune disk analysis cache at startup:", error);
+});
 
 let fatalExitScheduled = false;
 let runningServer: { close: (callback?: (error?: Error) => void) => unknown } | null =
