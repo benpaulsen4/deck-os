@@ -528,19 +528,6 @@ function syncPollingWithSubscribers(): void {
   }, POLL_INTERVAL_MS);
 }
 
-/**
- * No production caller remains: `http/runtimeRoutes.ts` used to call this
- * before subscribing, but that call was removed once polling became
- * refcounted on the subscriber set (this is a no-op until a subscriber
- * exists). Kept exported anyway -- `metrics.test.ts` uses it as the
- * "explicit start with no subscribers" lever for the refcount test, and
- * `runtimeRoutes.test.ts` asserts it is never called, as a regression guard
- * against reintroducing the removed call.
- */
-export function startMetricsPolling(): void {
-  syncPollingWithSubscribers();
-}
-
 export function stopMetricsPolling(): void {
   if (pollInterval) {
     clearInterval(pollInterval);

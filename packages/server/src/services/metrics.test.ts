@@ -159,14 +159,11 @@ describe("metrics service", () => {
     unsubscribe();
   });
 
-  test("subscribing starts the poller and an explicit start without subscribers does not", async () => {
+  test("subscribing starts the poller and having no subscribers does not", async () => {
     const { metrics, siMock } = await loadMetricsModule();
 
-    // No production caller remains -- the SSE handler's call was removed once
-    // polling became refcounted on the subscriber set. The export survives as
-    // this lever: an explicit start with no subscribers must stay a no-op,
-    // and only `subscribeToMetrics()` below should actually start the poller.
-    metrics.startMetricsPolling();
+    // With no subscribers at all, nothing polls: only `subscribeToMetrics()`
+    // below should actually start the poller.
     await vi.advanceTimersByTimeAsync(100);
     expect(siMock.currentLoad.mock.calls.length).toBe(0);
 
@@ -419,7 +416,7 @@ describe("metrics service", () => {
     unsubscribe();
   });
 
-  test("extra subscribers and start calls do not stack a second interval", async () => {
+  test("extra subscribers do not stack a second interval", async () => {
     const { metrics, siMock } = await loadMetricsModule();
 
     const unsubscribeA = metrics.subscribeToMetrics(() => undefined);
@@ -427,9 +424,10 @@ describe("metrics service", () => {
     const callsWithOneSubscriber = siMock.currentLoad.mock.calls.length;
     expect(callsWithOneSubscriber).toBeGreaterThanOrEqual(2);
 
+    // Each additional subscribe re-invokes the same refcount sync that an
+    // already-running poller must no-op against.
     const unsubscribeB = metrics.subscribeToMetrics(() => undefined);
-    metrics.startMetricsPolling();
-    metrics.startMetricsPolling();
+    const unsubscribeC = metrics.subscribeToMetrics(() => undefined);
     await vi.advanceTimersByTimeAsync(50);
 
     // A second interval would roughly double the collections over this window.
@@ -438,6 +436,7 @@ describe("metrics service", () => {
 
     unsubscribeA();
     unsubscribeB();
+    unsubscribeC();
     metrics.stopMetricsPolling();
   });
 

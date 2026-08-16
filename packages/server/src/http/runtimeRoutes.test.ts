@@ -13,7 +13,6 @@ import {
 } from "../lib/config.js";
 
 const metricsMock = vi.hoisted(() => ({
-  startMetricsPolling: vi.fn(),
   getCachedMetrics: vi.fn<() => unknown | null>(() => null),
   getOneShotMetrics: vi.fn(async () => undefined),
   subscribeToMetrics: vi.fn(() => () => undefined),
@@ -251,10 +250,6 @@ describe("runtimeRoutes", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/event-stream");
-    // Polling is refcounted on metricsService's own subscriber set (see
-    // metrics.ts); calling startMetricsPolling() here before subscribing is a
-    // no-op and was dead weight, not a required call.
-    expect(metricsMock.startMetricsPolling).not.toHaveBeenCalled();
     const reader = getResponseReader(res);
     const first = await reader.read();
     await reader.cancel();
