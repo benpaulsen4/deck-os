@@ -956,14 +956,19 @@ describe("diskAnalysis service", () => {
     }
   });
 
-  test("assembling the tree materialises each node at most once, not once per ancestor", async () => {
-    // A deep chain, so that "nodes x depth" is roughly thirty times "nodes".
-    // Under per-ancestor deep copying every leaf is re-serialised once for each
-    // level between it and the root and the count runs into five figures; under
-    // reference attachment the only materialisations are the one node per
-    // directory that finalisation produces plus the shallow live-branch copies.
-    // The bound is therefore the node count itself, and it stays meaningful:
-    // any extra whole-tree pass on the emit path pushes straight through it.
+  test("assembles a deep tree correctly (no per-ancestor complexity guard -- see PR #25 review)", async () => {
+    // This used to also assert `getNodeCopyCount()` stayed bounded by the
+    // node count rather than growing with nodes x depth, guarding against a
+    // regression back to the old per-ancestor deep-copy behaviour (every leaf
+    // re-serialised once per level between it and the root). That counter was
+    // removed as test-only instrumentation in the tree-build hot path (PR #25
+    // review). Unlike the child-lookup regression below, there is no
+    // production-code hook (a prototype method, a shared object) to spy on
+    // here instead: `finalizeDirectoryNode`/`toShallowBranch` build plain
+    // object literals, not calls through anything interceptable from a test.
+    // No honest equivalent was found, so that assertion is gone -- this test
+    // now only proves the deep tree assembles correctly, not that it does so
+    // without redundant copying.
     process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = "5000";
     process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES = "1";
     const dataDir = await createTempDir("deckos-disk-analysis-data-");
@@ -990,7 +995,6 @@ describe("diskAnalysis service", () => {
     );
 
     const diskAnalysis = await loadDiskAnalysisModule(dataDir);
-    diskAnalysis.__testing.resetInstrumentation();
 
     const mount = { mount: mountDir, fs: "testfs" };
     const start = await diskAnalysis.startScan(mount);
@@ -1000,15 +1004,6 @@ describe("diskAnalysis service", () => {
     expect(finalJob?.phase).toBe("completed");
     expect(snapshot?.snapshot.totals.totalFiles).toBe(depth * filesPerDirectory);
     expect(snapshot?.snapshot.totals.totalDirectories).toBe(depth + 1);
-
-    const totalNodes =
-      (snapshot?.snapshot.totals.totalFiles ?? 0) +
-      (snapshot?.snapshot.totals.totalDirectories ?? 0);
-    // Greater than zero first: a counter that nothing increments satisfies any
-    // upper bound, and the test would stop testing anything the moment it went
-    // green. This one is incremented on the live path, so it stays honest.
-    expect(diskAnalysis.__testing.getNodeCopyCount()).toBeGreaterThan(0);
-    expect(diskAnalysis.__testing.getNodeCopyCount()).toBeLessThanOrEqual(totalNodes);
 
     // The deepest file still has to arrive intact at the top of the tree.
     let deepest = snapshot?.snapshot.root;
@@ -1032,6 +1027,23 @@ describe("diskAnalysis service", () => {
     // and the invariant is per-insertion cost: the sibling entries a lookup has
     // to compare must stay a small constant multiple of the number of lookups,
     // rather than growing with the directory's fan-out.
+    //
+    // This used to read exact counters (`getChildLookupStats`) instrumented
+    // inside `findChildSlot`/`upsertChildBranch` themselves. Those were
+    // removed as test-only instrumentation in the tree-build hot path (PR #25
+    // review). `findChildSlot`'s lookup is a single `Map#get` call, so instead
+    // of a production hook this spies on `Map.prototype.get` for the duration
+    // of a real scan and bounds the total call count. The spy catches every
+    // `Map#get` call in the process during the scan (job bookkeeping,
+    // extension aggregation, the parent-path index, not just
+    // `childIndexByPath`), so the bound below is deliberately generous rather
+    // than exact -- it is still wide enough to separate O(width) from
+    // O(width^2): a fan-out of 500 costs on the order of 1,000-2,000 real Map
+    // probes under the current O(1)-per-lookup implementation, versus roughly
+    // width^2 / 2 (~125,000) comparisons under the old findIndex-over-siblings
+    // one. This is weaker than the removed exact assertion (it can no longer
+    // prove "exactly one candidate per lookup"), but it still fails if the
+    // O(n^2) regression comes back.
     process.env.DECKOS_DISK_ANALYSIS_MAX_PENDING_DIRECTORIES = "1024";
     process.env.DECKOS_DISK_ANALYSIS_MAX_INDEXED_NODES = "5000";
     process.env.DECKOS_DISK_ANALYSIS_SMALL_FILE_THRESHOLD_BYTES = "1";
@@ -1048,32 +1060,24 @@ describe("diskAnalysis service", () => {
     );
 
     const diskAnalysis = await loadDiskAnalysisModule(dataDir);
-    diskAnalysis.__testing.resetInstrumentation();
 
     const mount = { mount: mountDir, fs: "testfs" };
+    const mapGetSpy = vi.spyOn(Map.prototype, "get");
     const start = await diskAnalysis.startScan(mount);
     const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
     const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+    const totalMapGets = mapGetSpy.mock.calls.length;
+    mapGetSpy.mockRestore();
 
     expect(finalJob?.phase).toBe("completed");
     expect(snapshot?.snapshot.root.children).toHaveLength(width);
     expect(snapshot?.snapshot.totals.totalFiles).toBe(width);
 
-    const { lookups, candidates, maxIndexSize } =
-      diskAnalysis.__testing.getChildLookupStats();
-
-    // One lookup to insert each placeholder and one to replace it with the
-    // finished branch, so a fan-out of 500 costs exactly 1000 lookups.
-    expect(lookups).toBe(width * 2);
-    // Exactly one candidate inspected per lookup. This is counted inside
-    // findChildSlot rather than next to the call, so replacing the probe with a
-    // scan of the sibling array takes it to 0 (call deleted) or to ~250000 (scan
-    // counted honestly). Equality fails either way.
-    expect(candidates).toBe(lookups);
-    // And the index really is a populated path map rather than a renamed scan:
-    // the widest directory holds one entry per directory child. Take the Map
-    // away and this is 0 whatever the counters happen to say.
-    expect(maxIndexSize).toBe(width);
+    // O(width), not O(width^2). A quadratic findIndex-over-siblings
+    // implementation would cost on the order of width^2 / 2 (~125,000)
+    // comparisons for width = 500; this bound is a small multiple of width
+    // and nowhere near that.
+    expect(totalMapGets).toBeLessThan(width * 20);
 
     await diskAnalysis.__testing.clearState();
     await fs.remove(dataDir);
@@ -1255,7 +1259,7 @@ describe("diskAnalysis service", () => {
         expect(finished?.issueCount).toBeGreaterThanOrEqual(500);
         // Bounded: the array is for display, the counter is for truth.
         expect(finished?.issues.length).toBeLessThanOrEqual(
-          diskAnalysis.__testing.MAX_RETAINED_ISSUES
+          diskAnalysis.MAX_RETAINED_ISSUES
         );
 
         const symlinkIssues = (finished?.issues ?? []).filter(
@@ -1327,7 +1331,7 @@ describe("diskAnalysis service", () => {
           // the array fills all its slots. `toBeLessThanOrEqual` alone would
           // pass even if nothing were retained at all -- it stops testing the
           // cap the moment a future regression retains zero issues.
-          expect(finished?.issues.length).toBe(diskAnalysis.__testing.MAX_RETAINED_ISSUES);
+          expect(finished?.issues.length).toBe(diskAnalysis.MAX_RETAINED_ISSUES);
 
           await diskAnalysis.__testing.clearState();
           await fs.remove(dataDir);
@@ -1441,7 +1445,7 @@ describe("diskAnalysis service", () => {
           // The retained array is full of non-partial-signalling symlink
           // issues by the time `denied` is processed -- confirms the setup
           // actually exercises the retention race, not just the code path.
-          expect(finished?.issues.length).toBe(diskAnalysis.__testing.MAX_RETAINED_ISSUES);
+          expect(finished?.issues.length).toBe(diskAnalysis.MAX_RETAINED_ISSUES);
           expect(
             finished?.issues.every((issue) => issue.code === "symlink-skipped")
           ).toBe(true);
@@ -1466,8 +1470,11 @@ describe("diskAnalysis service", () => {
       // genuine uncaught mid-scan failure through the public scan API isn't
       // practical: every foreseeable fs error along that path is already
       // caught and turned into a normal (recoverable) issue by design, so
-      // this exercises `recordIssue`'s eviction logic directly via the
-      // __testing hook added for exactly this purpose.
+      // this exercises the real `recordIssue`'s eviction logic directly,
+      // exposed via `__testing` since it isn't a public production API. The
+      // stub job only needs the four fields `recordIssue` actually touches;
+      // the cast below is the same one a bespoke test-only wrapper used to
+      // do internally.
       const dataDir = await createTempDir("deckos-disk-analysis-data-");
       const diskAnalysis = (await loadDiskAnalysisModule(dataDir)) as DiskAnalysisModule & {
         createIssue: typeof import("./diskAnalysis.js").createIssue;
@@ -1479,11 +1486,12 @@ describe("diskAnalysis service", () => {
         partialResultDetected: boolean;
         partialIssueCount: number;
       } = { issues: [], issueCount: 0, partialResultDetected: false, partialIssueCount: 0 };
-      const cap = diskAnalysis.__testing.MAX_RETAINED_ISSUES;
+      const stubJob = job as Parameters<typeof diskAnalysis.__testing.recordIssue>[0];
+      const cap = diskAnalysis.MAX_RETAINED_ISSUES;
       const overfillCount = cap + 50;
       for (let i = 0; i < overfillCount; i += 1) {
-        diskAnalysis.__testing.recordIssueForTesting(
-          job,
+        diskAnalysis.__testing.recordIssue(
+          stubJob,
           diskAnalysis.createIssue("path-inaccessible", `/mnt/x${i}`, `bad ${i}`)
         );
       }
@@ -1493,8 +1501,8 @@ describe("diskAnalysis service", () => {
       expect(job.issues.length).toBe(cap);
       expect(job.issues.some((issue) => issue.recoverable === false)).toBe(false);
 
-      diskAnalysis.__testing.recordIssueForTesting(
-        job,
+      diskAnalysis.__testing.recordIssue(
+        stubJob,
         diskAnalysis.createIssue("unknown", "/mnt", "scan failed", false)
       );
 

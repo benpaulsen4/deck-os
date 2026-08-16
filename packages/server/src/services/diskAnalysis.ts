@@ -716,7 +716,7 @@ export function createIssue(
  * for display; `job.issueCount` keeps counting past the cap so the total
  * stays truthful even once the array stops growing.
  */
-const MAX_RETAINED_ISSUES = 100;
+export const MAX_RETAINED_ISSUES = 100;
 
 /**
  * Codes that mean the totals are a lower bound.
@@ -1359,42 +1359,19 @@ function createSmallFilesBucket(
 }
 
 /**
- * Test-only instrumentation for the tree-build and emit paths.
+ * The one place a child's slot is located: an O(1) `Map` probe.
  *
- * `nodeCopyCount` counts treemap nodes materialised *from an existing node* —
- * every serialisation or clone. It deliberately does not count the walker's
- * original node creations, which are one per node by construction. The
- * invariant the suite asserts is that the total stays bounded by the number of
- * nodes in the finished tree: linear, not nodes x depth.
- *
- * `childLookups` counts insertions; `childLookupCandidates` counts the sibling
- * entries those insertions had to inspect; `maxChildIndexSize` records the
- * widest path index actually built. The three are incremented in three
- * different places on purpose, so that no single edit can keep them consistent
- * while changing the algorithm underneath them -- see `findChildSlot`.
- */
-let nodeCopyCount = 0;
-let childLookups = 0;
-let childLookupCandidates = 0;
-let maxChildIndexSize = 0;
-
-/**
- * The one place a child's slot is located.
- *
- * The body must increment `childLookupCandidates` once per candidate it
- * actually inspects. A `Map` probe inspects exactly one, which is the whole
- * point: `upsertChildBranch` used to run a `findIndex` over the sibling array,
- * so building a directory with n entries cost O(n^2). If you replace this body,
- * count honestly -- the suite asserts one candidate per lookup, and deleting
- * the call to this function drops the count to zero and fails the same test.
+ * `upsertChildBranch` used to run a `findIndex` over the sibling array here,
+ * so building a directory with n entries cost O(n^2). Keep this a single
+ * `Map` lookup -- see "child insertion does not scan the sibling array" in
+ * the test suite, which guards the complexity by bounding total `Map#get`
+ * calls during a wide-fanout scan.
  */
 function findChildSlot(parent: MutableDirectoryNode, childPath: string): number | undefined {
-  childLookupCandidates += 1;
   return parent.childIndexByPath.get(childPath);
 }
 
 function upsertChildBranch(parent: MutableDirectoryNode, child: DiskAnalysisTreemapNode) {
-  childLookups += 1;
   const childIndex = findChildSlot(parent, child.path);
   if (childIndex !== undefined) {
     parent.children[childIndex] = child;
@@ -1417,7 +1394,6 @@ function upsertChildBranch(parent: MutableDirectoryNode, child: DiskAnalysisTree
  * `children` is sorted in place here, which leaves `childIndexByPath` stale.
  */
 function finalizeDirectoryNode(node: MutableDirectoryNode): DiskAnalysisTreemapNode {
-  maxChildIndexSize = Math.max(maxChildIndexSize, node.childIndexByPath.size);
   const children = node.children;
   children.sort((left, right) => right.recursiveSize - left.recursiveSize);
   let recursiveSize = 0;
@@ -1428,7 +1404,6 @@ function finalizeDirectoryNode(node: MutableDirectoryNode): DiskAnalysisTreemapN
       descendantsScanned += child.descendantsScanned + 1;
     }
   }
-  nodeCopyCount += 1;
   return {
     path: node.path,
     name: node.name,
@@ -1453,7 +1428,6 @@ function finalizeDirectoryNode(node: MutableDirectoryNode): DiskAnalysisTreemapN
  * receive as read-only -- see `subscribeToJob`.
  */
 function toShallowBranch(branch: DiskAnalysisTreemapNode): DiskAnalysisTreemapNode {
-  nodeCopyCount += 1;
   return {
     ...branch,
     issues: [...branch.issues],
@@ -1461,7 +1435,6 @@ function toShallowBranch(branch: DiskAnalysisTreemapNode): DiskAnalysisTreemapNo
       if (child.type === "file") {
         return child;
       }
-      nodeCopyCount += 1;
       return {
         ...child,
         issues: [...child.issues],
@@ -2572,7 +2545,6 @@ export function subscribeToJob(jobId: string, listener: JobListener): () => void
 }
 
 export const __testing = {
-  MAX_RETAINED_ISSUES,
   /**
    * Direct unit access to `recordIssue`'s retention/eviction behaviour
    * (finding 4, B5 review round 1). Driving a genuine uncaught mid-scan
@@ -2580,35 +2552,12 @@ export const __testing = {
    * practical -- every foreseeable fs error along that path is already
    * caught and turned into a normal (recoverable) issue by design, so a
    * `recoverable: false` issue in practice only ever comes from the single
-   * scan-failure call site in `runJob`. The stub only needs the four fields
-   * `recordIssue` actually touches.
+   * scan-failure call site in `runJob`. Exposed as the real function --
+   * callers construct (and cast) whatever slice of `DiskAnalysisJobInternal`
+   * they need rather than this module maintaining a bespoke test-only
+   * wrapper around it.
    */
-  recordIssueForTesting(
-    job: Pick<
-      DiskAnalysisJobInternal,
-      "issues" | "issueCount" | "partialResultDetected" | "partialIssueCount"
-    >,
-    issue: DiskAnalysisIssue,
-    options?: { nodeIssues?: DiskAnalysisIssue[]; occurrences?: number }
-  ): void {
-    recordIssue(job as DiskAnalysisJobInternal, issue, options);
-  },
-  getNodeCopyCount(): number {
-    return nodeCopyCount;
-  },
-  getChildLookupStats(): { lookups: number; candidates: number; maxIndexSize: number } {
-    return {
-      lookups: childLookups,
-      candidates: childLookupCandidates,
-      maxIndexSize: maxChildIndexSize,
-    };
-  },
-  resetInstrumentation() {
-    nodeCopyCount = 0;
-    childLookups = 0;
-    childLookupCandidates = 0;
-    maxChildIndexSize = 0;
-  },
+  recordIssue,
   /**
    * Await a job's run to fully unwind and report the phase it landed on.
    *
