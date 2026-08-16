@@ -488,6 +488,57 @@ describe("files route", () => {
       )
     );
     expect(invalidateQueriesSpy).toHaveBeenCalledTimes(1);
+
+    // Only the item that actually failed should still be selected -- the four
+    // that succeeded are gone from disk and must not linger in the selection.
+    expect(screen.getByText("Selected: 1")).toBeInTheDocument();
+    expect(screen.getByText("file3.txt").closest("tr")).toHaveClass(
+      "files-row--selected"
+    );
+    expect(screen.getByText("file1.txt").closest("tr")).not.toHaveClass(
+      "files-row--selected"
+    );
+  });
+
+  it("leaves the selection untouched when every delete in the batch fails", async () => {
+    state.listResults[""] = {
+      cwd: "C:\\",
+      parent: null,
+      entries: [1, 2].map((n) => ({
+        name: `file${n}.txt`,
+        path: `C:\\file${n}.txt`,
+        type: "file" as const,
+        size: 10,
+        modifiedAt: "2026-01-01T00:00:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      })),
+    };
+    deleteSpy
+      .mockRejectedValueOnce(new Error("EACCES"))
+      .mockRejectedValueOnce(new Error("EACCES"));
+
+    renderWithAppRouter({ initialEntries: ["/files"] });
+
+    fireEvent.click(await screen.findByText("file1.txt"));
+    fireEvent.click(screen.getByText("file2.txt"), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[1]);
+
+    await waitFor(() => expect(deleteSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(addToastSpy).toHaveBeenCalledWith(
+        "Deleted 0 of 2 item(s); 2 failed: file1.txt, file2.txt",
+        "error"
+      )
+    );
+
+    expect(screen.getByText("Selected: 2")).toBeInTheDocument();
+    expect(screen.getByText("file1.txt").closest("tr")).toHaveClass(
+      "files-row--selected"
+    );
+    expect(screen.getByText("file2.txt").closest("tr")).toHaveClass(
+      "files-row--selected"
+    );
   });
 
   it("continues past a rejected upload response and names the file that didn't land", async () => {

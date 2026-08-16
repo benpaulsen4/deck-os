@@ -799,17 +799,24 @@ function FilesPage() {
     if (selectedPaths.length === 0) {
       return;
     }
-    const failed: string[] = [];
+    // Track failures by full path (not just display name) so the selection can
+    // be narrowed to exactly the items that need retrying: a total failure
+    // must leave the selection unchanged, and a total success must clear it.
+    const failedPaths: string[] = [];
     try {
       for (const targetPath of selectedPaths) {
         try {
           await deleteMutation.mutateAsync(targetPath);
         } catch {
-          failed.push(getDisplayName(targetPath));
+          failedPaths.push(targetPath);
         }
       }
-      reportBulkOutcome("Deleted", selectedPaths.length - failed.length, failed);
-      setSelectedPaths([]);
+      reportBulkOutcome(
+        "Deleted",
+        selectedPaths.length - failedPaths.length,
+        failedPaths.map((path) => getDisplayName(path))
+      );
+      setSelectedPaths(failedPaths);
       setDeleteConfirmOpen(false);
     } finally {
       // The outcome toast above is already the meaningful signal; a refresh
