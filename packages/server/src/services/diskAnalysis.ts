@@ -853,6 +853,25 @@ function getComparableDeviceId(stat: fs.Stats): number | null {
  * is scoped to Windows; everywhere else a measured zero stands as zero, and
  * only a genuinely absent measurement (negative, NaN, or undefined) falls
  * back to apparent size.
+ *
+ * Two known, deliberately-unfixed btrfs limitations of this same function:
+ *
+ *  - **Inline extents.** A file small enough to fit inline (btrfs's
+ *    `max_inline`, capped around ~2 KB) is stored directly in a metadata
+ *    b-tree leaf with no separate data extent, so `stat.blocks` can read `0`
+ *    for a real, non-empty file -- the same shape as the NTFS case above,
+ *    but on a POSIX platform, where this function trusts a measured zero.
+ *    There is no signal in `fs.stat` (unlike `process.platform` for NTFS)
+ *    that distinguishes that from a genuinely sparse file of the same size,
+ *    so adding a size-based fallback here would silently reintroduce the
+ *    sparse-file bug this comment already explains, just scoped to small
+ *    files. Under-reports a few KB per affected file; not fixed.
+ *  - **Reflinks / CoW-shared extents.** `stat.blocks` counts a shared extent
+ *    in full for every file that references it, so allocated size
+ *    over-reports on any tree that uses `cp --reflink`, dedup, or (heavily)
+ *    snapshots -- the same blocks counted once per sharer. Detecting
+ *    sharing needs FIEMAP or btrfs-specific ioctls, not `stat()`; not
+ *    implemented, no bound on the magnitude.
  */
 function getAllocatedSizeBytes(stat: fs.Stats): number {
   if (!Number.isFinite(stat.blocks) || stat.blocks < 0) {
@@ -1548,6 +1567,42 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
     job.controller.signal
   );
   const rootDeviceId = getComparableDeviceId(rootStat);
+  /**
+   * btrfs (and any filesystem that gives subvolumes their own anonymous
+   * block device) assigns a distinct `st_dev` to every subvolume even when
+   * nothing is separately mounted there. Gating the nested-mount check
+   * below purely on `st_dev` would therefore misread every subvolume
+   * boundary as a nested mount and skip the whole subtree -- on a normal
+   * `@`/`@home`-style layout, or anything carrying snapshots, that is most
+   * of the filesystem.
+   *
+   * Ground the check in the kernel's own mount table instead: a device-id
+   * change is only a nested mount when the path *is* one, per
+   * `/proc/self/mounts` (or `/etc/mtab`). Read once per scan -- the walk
+   * below runs this check on every entry in the tree, so re-reading or
+   * re-scanning the table per directory would be a real cost -- and index
+   * it into a Set for an O(1) membership test.
+   *
+   * Falls back to the previous `st_dev`-only behaviour when the table is
+   * unavailable (`null` on Windows, or wherever neither candidate path can
+   * be read): that fallback is what keeps ext4 and Windows nested-mount
+   * skipping (procfs, sysfs, tmpfs, removable drives, bind mounts) working
+   * exactly as before.
+   */
+  const mountTableEntries = await readMountTable();
+  const genuineMountPoints: Set<string> | null = mountTableEntries
+    ? new Set(
+        mountTableEntries
+          .map((entry) => {
+            try {
+              return normalizeMountPathKey(entry.mountPoint);
+            } catch {
+              return null; // A relative or malformed mount point matches nothing.
+            }
+          })
+          .filter((normalized): normalized is string => normalized !== null)
+      )
+    : null;
   const smallFileThresholdBytes = getSmallFileThresholdBytes();
   const rootNode = createDirectoryNode(rootPath, null);
   const nodesByPath = new Map<string, MutableDirectoryNode>([[rootPath, rootNode]]);
@@ -1938,10 +1993,21 @@ async function executeScan(job: DiskAnalysisJobInternal): Promise<DiskAnalysisSn
               // procfs, sysfs, tmpfs, removable drives, or bind-mounted trees. The subtree
               // is real data the user has on disk, so record that it was skipped instead of
               // letting it vanish from the totals with no trace.
+              //
+              // A device-id change alone is not proof of a nested mount: btrfs gives every
+              // subvolume its own `st_dev` even when nothing is mounted there (see the
+              // `genuineMountPoints` comment above), so confirm against the mount table
+              // before treating this path as one. No table available (`genuineMountPoints
+              // === null`) means the check degrades to the original st_dev-only behaviour.
               if (rootDeviceId !== null && getComparableDeviceId(stat) !== rootDeviceId) {
-                task.node.truncated = true;
-                nestedMountSkips += 1;
-                continue;
+                const isGenuineMountPoint =
+                  genuineMountPoints === null ||
+                  genuineMountPoints.has(normalizeMountPathKey(entryPath));
+                if (isGenuineMountPoint) {
+                  task.node.truncated = true;
+                  nestedMountSkips += 1;
+                  continue;
+                }
               }
 
               if (stat.isDirectory()) {

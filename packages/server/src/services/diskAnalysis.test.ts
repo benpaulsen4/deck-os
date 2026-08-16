@@ -640,6 +640,28 @@ describe("diskAnalysis service", () => {
       return stat;
     });
 
+    // The device-id change above is a genuine nested mount, so back it with a
+    // mount table that actually lists `sub` as one -- otherwise this test
+    // would only prove the st_dev-only fallback (`genuineMountPoints ===
+    // null`) still works, which on a machine with a real /proc/self/mounts
+    // (CI's ubuntu-24.04) is not the branch that runs at all.
+    const originalReadFile = fs.readFile.bind(fs);
+    const mountTable = [
+      "/dev/sda1 / ext4 rw,relatime 0 0",
+      `tmpfs ${subPath.replace(/ /g, "\\040")} tmpfs rw,nosuid,nodev,relatime 0 0`,
+      "",
+    ].join("\n");
+    const readFileSpy = vi
+      .spyOn(fs, "readFile")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .mockImplementation(async (target: any, options?: any): Promise<any> => {
+        const targetPath = path.resolve(typeof target === "string" ? target : String(target));
+        if (targetPath === path.resolve("/proc/self/mounts")) {
+          return mountTable;
+        }
+        return await originalReadFile(target, options);
+      });
+
     try {
       const diskAnalysis = await loadDiskAnalysisModule(dataDir);
       const mount = { mount: mountDir, fs: "ext4" };
@@ -665,6 +687,7 @@ describe("diskAnalysis service", () => {
       await fs.remove(dataDir);
     } finally {
       statSpy.mockRestore();
+      readFileSpy.mockRestore();
       await fs.remove(mountDir);
     }
   }, 15000);
@@ -697,6 +720,29 @@ describe("diskAnalysis service", () => {
       return stat;
     });
 
+    // These device-id changes represent genuine nested mounts (the docker-overlay /
+    // many-tmpfs-children case the comment below calls out), so back them with a mount
+    // table that actually lists each child -- see the sibling test above for why an
+    // unmocked table would only prove the st_dev-only fallback on this host.
+    const originalReadFile = fs.readFile.bind(fs);
+    const mountTable = [
+      "/dev/sda1 / ext4 rw,relatime 0 0",
+      ...[...childPaths].map(
+        (childPath) => `tmpfs ${childPath.replace(/ /g, "\\040")} tmpfs rw,nosuid,nodev,relatime 0 0`
+      ),
+      "",
+    ].join("\n");
+    const readFileSpy = vi
+      .spyOn(fs, "readFile")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .mockImplementation(async (target: any, options?: any): Promise<any> => {
+        const targetPath = path.resolve(typeof target === "string" ? target : String(target));
+        if (targetPath === path.resolve("/proc/self/mounts")) {
+          return mountTable;
+        }
+        return await originalReadFile(target, options);
+      });
+
     try {
       const diskAnalysis = await loadDiskAnalysisModule(dataDir);
       const mount = { mount: mountDir, fs: "ext4" };
@@ -722,6 +768,87 @@ describe("diskAnalysis service", () => {
       await fs.remove(dataDir);
     } finally {
       statSpy.mockRestore();
+      readFileSpy.mockRestore();
+      await fs.remove(mountDir);
+    }
+  }, 15000);
+
+  test("a device-id change without a real mount point (btrfs subvolume shape) is walked, not skipped", async () => {
+    // btrfs gives every subvolume its own anonymous block device, so `st_dev`
+    // differs across a subvolume boundary even though nothing is separately
+    // mounted there. A gate keyed on `st_dev` alone cannot tell that apart
+    // from a genuine nested mount (the case above) and would skip the whole
+    // subvolume. Simulate exactly that shape -- device changes, but the path
+    // is absent from the mount table -- and assert the subtree is walked.
+    const dataDir = await createTempDir("deckos-disk-analysis-data-");
+    const mountDir = await createTempDir("deckos-disk-analysis-mount-");
+    const subvolDir = path.join(mountDir, "subvol");
+    const localFilePath = path.join(mountDir, "keep.txt");
+    const subvolFilePath = path.join(subvolDir, "data.bin");
+    await fs.ensureDir(subvolDir);
+    await fs.writeFile(localFilePath, "keep", "utf8");
+    await fs.writeFile(subvolFilePath, Buffer.alloc(4096));
+
+    const expectedLocalFileBytes = getExpectedAllocatedBytes(await fs.stat(localFilePath));
+    const expectedSubvolFileBytes = getExpectedAllocatedBytes(await fs.stat(subvolFilePath));
+
+    const originalStat = fs.stat.bind(fs);
+    const withDev = (stat: fs.Stats, dev: number): fs.Stats =>
+      Object.assign(Object.create(Object.getPrototypeOf(stat)) as fs.Stats, stat, { dev });
+    const subvolPathResolved = path.resolve(subvolDir);
+    const subvolFilePathResolved = path.resolve(subvolFilePath);
+    const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (target) => {
+      const stat = await originalStat(target);
+      const targetPath = path.resolve(typeof target === "string" ? target : String(target));
+      if (targetPath === subvolPathResolved || targetPath === subvolFilePathResolved) {
+        return withDev(stat, stat.dev + 1);
+      }
+      return stat;
+    });
+
+    // A real (non-null) mount table that does NOT list subvolDir as a mount
+    // point -- that absence is exactly what the fix under test relies on.
+    // Without this mock the dev-table read would return `null` on this
+    // (Windows) dev machine and mask whether the fallback or the real Set
+    // lookup is what let the subtree through.
+    const originalReadFile = fs.readFile.bind(fs);
+    const mountTable = ["/dev/sda1 / btrfs rw,relatime,subvolid=5,subvol=/ 0 0", ""].join("\n");
+    const readFileSpy = vi
+      .spyOn(fs, "readFile")
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .mockImplementation(async (target: any, options?: any): Promise<any> => {
+        const targetPath = path.resolve(typeof target === "string" ? target : String(target));
+        if (targetPath === path.resolve("/proc/self/mounts")) {
+          return mountTable;
+        }
+        return await originalReadFile(target, options);
+      });
+
+    try {
+      const diskAnalysis = await loadDiskAnalysisModule(dataDir);
+      const mount = { mount: mountDir, fs: "btrfs" };
+      const start = await diskAnalysis.startScan(mount);
+      const finalJob = await waitForTerminalJob(diskAnalysis, start.jobId);
+      const snapshot = await diskAnalysis.getCachedSnapshot(mount);
+
+      expect(finalJob?.phase).toBe("completed");
+      expect(snapshot?.snapshot.root.children.some((child) => child.name === "subvol")).toBe(
+        true
+      );
+      expect(
+        snapshot?.snapshot.issues.some((issue) => issue.code === "nested-mount-skipped")
+      ).toBe(false);
+      expect(snapshot?.snapshot.root.truncated).toBe(false);
+      expect(snapshot?.snapshot.totals.totalFiles).toBe(2);
+      expect(snapshot?.snapshot.totals.totalBytes).toBe(
+        expectedLocalFileBytes + expectedSubvolFileBytes
+      );
+
+      await diskAnalysis.__testing.clearState();
+      await fs.remove(dataDir);
+    } finally {
+      statSpy.mockRestore();
+      readFileSpy.mockRestore();
       await fs.remove(mountDir);
     }
   }, 15000);
