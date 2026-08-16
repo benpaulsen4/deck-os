@@ -275,11 +275,25 @@ export function registerRuntimeRoutes(app: Hono) {
           console.error("[deckos] Dropping unparsable disk analysis event:", result.error);
           return;
         }
-        stream.writeSSE({
-          data: JSON.stringify(result.data),
-          event: result.data.event,
-          id: Date.now().toString(),
-        });
+        // `writeEvent` stays synchronous -- its callers (the buffered-event
+        // loop below and the live `diskAnalysisService.subscribeToJob`
+        // listener, itself a synchronous callback whose return value is
+        // ignored) can't await it. That means a rejection from `writeSSE`
+        // can't be caught by a caller's `try/catch` either, since that only
+        // ever sees a *synchronous* throw. Attaching `.catch()` here routes a
+        // rejection into the same handling a synchronous throw already gets
+        // one level up, in `writeBufferedEvent` -- mirroring the detached
+        // write in the log route's `enqueue`/`drain` above.
+        stream
+          .writeSSE({
+            data: JSON.stringify(result.data),
+            event: result.data.event,
+            id: Date.now().toString(),
+          })
+          .catch((error) => {
+            console.error("[deckos] Error sending disk analysis event:", error);
+            unsubscribe();
+          });
       };
 
       writeBufferedEvent = (event) => {

@@ -40,11 +40,43 @@ const versionMock = vi.hoisted(() => ({
   getCurrentVersion: vi.fn(() => "0.0.0-test"),
 }));
 
+// Lets a single test make the real `stream.writeSSE()` reject, to prove a
+// caller that doesn't await it still gets the rejection handled rather than
+// leaking an unhandled rejection. Everything else passes through to the real
+// `hono/streaming` implementation unchanged.
+const sseInterceptor = vi.hoisted(() => ({ rejectNext: 0 }));
+
 vi.mock("../services/metrics.js", () => metricsMock);
 vi.mock("../services/docker.js", () => dockerMock);
 vi.mock("../services/pullJobs.js", () => pullJobsMock);
 vi.mock("../services/diskAnalysis.js", () => diskAnalysisMock);
 vi.mock("../lib/version.js", () => versionMock);
+vi.mock("hono/streaming", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("hono/streaming")>();
+  return {
+    ...actual,
+    streamSSE: (
+      c: Parameters<typeof actual.streamSSE>[0],
+      cb: Parameters<typeof actual.streamSSE>[1],
+      onError?: Parameters<typeof actual.streamSSE>[2]
+    ) =>
+      actual.streamSSE(
+        c,
+        (stream) => {
+          const originalWriteSSE = stream.writeSSE.bind(stream);
+          stream.writeSSE = (message) => {
+            if (sseInterceptor.rejectNext > 0) {
+              sseInterceptor.rejectNext -= 1;
+              return Promise.reject(new Error("simulated writeSSE failure"));
+            }
+            return originalWriteSSE(message);
+          };
+          return cb(stream);
+        },
+        onError
+      ),
+  };
+});
 
 import { registerRuntimeRoutes } from "./runtimeRoutes.js";
 
@@ -65,6 +97,7 @@ describe("runtimeRoutes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dockerMock.getDockerAsync.mockResolvedValue(null);
+    sseInterceptor.rejectNext = 0;
   });
 
   test("health endpoint returns ok payload", async () => {
@@ -445,6 +478,99 @@ describe("runtimeRoutes", () => {
     expect(payload).toContain('"phase":"completed"');
   });
 
+  test("disk analysis events endpoint tears down the subscription when writeSSE rejects, without leaking an unhandled rejection", async () => {
+    diskAnalysisMock.getJobStreamInitialEvent.mockReturnValue({
+      event: "status",
+      job: {
+        jobId: "11111111-1111-1111-1111-111111111111",
+        mount: { mount: "C:\\", fs: "ntfs" },
+        phase: "scanning",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        progress: {
+          directoriesDiscovered: 1,
+          directoriesCompleted: 0,
+          filesDiscovered: 0,
+          bytesProcessed: 0,
+        },
+        issues: [],
+        limits: {
+          maxWorkers: 2,
+          maxPendingDirectories: 10,
+          maxIndexedNodes: 100,
+        },
+      },
+    });
+
+    const unsubscribeSpy = vi.fn();
+    let capturedListener: ((event: unknown) => void) | undefined;
+    diskAnalysisMock.subscribeToJob.mockImplementationOnce(
+      ((...args: unknown[]) => {
+        capturedListener = args[1] as (event: unknown) => void;
+        return unsubscribeSpy;
+      }) as unknown as () => () => undefined
+    );
+
+    const app = createApp();
+    const res = await app.request(
+      "http://localhost/api/disk-analysis/jobs/11111111-1111-1111-1111-111111111111/events?mount=C%3A%5C&fs=ntfs",
+      {
+        headers: {
+          accept: "text/event-stream",
+        },
+      }
+    );
+
+    expect(res.status).toBe(200);
+    const reader = getResponseReader(res);
+    await reader.read();
+
+    expect(capturedListener).toBeDefined();
+
+    // Make the *next* writeSSE call reject, then simulate a live event
+    // arriving through the job listener. `writeEvent` calls `writeSSE`
+    // without awaiting it -- this proves that rejection is still handled
+    // (logged, subscription torn down) instead of becoming an unhandled
+    // promise rejection that vitest would otherwise fail this test for.
+    sseInterceptor.rejectNext = 1;
+    capturedListener?.({
+      event: "status",
+      job: {
+        jobId: "11111111-1111-1111-1111-111111111111",
+        mount: { mount: "C:\\", fs: "ntfs" },
+        phase: "completed",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:01:00.000Z",
+        progress: {
+          directoriesDiscovered: 1,
+          directoriesCompleted: 1,
+          filesDiscovered: 1,
+          bytesProcessed: 128,
+        },
+        issues: [],
+        limits: {
+          maxWorkers: 2,
+          maxPendingDirectories: 10,
+          maxIndexedNodes: 100,
+        },
+      },
+    });
+
+    // Let the rejected writeSSE promise's rejection handler (or, pre-fix,
+    // vitest's unhandled-rejection detector) run.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Asserted *before* cancelling the reader: cancelling triggers the
+    // stream's own `onAbort` -> `unsubscribe()` path, which would call
+    // `unsubscribeSpy` regardless of whether the writeSSE rejection is
+    // handled. Checking here isolates the rejection-handling teardown from
+    // that unrelated abort-triggered teardown.
+    expect(unsubscribeSpy).toHaveBeenCalledTimes(1);
+
+    await reader.cancel();
+  });
+
   test("disk analysis events endpoint skips an unparsable event instead of wedging the stream", async () => {
     diskAnalysisMock.getJobStreamInitialEvent.mockReturnValue({
       event: "status",
@@ -585,6 +711,7 @@ describe("runtimeRoutes session lock (AUTH-6)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dockerMock.getDockerAsync.mockResolvedValue(null);
+    sseInterceptor.rejectNext = 0;
   });
 
   afterEach(async () => {
@@ -952,6 +1079,7 @@ describe("runtimeRoutes log stream bounds (DOCK-10)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dockerMock.getDockerAsync.mockResolvedValue(null);
+    sseInterceptor.rejectNext = 0;
   });
 
   type SseEvent = { event: string | undefined; data: string };
