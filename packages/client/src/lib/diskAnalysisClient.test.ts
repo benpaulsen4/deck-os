@@ -110,6 +110,90 @@ describe("diskAnalysisClient", () => {
     ).toBe(true);
   });
 
+  // The first 24 children at depth 0 are force-kept regardless of size, so a
+  // case with only a handful of entries hides nothing at all. These build past
+  // that floor so the hidden path is genuinely exercised.
+  const withTrailingSmallEntries = (count: number) =>
+    makeDirectory("C:\\", [
+      ...Array.from({ length: 24 }, (_, index) =>
+        makeDirectory(`C:\\big-${index}`, [makeFile(`C:\\big-${index}\\data.bin`, 8_000)])
+      ),
+      ...Array.from({ length: count }, (_, index) =>
+        makeDirectory(`C:\\small-${index}`, [makeFile(`C:\\small-${index}\\note.txt`, 5)])
+      ),
+    ]);
+
+  const presentationOptions = {
+    maxDepth: 3,
+    maxChildrenPerDirectory: 12,
+    minShareByDepth: [0, 0.02, 0.01],
+  };
+
+  it("renders a lone hidden entry as itself instead of an Other bucket", () => {
+    const presentation = createPresentationTree(withTrailingSmallEntries(1), presentationOptions);
+
+    expect(presentation?.children.some((child) => child.path === "C:\\small-0")).toBe(true);
+    expect(
+      presentation?.children.some((child) => child.path.endsWith("__deckos_other_entries__"))
+    ).toBe(false);
+  });
+
+  it("still buckets when more than one entry is hidden", () => {
+    const presentation = createPresentationTree(withTrailingSmallEntries(2), presentationOptions);
+
+    expect(presentation?.children.some((child) => child.path === "C:\\small-0")).toBe(false);
+    expect(
+      presentation?.children.some((child) => child.path.endsWith("__deckos_other_entries__"))
+    ).toBe(true);
+  });
+
+  it("keeps deep-but-significant directories instead of collapsing them", () => {
+    // Six levels below the root, which the previous ceiling of 4 collapsed
+    // into "Other" regardless of size.
+    const deepFile = makeFile("C:\\a\\b\\c\\d\\e\\deep.bin", 1_000);
+    const root = makeDirectory("C:\\", [
+      makeDirectory("C:\\a", [
+        makeDirectory("C:\\a\\b", [
+          makeDirectory("C:\\a\\b\\c", [
+            makeDirectory("C:\\a\\b\\c\\d", [makeDirectory("C:\\a\\b\\c\\d\\e", [deepFile])]),
+          ]),
+        ]),
+      ]),
+    ]);
+
+    const presentation = createPresentationTree(root);
+
+    expect(findNodeByPath(presentation, "C:\\a\\b\\c\\d\\e")?.path).toBe("C:\\a\\b\\c\\d\\e");
+  });
+
+  it("stops descending a single-child chain at the depth ceiling", () => {
+    // Promoting a lone hidden child must not walk an arbitrarily deep chain --
+    // `node_modules` nesting would otherwise recurse without bound.
+    let node = makeFile("C:\\chain\\1\\2\\3\\4\\5\\6\\7\\8\\deep.bin", 1_000);
+    for (const path of [
+      "C:\\chain\\1\\2\\3\\4\\5\\6\\7\\8",
+      "C:\\chain\\1\\2\\3\\4\\5\\6\\7",
+      "C:\\chain\\1\\2\\3\\4\\5\\6",
+      "C:\\chain\\1\\2\\3\\4\\5",
+      "C:\\chain\\1\\2\\3\\4",
+      "C:\\chain\\1\\2\\3",
+      "C:\\chain\\1\\2",
+      "C:\\chain\\1",
+      "C:\\chain",
+    ]) {
+      node = makeDirectory(path, [node]);
+    }
+    const presentation = createPresentationTree(makeDirectory("C:\\", [node]));
+
+    const measureDepth = (n: DiskAnalysisTreemapNode | null, depth = 0): number =>
+      !n || n.children.length === 0
+        ? depth
+        : Math.max(...n.children.map((child) => measureDepth(child, depth + 1)));
+
+    // maxDepth 6, plus at most one promoted leaf past the ceiling.
+    expect(measureDepth(presentation)).toBeLessThanOrEqual(8);
+  });
+
   it("trusts newer shallow branch sizes over older preserved live totals", () => {
     const mount: DiskAnalysisMountIdentity = { mount: "C:\\", fs: "ntfs" };
     let root = createSyntheticLiveRoot(mount);

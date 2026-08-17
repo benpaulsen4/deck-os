@@ -293,6 +293,46 @@
   color: #ff8f3d;
 }
 
+/* Compact form of the same caveat, sitting in the toolbar's spare width. It
+   opens the issues modal, where the full sentence is shown, so it is a button
+   rather than a status block -- but it keeps the warning colours so it reads
+   as a caveat and not another action. */
+.disk-analysis-toolbar__partial {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: auto;
+  padding: 6px var(--space-2);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  line-height: 1;
+  color: var(--text-primary);
+  cursor: pointer;
+  background: rgba(255, 143, 61, 0.08);
+  border: 1px solid rgba(255, 143, 61, 0.3);
+}
+
+.disk-analysis-toolbar__partial svg {
+  flex: none;
+  color: #ff8f3d;
+}
+
+.disk-analysis-toolbar__partial:hover {
+  background: rgba(255, 143, 61, 0.16);
+}
+
+/* The count is the part worth keeping when width is short; the toolbar
+   buttons already collapse to their compact labels at this width. */
+@media (max-width: 720px) {
+  .disk-analysis-toolbar__partial {
+    padding: 6px;
+  }
+
+  .disk-analysis-toolbar__partial span {
+    display: none;
+  }
+}
+
 .disk-analysis-empty {
   display: grid;
   place-items: center;
