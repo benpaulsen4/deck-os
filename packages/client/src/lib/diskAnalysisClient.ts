@@ -306,14 +306,6 @@ export function createPresentationTree(
     return null;
   }
 
-  // Raised from 4: on a filesystem with deep-but-real trees (a btrfs host
-  // where subvolumes are now walked rather than skipped, `.nvm/versions/...`,
-  // nested `node_modules`) a ceiling of 4 collapsed whole branches into
-  // "Other" no matter how large they were, which is what made the treemap
-  // look mostly aggregated. The per-depth share thresholds below still
-  // tighten with depth and `maxChildrenPerDirectory` still applies, so the
-  // extra levels only materialise for entries that are individually
-  // significant.
   const maxDepth = options.maxDepth ?? 6;
   const maxChildrenPerDirectory = options.maxChildrenPerDirectory ?? 40;
   const minShareByDepth = options.minShareByDepth ?? [0, 0.0025, 0.0012, 0.0005, 0.0002];
@@ -377,11 +369,6 @@ export function createPresentationTree(
     if (hiddenBytes > 0) {
       const lone = onlyHiddenChild as DiskAnalysisTreemapNode | null;
       if (hiddenCount === 1 && lone) {
-        // Render the entry instead of a bucket standing in for it. Past the
-        // depth ceiling it is rendered as a leaf rather than descended into:
-        // recursing here would walk a single-child chain (`node_modules`
-        // nesting, `.nvm/versions/node/...`) to unbounded depth, which is the
-        // exact cost the ceiling exists to bound.
         keptChildren.push(
           depth + 1 <= maxDepth
             ? pruneNode(lone, depth + 1)
