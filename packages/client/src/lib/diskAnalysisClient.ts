@@ -45,6 +45,8 @@ export type PresentationTreeOptions = {
   maxDepth?: number;
   maxChildrenPerDirectory?: number;
   minShareByDepth?: number[];
+  minParentShare?: number;
+  maxSignificantChildren?: number;
 };
 
 /**
@@ -306,10 +308,25 @@ export function createPresentationTree(
     return null;
   }
 
-  const maxDepth = options.maxDepth ?? 6;
+  const maxDepth = options.maxDepth ?? 5;
   const maxChildrenPerDirectory = options.maxChildrenPerDirectory ?? 40;
   const minShareByDepth = options.minShareByDepth ?? [0, 0.0025, 0.0012, 0.0005, 0.0002];
+  // A child worth this much of its own parent is drawn whatever the byte
+  // thresholds above say. Those are measured against the whole mount, so deep
+  // inside a large directory every entry looks negligible and the bucket ends
+  // up holding most of its parent -- the block it replaces is exactly as big,
+  // it just no longer says what is in it.
+  const minParentShare = options.minParentShare ?? 0.005;
+  // Ceiling on that rule, so a directory of ten thousand equal children still
+  // aggregates rather than emitting ten thousand blocks.
+  const maxSignificantChildren = options.maxSignificantChildren ?? 160;
   const totalBytes = Math.max(root.recursiveSize, 1);
+
+  const asLeaf = (node: DiskAnalysisTreemapNode): DiskAnalysisTreemapNode => ({
+    ...node,
+    issues: dedupeIssues(node.issues),
+    children: [],
+  });
 
   const pruneNode = (node: DiskAnalysisTreemapNode, depth: number): DiskAnalysisTreemapNode => {
     if (node.type === "file") {
@@ -354,25 +371,30 @@ export function createPresentationTree(
 
     for (const [index, child] of node.children.entries()) {
       const share = child.recursiveSize / totalBytes;
+      const parentShare =
+        node.recursiveSize > 0 ? child.recursiveSize / node.recursiveSize : 0;
       const forceKeep = depth === 0 ? index < 24 : depth === 1 ? index < 16 : index < 10;
       const withinBudget = keptChildren.length < maxChildrenPerDirectory;
-      const shouldKeep = forceKeep || (withinBudget && share >= threshold);
+      const significant =
+        parentShare >= minParentShare && keptChildren.length < maxSignificantChildren;
+      const shouldKeep = forceKeep || significant || (withinBudget && share >= threshold);
 
-      if (!shouldKeep || depth >= maxDepth) {
+      if (!shouldKeep) {
         hide(child);
         continue;
       }
 
-      keptChildren.push(pruneNode(child, depth + 1));
+      // The ceiling bounds recursion, not how much the last level is allowed to
+      // say. Rendering these as leaves costs one block each -- the same block
+      // the bucket would have occupied -- and keeps their names.
+      keptChildren.push(depth >= maxDepth ? asLeaf(child) : pruneNode(child, depth + 1));
     }
 
     if (hiddenBytes > 0) {
       const lone = onlyHiddenChild as DiskAnalysisTreemapNode | null;
       if (hiddenCount === 1 && lone) {
         keptChildren.push(
-          depth + 1 <= maxDepth
-            ? pruneNode(lone, depth + 1)
-            : { ...lone, issues: dedupeIssues(lone.issues), children: [] }
+          depth + 1 <= maxDepth ? pruneNode(lone, depth + 1) : asLeaf(lone)
         );
       } else {
         keptChildren.push(

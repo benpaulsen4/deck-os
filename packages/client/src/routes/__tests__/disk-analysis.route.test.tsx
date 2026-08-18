@@ -1116,14 +1116,17 @@ describe("disk analysis route", () => {
       },
     });
 
-    const chip = await screen.findByLabelText(
-      "12 directories were unreadable - totals are a lower bound."
+    // The toolbar shows no banner of its own -- the issues button carries the
+    // warning, and the sentence rides on its label so it is not lost to sighted
+    // users only.
+    const issuesButton = await screen.findByLabelText(
+      /12 directories were unreadable - totals are a lower bound\./
     );
-    expect(chip).toBeInTheDocument();
+    expect(issuesButton).toBeInTheDocument();
 
-    // The chip abbreviates to "12 unreadable"; the full sentence has to be
-    // reachable, or the caveat is only ever visible to a tooltip.
-    fireEvent.click(chip);
+    // The full sentence still has to be reachable in the modal the button
+    // opens, or the caveat is only ever an accessible label.
+    fireEvent.click(issuesButton);
     expect(
       await screen.findByText("12 directories were unreadable - totals are a lower bound.")
     ).toBeInTheDocument();
@@ -1166,7 +1169,7 @@ describe("disk analysis route", () => {
     renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
 
     expect(
-      await screen.findByLabelText("12 directories were unreadable - totals are a lower bound.")
+      await screen.findByLabelText(/12 directories were unreadable - totals are a lower bound\./)
     ).toBeInTheDocument();
   });
 
@@ -1208,7 +1211,7 @@ describe("disk analysis route", () => {
     renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
 
     expect(
-      await screen.findByLabelText("Some directories were unreadable - totals are a lower bound.")
+      await screen.findByLabelText(/Some directories were unreadable - totals are a lower bound\./)
     ).toBeInTheDocument();
     expect(screen.queryByText(/0 directories were unreadable/)).not.toBeInTheDocument();
   });
@@ -1269,7 +1272,7 @@ describe("disk analysis route", () => {
     renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
 
     expect(
-      await screen.findByLabelText("3 directories were unreadable - totals are a lower bound.")
+      await screen.findByLabelText(/3 directories were unreadable - totals are a lower bound\./)
     ).toBeInTheDocument();
     expect(screen.queryByText(/343 directories were unreadable/)).not.toBeInTheDocument();
   });

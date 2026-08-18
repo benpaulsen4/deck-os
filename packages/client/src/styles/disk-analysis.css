@@ -46,6 +46,31 @@
   font-family: var(--font-mono);
 }
 
+/* The partial-scan caveat has no banner in the toolbar any more: the button
+   that opens the explanation carries the warning itself. Keyframes outrank the
+   inline variant styles, so the pulse lands on the background without either
+   fighting the other. */
+.disk-analysis-toolbar__issues--alert {
+  animation: disk-analysis-issues-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes disk-analysis-issues-pulse {
+  0%,
+  100% {
+    background: color-mix(in srgb, var(--status-warning) 8%, transparent);
+  }
+  50% {
+    background: color-mix(in srgb, var(--status-warning) 28%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .disk-analysis-toolbar__issues--alert {
+    animation: none;
+    background: color-mix(in srgb, var(--status-warning) 16%, transparent);
+  }
+}
+
 .disk-analysis-mode-switch {
   display: flex;
   width: 100%;
@@ -279,7 +304,8 @@
   display: flex;
   gap: 8px;
   align-items: flex-start;
-  padding: var(--space-2);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
   font-size: var(--text-xs);
   line-height: 1.5;
   color: var(--text-primary);
@@ -291,46 +317,6 @@
   flex: none;
   margin-top: 2px;
   color: #ff8f3d;
-}
-
-/* Compact form of the same caveat, sitting in the toolbar's spare width. It
-   opens the issues modal, where the full sentence is shown, so it is a button
-   rather than a status block -- but it keeps the warning colours so it reads
-   as a caveat and not another action. */
-.disk-analysis-toolbar__partial {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  margin-left: auto;
-  padding: 6px var(--space-2);
-  font-family: inherit;
-  font-size: var(--text-xs);
-  line-height: 1;
-  color: var(--text-primary);
-  cursor: pointer;
-  background: rgba(255, 143, 61, 0.08);
-  border: 1px solid rgba(255, 143, 61, 0.3);
-}
-
-.disk-analysis-toolbar__partial svg {
-  flex: none;
-  color: #ff8f3d;
-}
-
-.disk-analysis-toolbar__partial:hover {
-  background: rgba(255, 143, 61, 0.16);
-}
-
-/* The count is the part worth keeping when width is short; the toolbar
-   buttons already collapse to their compact labels at this width. */
-@media (max-width: 720px) {
-  .disk-analysis-toolbar__partial {
-    padding: 6px;
-  }
-
-  .disk-analysis-toolbar__partial span {
-    display: none;
-  }
 }
 
 .disk-analysis-empty {

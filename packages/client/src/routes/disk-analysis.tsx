@@ -42,10 +42,12 @@ export const Route = createFileRoute("/disk-analysis")({
 type ViewMode = "cached" | "live";
 const LIVE_EVENT_BATCH_MS = 0;
 const LIVE_MERGE_PUBLISH_MS = 250;
-const LIVE_PRESENTATION_OPTIONS = {
-  maxDepth: 4,
-  maxChildrenPerDirectory: 36,
-};
+/**
+ * The idle view deliberately carries no overrides. It used to pin `maxDepth: 4`
+ * here, which silently shadowed the library default -- tuning the default did
+ * nothing to this page, because this page never used it.
+ */
+const LIVE_PRESENTATION_OPTIONS = {};
 const LIVE_SCANNING_PRESENTATION_OPTIONS = {
   maxDepth: 3,
   maxChildrenPerDirectory: 24,
@@ -711,7 +713,6 @@ function DiskAnalysisPage() {
   const canWatchRunningScan =
     !!mount && !streamPath && !startScanMutation.isPending && isJobActive;
   const manualScanLabel = cachedSnapshot ? "Start New Scan" : "Start Scan";
-  const showToolbarActions = canStartManualScan || issueList.length > 0 || isJobActive;
   // B1/B5: a job reaches "partial" when anything made the totals a lower
   // bound. `partialIssueCount` (final whole-branch review, finding 2) is the
   // count scoped to the codes that actually mean that -- `PARTIAL_RESULT_CODES`
@@ -743,6 +744,8 @@ function DiskAnalysisPage() {
     partialIssueCount > 0
       ? `${formatCount(partialIssueCount)} directories were unreadable - totals are a lower bound.`
       : "Some directories were unreadable - totals are a lower bound.";
+  const showToolbarActions =
+    canStartManualScan || issueList.length > 0 || isJobActive || isPartialResult;
 
   const openInFiles = (node: DiskAnalysisTreemapNode) => {
     void navigate({
@@ -796,28 +799,6 @@ function DiskAnalysisPage() {
                 Back
               </span>
             </Button>
-            {/* The caveat lives here rather than in the sidebar: it is one
-                short line, and a full-width sidebar block cost more vertical
-                space than it earned. The full sentence is in the issues modal
-                this opens -- the chip is the pointer, not the explanation, so
-                it still carries the sentence as its accessible label and
-                tooltip for anyone who never opens the modal. */}
-            {isPartialResult ? (
-              <button
-                type="button"
-                className="disk-analysis-toolbar__partial"
-                onClick={() => setIsIssuesModalOpen(true)}
-                title={partialResultMessage}
-                aria-label={partialResultMessage}
-              >
-                <AlertTriangle size={14} aria-hidden="true" />
-                <span>
-                  {partialIssueCount > 0
-                    ? `${formatCount(partialIssueCount)} unreadable`
-                    : "Totals incomplete"}
-                </span>
-              </button>
-            ) : null}
             {showToolbarActions ? (
               <div className="disk-analysis-toolbar__actions">
                 {canStartManualScan ? (
@@ -851,10 +832,22 @@ function DiskAnalysisPage() {
                     </span>
                   </Button>
                 ) : null}
-                {issueList.length > 0 ? (
+                {issueList.length > 0 || isPartialResult ? (
+                  /* A partial scan gets no banner of its own up here -- it
+                     colours and pulses the button that already leads to the
+                     explanation. The caveat still reaches assistive tech
+                     through the label, since there is no longer a chip
+                     carrying it. */
                   <Button
-                    variant="secondary"
-                    aria-label={`View Issues (${formatCount(issueList.length)})`}
+                    variant={isPartialResult ? "warning" : "secondary"}
+                    className={
+                      isPartialResult ? "disk-analysis-toolbar__issues--alert" : undefined
+                    }
+                    aria-label={
+                      isPartialResult
+                        ? `View Issues (${formatCount(issueList.length)}) - ${partialResultMessage}`
+                        : `View Issues (${formatCount(issueList.length)})`
+                    }
                     onClick={() => setIsIssuesModalOpen(true)}
                   >
                     <AlertTriangle size={14} />
@@ -864,9 +857,11 @@ function DiskAnalysisPage() {
                     <span className="disk-analysis-toolbar__label disk-analysis-toolbar__label--compact">
                       Issues
                     </span>
-                    <span className="disk-analysis-toolbar__issues-count">
-                      ({formatCount(issueList.length)})
-                    </span>
+                    {issueList.length > 0 ? (
+                      <span className="disk-analysis-toolbar__issues-count">
+                        ({formatCount(issueList.length)})
+                      </span>
+                    ) : null}
                   </Button>
                 ) : null}
               </div>
