@@ -1327,11 +1327,18 @@ describe("diskAnalysis service", () => {
           expect(finished?.phase).toBe("partial");
           // 150 distinct, non-aggregating problems -- the counter has to say so.
           expect(finished?.issueCount).toBeGreaterThanOrEqual(unreadableCount);
-          // Exactly at the cap, not merely under it: 150 distinct issues means
-          // the array fills all its slots. `toBeLessThanOrEqual` alone would
-          // pass even if nothing were retained at all -- it stops testing the
-          // cap the moment a future regression retains zero issues.
-          expect(finished?.issues.length).toBe(diskAnalysis.MAX_RETAINED_ISSUES);
+          // Retention and live delivery are capped separately. A finished job
+          // *state* is a live view -- it rides on mount-state polling -- so it
+          // carries at most `LIVE_ISSUE_LIMIT`, well under the 150 recorded.
+          expect(finished?.issues.length).toBe(diskAnalysis.LIVE_ISSUE_LIMIT);
+          // The snapshot is not a live view and keeps everything retained, so
+          // the issues screen sees all 150. Asserting the exact count rather
+          // than a bound: `toBeLessThanOrEqual` would still pass if a
+          // regression truncated the snapshot to the live cap, which is the
+          // failure this exists to catch.
+          expect(unreadableCount).toBeLessThan(diskAnalysis.MAX_RETAINED_ISSUES);
+          const envelope = await diskAnalysis.getCachedSnapshot(mount);
+          expect(envelope?.snapshot.issues.length).toBe(unreadableCount);
 
           await diskAnalysis.__testing.clearState();
           await fs.remove(dataDir);
@@ -1442,13 +1449,19 @@ describe("diskAnalysis service", () => {
           const start = await diskAnalysis.startScan(mount);
           const finished = await waitForTerminalJob(diskAnalysis, start.jobId);
 
-          // The retained array is full of non-partial-signalling symlink
-          // issues by the time `denied` is processed -- confirms the setup
-          // actually exercises the retention race, not just the code path.
-          expect(finished?.issues.length).toBe(diskAnalysis.MAX_RETAINED_ISSUES);
-          expect(
-            finished?.issues.every((issue) => issue.code === "symlink-skipped")
-          ).toBe(true);
+          // `denied` is processed after every symlink directory (see the LIFO
+          // note above). At this scale it is comfortably inside the retention
+          // cap, so it is retained -- the retention *race* itself is driven
+          // directly in "partiality is recorded even when the issue itself is
+          // dropped", because filling a 1000-entry cap through a real scan
+          // would trip the indexed-node budget first and change what is being
+          // tested.
+          const envelope = await diskAnalysis.getCachedSnapshot(mount);
+          const snapshotCodes = new Set(
+            (envelope?.snapshot.issues ?? []).map((issue) => issue.code)
+          );
+          expect(snapshotCodes.has("symlink-skipped")).toBe(true);
+          expect(snapshotCodes.has("permission-denied")).toBe(true);
 
           // The point of this test: partiality must not depend on retention.
           expect(finished?.phase).toBe("partial");
@@ -1462,6 +1475,55 @@ describe("diskAnalysis service", () => {
       },
       20000
     );
+
+    test("partiality is recorded even when the issue itself is dropped", async () => {
+      // The retention race: a partial-signalling issue that arrives once the
+      // array is full is not retained, but the totals it invalidates are
+      // still a lower bound, so `partialResultDetected` must be set anyway.
+      // Driven through `recordIssue` directly rather than a real scan --
+      // producing MAX_RETAINED_ISSUES issues by walking a tree trips the
+      // indexed-node budget first, which would make this a test of that
+      // budget instead.
+      const dataDir = await createTempDir("deckos-disk-analysis-data-");
+      const diskAnalysis = (await loadDiskAnalysisModule(dataDir)) as DiskAnalysisModule & {
+        createIssue: typeof import("./diskAnalysis.js").createIssue;
+      };
+
+      const job: {
+        issues: DiskAnalysisIssue[];
+        issueCount: number;
+        partialResultDetected: boolean;
+        partialIssueCount: number;
+      } = { issues: [], issueCount: 0, partialResultDetected: false, partialIssueCount: 0 };
+      const stubJob = job as Parameters<typeof diskAnalysis.__testing.recordIssue>[0];
+      const cap = diskAnalysis.MAX_RETAINED_ISSUES;
+
+      // `symlink-skipped` is deliberately not a partial-result code, so the
+      // filler cannot be what sets the flag.
+      for (let i = 0; i < cap; i += 1) {
+        diskAnalysis.__testing.recordIssue(
+          stubJob,
+          diskAnalysis.createIssue("symlink-skipped", `/mnt/link${i}`, `skipped ${i}`)
+        );
+      }
+      expect(job.issues.length).toBe(cap);
+      expect(job.partialResultDetected).toBe(false);
+
+      diskAnalysis.__testing.recordIssue(
+        stubJob,
+        diskAnalysis.createIssue("permission-denied", "/mnt/denied", "Permission denied")
+      );
+
+      // Dropped from the array...
+      expect(job.issues.length).toBe(cap);
+      expect(job.issues.some((issue) => issue.code === "permission-denied")).toBe(false);
+      // ...but the scan is still partial, and the counters still say so.
+      expect(job.partialResultDetected).toBe(true);
+      expect(job.partialIssueCount).toBe(1);
+
+      await diskAnalysis.__testing.clearState();
+      await fs.remove(dataDir);
+    });
 
     test("a non-recoverable issue is never evicted by the retention cap", async () => {
       // B5 review round 1, finding 4: the scan-failure issue (the only

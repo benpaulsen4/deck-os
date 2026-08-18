@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { AlertTriangle, X } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import {
   formatBytes,
@@ -72,10 +72,13 @@ export function LegendRow({ item }: { item: DiskAnalysisLegendItem }) {
 export function ScanIssuesModal({
   isOpen,
   issues,
+  partialResultMessage = null,
   onClose,
 }: {
   isOpen: boolean;
   issues: DiskAnalysisIssue[];
+  /** Full "totals are a lower bound" sentence, or null when the scan reached everything. */
+  partialResultMessage?: string | null;
   onClose: () => void;
 }) {
   const [pageState, setPageState] = useState<IssuesPageState>({
@@ -156,6 +159,15 @@ export function ScanIssuesModal({
           </Button>
         </div>
         <div className="disk-analysis-modal__body">
+          {/* The full sentence the header chip abbreviates. This is where
+              someone comes to understand *why* the totals are a lower bound,
+              so it states it in full rather than relying on the chip. */}
+          {partialResultMessage ? (
+            <div className="disk-analysis-partial" role="status">
+              <AlertTriangle size={14} aria-hidden="true" />
+              <span>{partialResultMessage}</span>
+            </div>
+          ) : null}
           <div className="disk-analysis-modal__toolbar">
             <label className="disk-analysis-modal__search">
               <span className="label">Search Issues</span>

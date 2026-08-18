@@ -796,6 +796,28 @@ function DiskAnalysisPage() {
                 Back
               </span>
             </Button>
+            {/* The caveat lives here rather than in the sidebar: it is one
+                short line, and a full-width sidebar block cost more vertical
+                space than it earned. The full sentence is in the issues modal
+                this opens -- the chip is the pointer, not the explanation, so
+                it still carries the sentence as its accessible label and
+                tooltip for anyone who never opens the modal. */}
+            {isPartialResult ? (
+              <button
+                type="button"
+                className="disk-analysis-toolbar__partial"
+                onClick={() => setIsIssuesModalOpen(true)}
+                title={partialResultMessage}
+                aria-label={partialResultMessage}
+              >
+                <AlertTriangle size={14} aria-hidden="true" />
+                <span>
+                  {partialIssueCount > 0
+                    ? `${formatCount(partialIssueCount)} unreadable`
+                    : "Totals incomplete"}
+                </span>
+              </button>
+            ) : null}
             {showToolbarActions ? (
               <div className="disk-analysis-toolbar__actions">
                 {canStartManualScan ? (
@@ -913,13 +935,6 @@ function DiskAnalysisPage() {
                   `tone` for the default, neutral styling. */}
               {streamNotice ? <SidebarStat label="Scan" value={streamNotice} /> : null}
             </div>
-
-            {isPartialResult ? (
-              <div className="disk-analysis-partial" role="status">
-                <AlertTriangle size={14} aria-hidden="true" />
-                <span>{partialResultMessage}</span>
-              </div>
-            ) : null}
 
             {activeJob ? (
               <div className="disk-analysis-progress">
@@ -1043,6 +1058,7 @@ function DiskAnalysisPage() {
       <ScanIssuesModal
         isOpen={isIssuesModalOpen}
         issues={issueList}
+        partialResultMessage={isPartialResult ? partialResultMessage : null}
         onClose={() => setIsIssuesModalOpen(false)}
       />
     </div>

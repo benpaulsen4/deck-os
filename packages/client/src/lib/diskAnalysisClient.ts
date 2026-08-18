@@ -306,7 +306,7 @@ export function createPresentationTree(
     return null;
   }
 
-  const maxDepth = options.maxDepth ?? 4;
+  const maxDepth = options.maxDepth ?? 6;
   const maxChildrenPerDirectory = options.maxChildrenPerDirectory ?? 40;
   const minShareByDepth = options.minShareByDepth ?? [0, 0.0025, 0.0012, 0.0005, 0.0002];
   const totalBytes = Math.max(root.recursiveSize, 1);
@@ -335,6 +335,22 @@ export function createPresentationTree(
     let hiddenFileCount = 0;
     let hiddenDirectoryCount = 0;
     let hiddenHasIssues = false;
+    // Tracked so a lone hidden entry can be rendered as itself. "Other (1
+    // folder)" costs exactly as many blocks as the folder would, and throws
+    // away its name to say nothing.
+    let hiddenCount = 0;
+    let onlyHiddenChild: DiskAnalysisTreemapNode | null = null;
+    const hide = (child: DiskAnalysisTreemapNode) => {
+      hiddenBytes += child.recursiveSize;
+      hiddenHasIssues ||= child.truncated || child.issues.length > 0;
+      if (child.type === "directory") {
+        hiddenDirectoryCount += 1;
+      } else {
+        hiddenFileCount += 1;
+      }
+      hiddenCount += 1;
+      onlyHiddenChild = hiddenCount === 1 ? child : null;
+    };
 
     for (const [index, child] of node.children.entries()) {
       const share = child.recursiveSize / totalBytes;
@@ -342,25 +358,8 @@ export function createPresentationTree(
       const withinBudget = keptChildren.length < maxChildrenPerDirectory;
       const shouldKeep = forceKeep || (withinBudget && share >= threshold);
 
-      if (!shouldKeep) {
-        hiddenBytes += child.recursiveSize;
-        hiddenHasIssues ||= child.truncated || child.issues.length > 0;
-        if (child.type === "directory") {
-          hiddenDirectoryCount += 1;
-        } else {
-          hiddenFileCount += 1;
-        }
-        continue;
-      }
-
-      if (depth >= maxDepth) {
-        hiddenBytes += child.recursiveSize;
-        hiddenHasIssues ||= child.truncated || child.issues.length > 0;
-        if (child.type === "directory") {
-          hiddenDirectoryCount += 1;
-        } else {
-          hiddenFileCount += 1;
-        }
+      if (!shouldKeep || depth >= maxDepth) {
+        hide(child);
         continue;
       }
 
@@ -368,15 +367,24 @@ export function createPresentationTree(
     }
 
     if (hiddenBytes > 0) {
-      keptChildren.push(
-        createAggregateBucket(
-          node.path,
-          hiddenFileCount,
-          hiddenDirectoryCount,
-          hiddenBytes,
-          hiddenHasIssues
-        )
-      );
+      const lone = onlyHiddenChild as DiskAnalysisTreemapNode | null;
+      if (hiddenCount === 1 && lone) {
+        keptChildren.push(
+          depth + 1 <= maxDepth
+            ? pruneNode(lone, depth + 1)
+            : { ...lone, issues: dedupeIssues(lone.issues), children: [] }
+        );
+      } else {
+        keptChildren.push(
+          createAggregateBucket(
+            node.path,
+            hiddenFileCount,
+            hiddenDirectoryCount,
+            hiddenBytes,
+            hiddenHasIssues
+          )
+        );
+      }
     }
 
     return {

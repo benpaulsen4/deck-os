@@ -602,7 +602,9 @@ function getJobState(job: DiskAnalysisJobInternal): DiskAnalysisJobState {
     startedAt: job.startedAt,
     updatedAt: job.updatedAt,
     progress: job.progress,
-    issues: job.issues,
+    // Live views are capped (see `LIVE_ISSUE_LIMIT`). The finished snapshot
+    // reads `job.issues` directly, so it is not truncated by this.
+    issues: job.issues.slice(0, LIVE_ISSUE_LIMIT),
     issueCount: job.issueCount,
     partialIssueCount: job.partialIssueCount,
     limits: job.limits,
@@ -715,8 +717,26 @@ export function createIssue(
  * host with many unreadable paths. `MAX_RETAINED_ISSUES` caps what is kept
  * for display; `job.issueCount` keeps counting past the cap so the total
  * stays truthful even once the array stops growing.
+ *
+ * The cap is deliberately far above the old value of 100: the issues screen
+ * paginates and searches, so it can use everything it is given, and a scan
+ * that hits thousands of unreadable paths is exactly when the list is worth
+ * reading. The bound still exists because a pathological host can produce an
+ * issue per path.
  */
-export const MAX_RETAINED_ISSUES = 100;
+export const MAX_RETAINED_ISSUES = 1000;
+
+/**
+ * What a *live* view of a job carries, as opposed to the finished snapshot.
+ *
+ * `getJobState` rides on mount-state polling while a scan runs, so the whole
+ * retained list would be re-sent every poll for as long as the scan lasts --
+ * the same waste DISK-1 removed from progress events, just on a slower
+ * cadence. The finished snapshot is built straight from `job.issues` and is
+ * not capped by this, so a completed scan still surfaces everything retained.
+ * `issueCount` is unaffected either way, so the reported total stays honest.
+ */
+export const LIVE_ISSUE_LIMIT = 100;
 
 /**
  * Codes that mean the totals are a lower bound.
