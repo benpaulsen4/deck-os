@@ -1,7 +1,7 @@
 import { cn } from "../../lib/cn";
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: "primary" | "secondary" | "danger" | "icon";
+  variant?: "primary" | "secondary" | "danger" | "icon" | "warning";
   children?: React.ReactNode;
 }
 
@@ -45,6 +45,11 @@ export function Button({
     secondaryHover: {
       background: "var(--bg-tertiary)",
       borderColor: "var(--accent-primary)",
+    },
+    warning: {
+      background: "transparent",
+      border: "1px solid var(--status-warning)",
+      color: "var(--status-warning)",
     },
     danger: {
       background: "transparent",

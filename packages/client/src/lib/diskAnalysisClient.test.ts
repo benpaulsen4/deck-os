@@ -190,8 +190,8 @@ describe("diskAnalysisClient", () => {
         ? depth
         : Math.max(...n.children.map((child) => measureDepth(child, depth + 1)));
 
-    // maxDepth 6, plus at most one promoted leaf past the ceiling.
-    expect(measureDepth(presentation)).toBeLessThanOrEqual(8);
+    // maxDepth 5, plus at most one promoted leaf past the ceiling.
+    expect(measureDepth(presentation)).toBeLessThanOrEqual(7);
   });
 
   it("trusts newer shallow branch sizes over older preserved live totals", () => {
@@ -232,6 +232,9 @@ describe("diskAnalysisClient", () => {
 
   it("resolves hovered synthetic aggregate buckets from the presentation tree before raw data", () => {
     const rawRoot = makeDirectory("C:\\", [
+      // One dominant entry, so the tail really is a negligible share of the
+      // parent and still aggregates under the significant-child rule.
+      makeFile("C:\\big.bin", 1_000_000),
       ...Array.from({ length: 50 }, (_, index) => makeFile(`C:\\tiny-${index}.txt`, 10)),
     ]);
     const presentationRoot = createPresentationTree(rawRoot, {
@@ -478,5 +481,52 @@ describe("diskAnalysisClient", () => {
     expect(getMountStatePollIntervalMs(running)).toBeGreaterThan(0);
     expect(getMountStatePollIntervalMs(idle)).toBe(false);
     expect(getMountStatePollIntervalMs(undefined)).toBe(false);
+  });
+});
+
+describe("createPresentationTree aggregation", () => {
+  function makeChain(
+    depth: number,
+    leaves: DiskAnalysisTreemapNode[]
+  ): DiskAnalysisTreemapNode {
+    let node = makeDirectory("/level" + depth, leaves);
+    for (let level = depth - 1; level >= 1; level -= 1) {
+      node = makeDirectory("/level" + level, [node]);
+    }
+    return makeDirectory("/", [node]);
+  }
+
+  it("renders entries at the depth ceiling by name instead of bucketing them", () => {
+    const leaves = [
+      makeFile("/level4/alpha.bin", 30_000_000),
+      makeFile("/level4/beta.bin", 20_000_000),
+      makeFile("/level4/gamma.bin", 10_000_000),
+    ];
+    const presentation = createPresentationTree(makeChain(4, leaves), { maxDepth: 4 });
+
+    let cursor = presentation;
+    for (let level = 1; level <= 4; level += 1) {
+      cursor = cursor?.children[0] ?? null;
+    }
+
+    const names = (cursor?.children ?? []).map((child) => child.name);
+    expect(names).toEqual(["alpha.bin", "beta.bin", "gamma.bin"]);
+    expect(names.some((name) => name.startsWith("Other"))).toBe(false);
+  });
+
+  it("keeps children that are a significant share of their parent past the child cap", () => {
+    const wideChildren = Array.from({ length: 50 }, (_, index) =>
+      makeFile(`/wide/entry-${String(index).padStart(2, "0")}.bin`, 100_000)
+    );
+    const root = makeDirectory("/", [
+      makeFile("/huge.bin", 95_000_000),
+      makeDirectory("/wide", wideChildren),
+    ]);
+
+    const presentation = createPresentationTree(root, { maxDepth: 6 });
+    const wide = presentation?.children.find((child) => child.name === "wide");
+
+    expect(wide?.children).toHaveLength(50);
+    expect(wide?.children.some((child) => child.name.startsWith("Other"))).toBe(false);
   });
 });
