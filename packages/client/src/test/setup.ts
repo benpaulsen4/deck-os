@@ -29,7 +29,10 @@ afterEach(() => {
   globalThis.localStorage?.clear();
   globalThis.sessionStorage?.clear();
   vi.restoreAllMocks();
-  vi.clearAllMocks();
+  // resetAllMocks, not clearAllMocks: vitest 4 narrowed restoreAllMocks to
+  // spies, so a plain vi.fn() keeps its implementation into the next test
+  // unless it is reset. clearAllMocks only drops call history.
+  vi.resetAllMocks();
   vi.useRealTimers();
 });
 
