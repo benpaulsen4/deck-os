@@ -53,8 +53,13 @@ vi.mock("util", async () => {
 // assertValidAppId was never exercised through any docker-service path, and the
 // async mocks of its sync helpers hid that pullStack builds its argv without
 // awaiting them.
+// The implementation must be a `function`, not an arrow: the service calls
+// `new Docker()`, and vitest forwards construction to the implementation via
+// Reflect.construct, which arrow functions do not support.
 vi.mock("dockerode", () => ({
-  default: vi.fn(() => dockerClient),
+  default: vi.fn(function () {
+    return dockerClient;
+  }),
 }));
 
 const createdDirs: string[] = [];
