@@ -10,10 +10,9 @@ overrides:
   '@grpc/grpc-js': ^1.14.4
   dockerode>@grpc/grpc-js: ^1.14.4
   brace-expansion@>=3.0.0 <5.0.9: ^5.0.9
-  test-exclude>glob: ^11.0.0
   flatted: ^3.4.2
   follow-redirects: ^1.16.0
-  hono: ^4.12.34
+  hono: ^4.13.8
   nanoid: '>=3.3.18'
   postcss: '>=8.5.18'
   shell-quote: '>=1.9.0'
@@ -235,7 +234,7 @@ importers:
         specifier: ^11.4.0
         version: 11.4.0
       hono:
-        specifier: ^4.12.34
+        specifier: ^4.13.8
         version: 4.13.8
       protobufjs:
         specifier: 8.7.2
@@ -936,14 +935,14 @@ packages:
     resolution: {integrity: sha512-XovyyCCnBzW+zKu+z/zq8hwNs4KOR5rEMAOxo2f40Q5xoOI37IMm6MIg2COOUtUApo0i6850MTBKH2u4QLGIqg==}
     engines: {node: '>=20'}
     peerDependencies:
-      hono: ^4.12.34
+      hono: ^4.13.8
 
   '@hono/trpc-server@0.4.2':
     resolution: {integrity: sha512-3TDrc42CZLgcTFkXQba+y7JlRWRiyw1AqhLqztWyNS2IFT+3bHld0lxKdGBttCtGKHYx0505dM67RMazjhdZqw==}
     engines: {node: '>=16.0.0'}
     peerDependencies:
       '@trpc/server': ^10.10.0 || >11.0.0-rc
-      hono: ^4.12.34
+      hono: ^4.13.8
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
