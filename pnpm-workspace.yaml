@@ -55,7 +55,19 @@ overrides:
   "hono": "^4.13.8"
   "nanoid": ">=3.3.18"
   "postcss": ">=8.5.18"
-  "shell-quote": ">=1.9.0"
+  "shell-quote": ">=1.11.0"
+  "seroval": ">=1.6.3"
+  "source-map-js": ">=1.2.2"
   "undici": "^7.29.1"
   "dockerode>protobufjs": "^7.6.5"
   "@grpc/proto-loader>protobufjs": "^7.6.5"
+
+# Advisories with no patched release, accepted until one ships. Each entry
+# must say why it is unreachable here; drop it as soon as a fix is published
+# (an override above is the preferred remedy).
+auditConfig:
+  ignoreGhsas:
+    # braces <=3.0.3 stack exhaustion on deeply nested patterns (no 3.0.4 yet).
+    # Only path is nodemon > chokidar@3 > braces, a dev-only watcher whose
+    # patterns come from packages/server/nodemon.json, never from user input.
+    - GHSA-vfj7-8cjw-p6xm
