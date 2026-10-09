@@ -147,6 +147,44 @@ describe("template detail route", () => {
     expect(startSpy).not.toHaveBeenCalled();
   });
 
+  it("keeps the DECKOS_HOST token unresolved in the deployed url", async () => {
+    const Component = getRouteComponent();
+    render(<Component />);
+    fireEvent.click(screen.getByRole("button", { name: "DEPLOY" }));
+    await waitFor(() => expect(deploySpy).toHaveBeenCalledTimes(1));
+    const deployInput = deploySpy.mock.calls[0]?.[0] as { url?: string } | undefined;
+    expect(deployInput?.url).toBe("http://{{DECKOS_HOST}}:8080");
+  });
+
+  it("updates the web url when a parameter changes", async () => {
+    const Component = getRouteComponent();
+    render(<Component />);
+    fireEvent.change(screen.getByLabelText("Port"), { target: { value: "9090" } });
+    expect((screen.getByLabelText("WEB URL") as HTMLInputElement).value).toBe(
+      "http://{{DECKOS_HOST}}:9090"
+    );
+    fireEvent.click(screen.getByRole("button", { name: "DEPLOY" }));
+    await waitFor(() => expect(deploySpy).toHaveBeenCalledTimes(1));
+    const deployInput = deploySpy.mock.calls[0]?.[0] as { url?: string } | undefined;
+    expect(deployInput?.url).toBe("http://{{DECKOS_HOST}}:9090");
+  });
+
+  it("does not overwrite a hand-edited web url when a parameter changes", async () => {
+    const Component = getRouteComponent();
+    render(<Component />);
+    fireEvent.change(screen.getByLabelText("WEB URL"), {
+      target: { value: "https://media.example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Port"), { target: { value: "9090" } });
+    expect((screen.getByLabelText("WEB URL") as HTMLInputElement).value).toBe(
+      "https://media.example.com"
+    );
+    fireEvent.click(screen.getByRole("button", { name: "DEPLOY" }));
+    await waitFor(() => expect(deploySpy).toHaveBeenCalledTimes(1));
+    const deployInput = deploySpy.mock.calls[0]?.[0] as { url?: string } | undefined;
+    expect(deployInput?.url).toBe("https://media.example.com");
+  });
+
   it("sends composeOverride only when editing is enabled", async () => {
     const Component = getRouteComponent();
     render(<Component />);

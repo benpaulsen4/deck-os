@@ -31,6 +31,8 @@ For each app, DeckOS stores `docker-compose.yml` and `metadata.json`. This keeps
 
 App metadata controls how the app appears inside DeckOS, including the display name, description, icon, and launch URL. The launch URL is what powers the `OPEN` action from the dashboard or app detail page. If you want DeckOS to behave like a launcher as well as a manager, keeping this metadata accurate is worth the effort.
 
+The launch URL can use `{{DECKOS_HOST}}` in place of a hostname, for example `http://{{DECKOS_HOST}}:8686`. DeckOS fills in whatever address you are currently viewing it on, so the same shortcut works from `localhost`, a LAN IP, or a Tailscale name. Apps deployed from templates use this form automatically.
+
 ## Review Logs And Container State
 
 1. Open the app detail page when a service is not behaving the way you expect. This page combines app-level controls with the information you need to understand what is actually happening.

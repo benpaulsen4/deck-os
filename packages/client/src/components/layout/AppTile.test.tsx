@@ -49,6 +49,23 @@ describe("AppTile", () => {
     expect(external).toHaveAttribute("href", "https://example.com");
   });
 
+  it("resolves the DECKOS_HOST token against the current hostname", () => {
+    render(
+      <AppTile
+        app={{
+          id: "app-1",
+          metadata: {
+            name: "Host App",
+            icon: "",
+            url: "http://{{DECKOS_HOST}}:8686",
+          },
+        } as never}
+      />
+    );
+    const external = screen.getByRole("link", { name: /Host App/i });
+    expect(external).toHaveAttribute("href", "http://localhost:8686");
+  });
+
   it("falls back to non-anchor inner content for unsafe urls", () => {
     state.status = "warning";
     state.flash = false;

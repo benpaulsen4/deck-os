@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { trpcClient, useTRPC } from "../../trpc";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
+import { APP_URL_HINT } from "../../lib/appUrl";
 import { useToastStore } from "../../stores/toast";
 import type { App } from "../../../../server/src/lib/schema.js";
 
@@ -150,7 +151,8 @@ export function MetadataEditModal({ app, isOpen, onClose }: MetadataEditModalPro
             label="WEB URL"
             value={editedUrl}
             onChange={(e) => handleFieldChange("url", e.target.value)}
-            placeholder="http://localhost:8080"
+            placeholder="http://{{DECKOS_HOST}}:8080"
+            hint={APP_URL_HINT}
           />
         </div>
 

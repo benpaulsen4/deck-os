@@ -1,9 +1,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { DECKOS_HOST_TOKEN } from "@deckos/contracts";
 import { useTRPC, trpcClient } from "../../../trpc";
 import { AppIcon } from "../../../components/ui/AppIcon";
 import { Input } from "../../../components/ui/Input";
+import { APP_URL_HINT } from "../../../lib/appUrl";
 import { Button } from "../../../components/ui/Button";
 import { CodeEditor } from "../../../components/ui/CodeEditor";
 import { PullProgress } from "../../../components/ui/PullProgress";
@@ -24,7 +26,8 @@ function TemplateDetailPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [icon, setIcon] = useState("");
-  const [url, setUrl] = useState("");
+  // null until the user types in WEB URL; until then it tracks the parameters.
+  const [urlOverride, setUrlOverride] = useState<string | null>(null);
   const [params, setParams] = useState<Record<string, string>>({});
   const [composeOverride, setComposeOverride] = useState<string | null>(null);
   const [isEditingCompose, setIsEditingCompose] = useState(false);
@@ -47,16 +50,22 @@ function TemplateDetailPage() {
       initialParams[p.key] = p.defaultValue ?? "";
     }
     setParams(initialParams);
-
-    const host = window.location.hostname;
-    const values = { ...initialParams, DECKOS_HOST: host };
-    const computed = renderStringTemplate(tpl.webUrlTemplate || "", values);
-    if (computed) setUrl(computed);
+    setUrlOverride(null);
     // Only the template identity may retrigger seeding. Including the
     // fields it sets (as the previous version did) is what made the form
     // fight the user, and re-seeded a brand-new {} forever whenever a
     // template shipped with no parameters (CLI-2, CLI-3).
   }, [tpl]);
+
+  const renderedUrl = useMemo(() => {
+    if (!tpl) return "";
+    // Leave the host as a token so the saved shortcut follows whichever
+    // address DeckOS is later opened on.
+    const values = { ...params, DECKOS_HOST: DECKOS_HOST_TOKEN };
+    return renderStringTemplate(tpl.webUrlTemplate || "", values);
+  }, [tpl, params]);
+
+  const url = urlOverride ?? renderedUrl;
 
   const renderedCompose = useMemo(() => {
     if (!tpl) return "";
@@ -156,7 +165,8 @@ function TemplateDetailPage() {
               <Input
                 label="WEB URL"
                 value={url}
-                onChange={(e) => setUrl(e.target.value)}
+                onChange={(e) => setUrlOverride(e.target.value)}
+                hint={APP_URL_HINT}
               />
             </div>
 

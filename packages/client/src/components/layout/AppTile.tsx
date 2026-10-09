@@ -1,5 +1,6 @@
 import { type App } from "../../../../server/src/lib/schema.js";
 import { Link } from "@tanstack/react-router";
+import { getAppLaunchUrl } from "../../lib/appUrl";
 import { useAppStatusStore } from "../../stores/appStatus";
 import { AppIcon } from "../ui/AppIcon";
 
@@ -17,11 +18,7 @@ export function AppTile({ app, style, className, rootRef, rootProps }: AppTilePr
   const isFlashing = flashStates[app.id];
   const status = getResolvedStatus(app.id);
 
-  const safeUrl = (() => {
-    const u = typeof app.metadata.url === "string" ? app.metadata.url.trim() : "";
-    if (!u) return "";
-    return /^https?:\/\//i.test(u) ? u : "";
-  })();
+  const safeUrl = getAppLaunchUrl(app.metadata.url);
 
   const getStatusLabel = (): string => {
     switch (status) {
