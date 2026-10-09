@@ -1,4 +1,5 @@
 export { getFilesRouteTargetPath, FilesRouteSearchSchema, FilesRouteSourceSchema } from "./files.js";
+export { DECKOS_HOST_TOKEN, resolveAppUrl } from "./appUrl.js";
 export { getPathParent, trimTrailingPathSeparators } from "./paths.js";
 export {
   DiskAnalysisCacheMetadataSchema,

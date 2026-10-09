@@ -147,6 +147,15 @@ describe("template detail route", () => {
     expect(startSpy).not.toHaveBeenCalled();
   });
 
+  it("keeps the DECKOS_HOST token unresolved in the deployed url", async () => {
+    const Component = getRouteComponent();
+    render(<Component />);
+    fireEvent.click(screen.getByRole("button", { name: "DEPLOY" }));
+    await waitFor(() => expect(deploySpy).toHaveBeenCalledTimes(1));
+    const deployInput = deploySpy.mock.calls[0]?.[0] as { url?: string } | undefined;
+    expect(deployInput?.url).toBe("http://{{DECKOS_HOST}}:8080");
+  });
+
   it("sends composeOverride only when editing is enabled", async () => {
     const Component = getRouteComponent();
     render(<Component />);

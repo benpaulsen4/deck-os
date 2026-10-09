@@ -5,8 +5,9 @@ import * as appsService from "../services/apps.js";
 import {
   AppIdSchema,
   OptionalUrlOrPathSchema,
-  OptionalUrlSchema,
+  OptionalWebUrlSchema,
   UrlOrEmptySchema,
+  WebUrlOrEmptySchema,
 } from "../lib/schema.js";
 import { AppNotFoundError, getErrorMessage } from "../lib/errors.js";
 
@@ -50,7 +51,7 @@ export const appsRouter = router({
         name: z.string().min(1),
         description: z.string().optional().default(""),
         icon: OptionalUrlOrPathSchema,
-        url: OptionalUrlSchema,
+        url: OptionalWebUrlSchema,
         composeYaml: z.string().min(1),
       })
     )
@@ -71,7 +72,7 @@ export const appsRouter = router({
         name: z.string().optional(),
         description: z.string().optional(),
         icon: z.union([UrlOrEmptySchema, z.string().startsWith("/")]).optional(),
-        url: UrlOrEmptySchema.optional(),
+        url: WebUrlOrEmptySchema.optional(),
       })
     )
     .mutation(async ({ input }) => {

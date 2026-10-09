@@ -150,7 +150,7 @@ export function MetadataEditModal({ app, isOpen, onClose }: MetadataEditModalPro
             label="WEB URL"
             value={editedUrl}
             onChange={(e) => handleFieldChange("url", e.target.value)}
-            placeholder="http://localhost:8080"
+            placeholder="http://{{DECKOS_HOST}}:8080"
           />
         </div>
 

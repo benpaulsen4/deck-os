@@ -1,3 +1,4 @@
+import { resolveAppUrl } from "@deckos/contracts";
 import { z } from "zod";
 
 const AUTH_SESSION_DURATION_MIN_MS = 60 * 60 * 1000;
@@ -20,7 +21,16 @@ const HttpUrlSchema = z
   );
 
 const UrlOrEmptySchema = z.union([HttpUrlSchema, z.literal("")]);
-const OptionalUrlSchema = UrlOrEmptySchema.optional().default("");
+
+// An app's launch URL may use {{DECKOS_HOST}} in place of a hostname; it is
+// stored verbatim and resolved by the client, so validate it with a stand-in.
+const WebUrlSchema = z
+  .string()
+  .refine((value) => resolveAppUrl(value, "deckos-host.invalid") !== "", {
+    message: "Invalid URL",
+  });
+const WebUrlOrEmptySchema = z.union([WebUrlSchema, z.literal("")]);
+const OptionalWebUrlSchema = WebUrlOrEmptySchema.optional().default("");
 const UrlOrPathOrEmptySchema = z.union([
   HttpUrlSchema,
   z.string().startsWith("/"),
@@ -43,7 +53,7 @@ const AppMetadataSchema = z.object({
   id: AppIdSchema,
   name: z.string(),
   icon: OptionalUrlOrPathSchema,
-  url: OptionalUrlSchema,
+  url: OptionalWebUrlSchema,
   description: z.string().optional().default(""),
   order: z.number().int().default(0),
   createdAt: z.string().datetime(),
@@ -216,7 +226,8 @@ export {
   ContainerPortSchema,
   StackStatusSchema,
   UrlOrEmptySchema,
-  OptionalUrlSchema,
+  WebUrlOrEmptySchema,
+  OptionalWebUrlSchema,
   OptionalUrlOrPathSchema,
   AppIdSchema,
   PasscodeSchema,

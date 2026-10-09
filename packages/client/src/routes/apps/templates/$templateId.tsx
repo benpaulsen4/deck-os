@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { DECKOS_HOST_TOKEN } from "@deckos/contracts";
 import { useTRPC, trpcClient } from "../../../trpc";
 import { AppIcon } from "../../../components/ui/AppIcon";
 import { Input } from "../../../components/ui/Input";
@@ -48,8 +49,9 @@ function TemplateDetailPage() {
     }
     setParams(initialParams);
 
-    const host = window.location.hostname;
-    const values = { ...initialParams, DECKOS_HOST: host };
+    // Leave the host as a token so the saved shortcut follows whichever
+    // address DeckOS is later opened on.
+    const values = { ...initialParams, DECKOS_HOST: DECKOS_HOST_TOKEN };
     const computed = renderStringTemplate(tpl.webUrlTemplate || "", values);
     if (computed) setUrl(computed);
     // Only the template identity may retrigger seeding. Including the

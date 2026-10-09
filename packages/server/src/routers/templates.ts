@@ -1,7 +1,7 @@
 import { router, protectedProcedure } from "../trpc/trpc.js";
 import { z } from "zod";
 import * as templatesService from "../services/templates.js";
-import { OptionalUrlOrPathSchema, OptionalUrlSchema } from "../lib/schema.js";
+import { OptionalUrlOrPathSchema, OptionalWebUrlSchema } from "../lib/schema.js";
 
 const TemplateParameterSchema = z.object({
   key: z.string().min(1),
@@ -66,7 +66,7 @@ export const templatesRouter = router({
         name: z.string().min(1),
         description: z.string().optional().default(""),
         icon: OptionalUrlOrPathSchema,
-        url: OptionalUrlSchema,
+        url: OptionalWebUrlSchema,
         parameters: z.record(z.string()).optional().default({}),
         composeOverride: z.string().optional(),
       })

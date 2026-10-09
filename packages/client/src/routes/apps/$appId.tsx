@@ -8,6 +8,7 @@ import { ContainerTable } from "../../components/ui/ContainerTable";
 import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { PullProgress } from "../../components/ui/PullProgress";
 import { AppIcon } from "../../components/ui/AppIcon";
+import { getAppLaunchUrl } from "../../lib/appUrl";
 import { useToastStore } from "../../stores/toast";
 import {
   APP_BUSY_MESSAGE,
@@ -169,10 +170,7 @@ function AppDetailPage() {
   const busyTitle = isAppBusy ? APP_BUSY_TITLE : undefined;
 
   const isRunning = (stackStatus?.running ?? 0) > 0;
-  const safeUrl = (() => {
-    const u = typeof app?.metadata.url === "string" ? app.metadata.url.trim() : "";
-    return u && /^https?:\/\//i.test(u) ? u : "";
-  })();
+  const safeUrl = getAppLaunchUrl(app?.metadata.url);
 
   if (appLoading) {
     return (

@@ -157,7 +157,7 @@ function NewAppPage() {
                   label="WEB URL"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  placeholder="http://localhost:8080"
+                  placeholder="http://{{DECKOS_HOST}}:8080"
                 />
               </div>
 
