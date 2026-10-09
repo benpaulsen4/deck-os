@@ -3,6 +3,7 @@ import { useState } from "react";
 import { trpcClient } from "../../trpc";
 import { useMutation } from "@tanstack/react-query";
 import { Input } from "../../components/ui/Input";
+import { APP_URL_HINT } from "../../lib/appUrl";
 import { Button } from "../../components/ui/Button";
 import { CodeEditor } from "../../components/ui/CodeEditor";
 import { PullProgress } from "../../components/ui/PullProgress";
@@ -158,6 +159,7 @@ function NewAppPage() {
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="http://{{DECKOS_HOST}}:8080"
+                  hint={APP_URL_HINT}
                 />
               </div>
 

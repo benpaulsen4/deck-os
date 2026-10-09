@@ -5,6 +5,7 @@ import { DECKOS_HOST_TOKEN } from "@deckos/contracts";
 import { useTRPC, trpcClient } from "../../../trpc";
 import { AppIcon } from "../../../components/ui/AppIcon";
 import { Input } from "../../../components/ui/Input";
+import { APP_URL_HINT } from "../../../lib/appUrl";
 import { Button } from "../../../components/ui/Button";
 import { CodeEditor } from "../../../components/ui/CodeEditor";
 import { PullProgress } from "../../../components/ui/PullProgress";
@@ -159,6 +160,7 @@ function TemplateDetailPage() {
                 label="WEB URL"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
+                hint={APP_URL_HINT}
               />
             </div>
 

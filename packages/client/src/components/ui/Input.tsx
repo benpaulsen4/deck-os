@@ -2,11 +2,13 @@ import { useId } from "react";
 
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
+  hint?: string;
 }
 
-export function Input({ label, className, ...props }: InputProps) {
+export function Input({ label, hint, className, ...props }: InputProps) {
   const generatedId = useId();
   const inputId = props.id ?? generatedId;
+  const hintId = `${inputId}-hint`;
   const labelStyle = {
     display: "block",
     marginBottom: "4px",
@@ -39,6 +41,7 @@ export function Input({ label, className, ...props }: InputProps) {
       )}
       <input
         id={inputId}
+        aria-describedby={hint ? hintId : undefined}
         className={className}
         style={inputStyle}
         onMouseEnter={(e) => {
@@ -59,6 +62,15 @@ export function Input({ label, className, ...props }: InputProps) {
         }}
         {...props}
       />
+      {hint && (
+        <span
+          id={hintId}
+          className="text-muted"
+          style={{ display: "block", marginTop: "4px", fontSize: "var(--text-xs)" }}
+        >
+          {hint}
+        </span>
+      )}
     </div>
   );
 }

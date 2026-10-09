@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { OptionalWebUrlSchema, WebUrlOrEmptySchema } from "./schema.js";
+import {
+  AppMetadataSchema,
+  OptionalWebUrlSchema,
+  WebUrlOrEmptySchema,
+} from "./schema.js";
 
 describe("WebUrlOrEmptySchema", () => {
   it("accepts plain http(s) urls and the empty string", () => {
@@ -30,5 +34,23 @@ describe("WebUrlOrEmptySchema", () => {
       false
     );
     expect(WebUrlOrEmptySchema.safeParse("http://{{OTHER}}:8080").success).toBe(false);
+  });
+
+  it("still accepts braces outside the host, as the previous schema did", () => {
+    expect(WebUrlOrEmptySchema.parse("http://nas/app/?q={{x}}")).toBe(
+      "http://nas/app/?q={{x}}"
+    );
+    const stored = {
+      id: "my-app",
+      name: "My App",
+      url: "http://nas/{{x}}",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    expect(AppMetadataSchema.parse(stored).url).toBe("http://nas/{{x}}");
+  });
+
+  it("rejects a mistyped token in the host even across a line break", () => {
+    expect(WebUrlOrEmptySchema.safeParse("http://{{OTHER\n}}:8080").success).toBe(false);
   });
 });
