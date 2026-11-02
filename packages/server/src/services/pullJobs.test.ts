@@ -67,8 +67,7 @@ describe("pullJobs service", () => {
   });
 
   test("startPullJob deduplicates active jobs per app and publishes completion", async () => {
-    const { pullJobs, getAppMock, pullImagesWithProgressMock } =
-      await loadPullJobsModule();
+    const { pullJobs, getAppMock, pullImagesWithProgressMock } = await loadPullJobsModule();
     getAppMock.mockResolvedValue(createMockApp());
 
     let resolvePull: () => void = () => undefined;
@@ -110,8 +109,7 @@ describe("pullJobs service", () => {
   });
 
   test("cancelPullJob reports an error even when the aborted pull resolves", async () => {
-    const { pullJobs, getAppMock, pullImagesWithProgressMock } =
-      await loadPullJobsModule();
+    const { pullJobs, getAppMock, pullImagesWithProgressMock } = await loadPullJobsModule();
     getAppMock.mockResolvedValue(createMockApp());
 
     // The mock must RESOLVE on abort, not reject: docker-modem's followProgress

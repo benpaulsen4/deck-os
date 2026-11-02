@@ -164,10 +164,7 @@ export async function listApps(): Promise<App[]> {
       if (!metadataExists || !composeExists) continue;
 
       const metadataJson = await fs.readJson(metadataPath);
-      const metadata = withDirectoryIdentity(
-        appId,
-        AppMetadataSchema.parse(metadataJson)
-      );
+      const metadata = withDirectoryIdentity(appId, AppMetadataSchema.parse(metadataJson));
       const composeYaml = await fs.readFile(composePath, "utf-8");
 
       apps.push({
@@ -283,10 +280,7 @@ export async function updateApp(
   });
 }
 
-export async function updateCompose(
-  id: string,
-  composeYaml: string
-): Promise<App | null> {
+export async function updateCompose(id: string, composeYaml: string): Promise<App | null> {
   await validateComposeYaml(composeYaml);
 
   return await withAppLock(id, async () => {
