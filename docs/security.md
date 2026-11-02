@@ -40,6 +40,16 @@ The file browser blocks access to protected system paths so users cannot casuall
 
 This improves safety, but it does not make DeckOS a sandbox. DeckOS also runs as its own service account, which means normal Linux file permissions still apply. If DeckOS cannot read from or write to a path you expect to manage, you may need to adjust ownership or permissions on that path so the `deckos` user can access it safely.
 
+## Request Size Limits
+
+DeckOS caps how much a single request can make the server hold in memory, because the API can be reachable without a passcode:
+
+- API requests can be up to 16 MiB, which leaves room for the largest text file the editor can save
+- passcode and session requests can be up to 16 KiB
+- compose files can be up to 512 KiB, because parsing YAML uses far more memory than the file's own size
+
+File uploads are written to disk as they arrive, so they keep their own limits of 128 MiB per file and 512 MiB per upload.
+
 ## Release Verification
 
 Every DeckOS release publishes a `SHA256SUMS` manifest and a detached `ed25519` signature over it, `SHA256SUMS.sig`. Both the installer and the in-app updater verify that signature against a public key built into DeckOS, then check the release archive against its entry in the manifest, before anything is unpacked.

@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as dockerService from "../services/docker.js";
 import * as appsService from "../services/apps.js";
 import { AppNotFoundError } from "../lib/errors.js";
-import { AppIdSchema } from "../lib/schema.js";
+import { AppIdListSchema, AppIdSchema } from "../lib/schema.js";
 
 /**
  * Docker container ids are hex digests. Constraining the shape keeps arbitrary
@@ -89,7 +89,7 @@ export const dockerRouter = router({
     }),
 
   getStatuses: protectedProcedure
-    .input(z.object({ appIds: z.array(AppIdSchema).max(500) }))
+    .input(z.object({ appIds: AppIdListSchema }))
     .query(async ({ input }) => {
       const uniqueAppIds = Array.from(new Set(input.appIds));
       const docker = await dockerService.getDockerAsync();

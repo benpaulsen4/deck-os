@@ -42,6 +42,42 @@ const AppIdSchema = z
   .min(1)
   .max(64)
   .regex(/^[a-z0-9][a-z0-9-]*$/, "Invalid app id");
+const MAX_APP_IDS_PER_REQUEST = 500;
+// Without a limit, zod validates every element of an array or record and reports
+// one issue for each, so a few MB of JSON could take over a GB of memory to reject.
+const AppIdListSchema = z.array(AppIdSchema).max(MAX_APP_IDS_PER_REQUEST);
+
+// Parsing YAML takes far more memory and time than holding it: 4 MiB of flow sequence
+// costs about 2 GB of memory and takes 8 seconds, while 500 KiB costs about
+// 270 MB and takes 1 second. The largest bundled template is under 9 KB, so real files
+// are nowhere near the limit.
+const MAX_COMPOSE_YAML_CHARS = 512 * 1024;
+const ComposeYamlSchema = z
+  .string()
+  .max(MAX_COMPOSE_YAML_CHARS, "Compose YAML must be 512 KiB or smaller");
+
+// The largest bundled template has 31 parameters, with values of a few dozen characters.
+const MAX_DEPLOY_PARAMETERS = 256;
+const MAX_DEPLOY_PARAMETER_KEY_CHARS = 256;
+const MAX_DEPLOY_PARAMETER_VALUE_CHARS = 64 * 1024;
+// z.record() has no size limit of its own, so the key count is checked first: when the
+// left side of a pipe fails, the record is never walked. Anything that is not an object
+// passes the count and gets its usual error from z.record().
+const DeployParametersSchema = z
+  .custom<Record<string, string>>(
+    (value) =>
+      typeof value !== "object" ||
+      value === null ||
+      Object.keys(value).length <= MAX_DEPLOY_PARAMETERS,
+    `Templates accept at most ${MAX_DEPLOY_PARAMETERS} parameters`
+  )
+  .pipe(
+    z.record(
+      z.string().max(MAX_DEPLOY_PARAMETER_KEY_CHARS),
+      z.string().max(MAX_DEPLOY_PARAMETER_VALUE_CHARS)
+    )
+  );
+
 const PasscodeSchema = z.string().regex(/^[0-9]{4,10}$/, "Passcode must be 4-10 digits");
 const SessionDurationMsSchema = z
   .number()
@@ -232,6 +268,13 @@ export {
   OptionalWebUrlSchema,
   OptionalUrlOrPathSchema,
   AppIdSchema,
+  AppIdListSchema,
+  ComposeYamlSchema,
+  DeployParametersSchema,
+  MAX_APP_IDS_PER_REQUEST,
+  MAX_COMPOSE_YAML_CHARS,
+  MAX_DEPLOY_PARAMETERS,
+  MAX_DEPLOY_PARAMETER_VALUE_CHARS,
   PasscodeSchema,
   SessionDurationMsSchema,
   AUTH_SESSION_DURATION_MIN_MS,
