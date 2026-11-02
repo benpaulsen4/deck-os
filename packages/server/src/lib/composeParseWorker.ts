@@ -1,6 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { parse } from "yaml";
 import { ComposeFileSchema } from "./composeSchema.js";
+import { getErrorMessage } from "./errors.js";
 
 export type ComposeParseRequest = {
   operation: "validate" | "readImages";
@@ -33,7 +34,7 @@ function run({ operation, composeYaml }: ComposeParseRequest): ComposeParseRespo
     ComposeFileSchema.parse(parsed);
     return { ok: true, images: [] };
   } catch (error: unknown) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    return { ok: false, message: getErrorMessage(error) };
   }
 }
 

@@ -84,17 +84,22 @@ function NewAppPage() {
   const handleValidate = async () => {
     setValidationError(null);
 
+    const showValidationFailure = (message: string) => {
+      setValidationError(message);
+      addToast("Validation failed", "error");
+    };
+
     try {
       const result = await trpcClient.apps.validateCompose.mutate({
         composeYaml,
       });
       if (result.valid) {
         addToast("Compose YAML is valid", "success");
+      } else {
+        showValidationFailure(result.message);
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Invalid compose YAML";
-      setValidationError(message);
-      addToast("Validation failed", "error");
+      showValidationFailure(err instanceof Error ? err.message : "Invalid compose YAML");
     }
   };
 
