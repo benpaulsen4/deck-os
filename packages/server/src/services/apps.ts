@@ -2,9 +2,9 @@ import fs from "fs-extra";
 import * as crypto from "node:crypto";
 import * as path from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { parse } from "yaml";
 import type { App, AppMetadata } from "../lib/schema.js";
-import { AppMetadataSchema, ComposeFileSchema } from "../lib/schema.js";
+import { AppMetadataSchema } from "../lib/schema.js";
+import { validateComposeYaml } from "../lib/composeParser.js";
 import { APPS_DIR, getAppDir, getMetadataPath, getComposePath } from "../lib/config.js";
 import * as dockerService from "./docker.js";
 
@@ -164,7 +164,10 @@ export async function listApps(): Promise<App[]> {
       if (!metadataExists || !composeExists) continue;
 
       const metadataJson = await fs.readJson(metadataPath);
-      const metadata = withDirectoryIdentity(appId, AppMetadataSchema.parse(metadataJson));
+      const metadata = withDirectoryIdentity(
+        appId,
+        AppMetadataSchema.parse(metadataJson)
+      );
       const composeYaml = await fs.readFile(composePath, "utf-8");
 
       apps.push({
@@ -230,8 +233,7 @@ export async function createApp(
     updatedAt: now,
   });
 
-  const parsed = parse(composeYaml);
-  ComposeFileSchema.parse(parsed);
+  await validateComposeYaml(composeYaml);
 
   const appDir = getAppDir(id);
   try {
@@ -281,9 +283,11 @@ export async function updateApp(
   });
 }
 
-export async function updateCompose(id: string, composeYaml: string): Promise<App | null> {
-  const parsed = parse(composeYaml);
-  ComposeFileSchema.parse(parsed);
+export async function updateCompose(
+  id: string,
+  composeYaml: string
+): Promise<App | null> {
+  await validateComposeYaml(composeYaml);
 
   return await withAppLock(id, async () => {
     const existing = await getApp(id);

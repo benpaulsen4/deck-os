@@ -49,8 +49,26 @@ describe("pullJobs service", () => {
     await expect(pullJobs.startPullJob("missing-app")).rejects.toThrow("App not found");
   });
 
+  test("startPullJob starts one job for concurrent requests", async () => {
+    const { pullJobs, getAppMock, pullImagesWithProgressMock } =
+      await loadPullJobsModule();
+    getAppMock.mockResolvedValue(createMockApp());
+    pullImagesWithProgressMock.mockImplementation(
+      () => new Promise<void>(() => undefined)
+    );
+
+    const [first, second] = await Promise.all([
+      pullJobs.startPullJob("my-app"),
+      pullJobs.startPullJob("my-app"),
+    ]);
+
+    expect(second.jobId).toBe(first.jobId);
+    expect(pullImagesWithProgressMock).toHaveBeenCalledTimes(1);
+  });
+
   test("startPullJob deduplicates active jobs per app and publishes completion", async () => {
-    const { pullJobs, getAppMock, pullImagesWithProgressMock } = await loadPullJobsModule();
+    const { pullJobs, getAppMock, pullImagesWithProgressMock } =
+      await loadPullJobsModule();
     getAppMock.mockResolvedValue(createMockApp());
 
     let resolvePull: () => void = () => undefined;
@@ -92,7 +110,8 @@ describe("pullJobs service", () => {
   });
 
   test("cancelPullJob reports an error even when the aborted pull resolves", async () => {
-    const { pullJobs, getAppMock, pullImagesWithProgressMock } = await loadPullJobsModule();
+    const { pullJobs, getAppMock, pullImagesWithProgressMock } =
+      await loadPullJobsModule();
     getAppMock.mockResolvedValue(createMockApp());
 
     // The mock must RESOLVE on abort, not reject: docker-modem's followProgress

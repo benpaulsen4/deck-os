@@ -11,6 +11,7 @@ import {
   UrlOrEmptySchema,
   WebUrlOrEmptySchema,
 } from "../lib/schema.js";
+import { ComposeParserBusyError, validateComposeYaml } from "../lib/composeParser.js";
 import { AppNotFoundError, getErrorMessage } from "../lib/errors.js";
 
 export const appsRouter = router({
@@ -32,14 +33,14 @@ export const appsRouter = router({
     .input(z.object({ composeYaml: ComposeYamlSchema }))
     .mutation(async ({ input }) => {
       try {
-        const { parse } = await import("yaml");
-        const { ComposeFileSchema } = await import("../lib/schema.js");
-
-        const parsed = parse(input.composeYaml);
-        ComposeFileSchema.parse(parsed);
+        await validateComposeYaml(input.composeYaml);
 
         return { valid: true, message: "Compose YAML is valid" };
       } catch (error: unknown) {
+        // Being turned away says nothing about the file itself.
+        if (error instanceof ComposeParserBusyError) {
+          throw error;
+        }
         return {
           valid: false,
           message: getErrorMessage(error),
