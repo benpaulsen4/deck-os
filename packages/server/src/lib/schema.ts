@@ -1,5 +1,6 @@
 import { resolveAppUrl } from "@deckos/contracts";
 import { z } from "zod";
+import { ComposeFileSchema } from "./composeSchema.js";
 
 const AUTH_SESSION_DURATION_MIN_MS = 60 * 60 * 1000;
 const AUTH_SESSION_DURATION_MAX_MS = 7 * 24 * 60 * 60 * 1000;
@@ -47,10 +48,10 @@ const MAX_APP_IDS_PER_REQUEST = 500;
 // one issue for each, so a few MB of JSON could take over a GB of memory to reject.
 const AppIdListSchema = z.array(AppIdSchema).max(MAX_APP_IDS_PER_REQUEST);
 
-// Parsing YAML takes far more memory and time than holding it: 4 MiB of flow sequence
-// costs about 2 GB of memory and takes 8 seconds, while 500 KiB costs about
-// 270 MB and takes 1 second. The largest bundled template is under 9 KB, so real files
-// are nowhere near the limit.
+// Parsing YAML takes far more memory and time than holding it, so this sits well below
+// the request body limit: at this size a parse can still take about 250 MB of memory, or
+// over 10 seconds for a file of unique keys, which is why `composeParser.ts` runs it in a
+// worker. The largest bundled template is under 9 KB, so real files are nowhere near it.
 const MAX_COMPOSE_YAML_CHARS = 512 * 1024;
 const ComposeYamlSchema = z
   .string()
@@ -94,18 +95,6 @@ const AppMetadataSchema = z.object({
   order: z.number().int().default(0),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
-});
-
-const ComposeFileSchema = z.object({
-  version: z.string().optional(),
-  services: z.record(
-    z.string(),
-    z
-      .object({
-        image: z.string(),
-      })
-      .passthrough()
-  ),
 });
 
 const AppSchema = z.object({

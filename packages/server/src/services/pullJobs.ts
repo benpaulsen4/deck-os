@@ -1,5 +1,5 @@
 import * as crypto from "node:crypto";
-import { parse } from "yaml";
+import { readComposeImages } from "../lib/composeParser.js";
 import * as appsService from "./apps.js";
 import * as dockerService from "./docker.js";
 
@@ -76,21 +76,6 @@ function pruneJobs(now: number = Date.now()) {
   }
 }
 
-function getImagesFromCompose(composeYaml: string): string[] {
-  const parsed: unknown = parse(composeYaml);
-  if (!parsed || typeof parsed !== "object") return [];
-  const services = (parsed as Record<string, unknown>).services;
-  if (!services || typeof services !== "object") return [];
-  return Object.values(services as Record<string, unknown>)
-    .map((svc) => {
-      if (!svc || typeof svc !== "object") return "";
-      const image = (svc as Record<string, unknown>).image;
-      return typeof image === "string" ? image : "";
-    })
-    .map((s: string) => s.trim())
-    .filter(Boolean);
-}
-
 export function getPullJob(jobId: string): PullJobSnapshot | null {
   pruneJobs();
   const job = jobs.get(jobId);
@@ -115,21 +100,31 @@ export function subscribeToPullJob(jobId: string, listener: PullJobListener): ()
   };
 }
 
+function findRunningJob(appId: string): PullJobSnapshot | null {
+  const existingJobId = runningByAppId.get(appId);
+  if (!existingJobId) return null;
+  const existing = getPullJob(existingJobId);
+  if (existing && existing.status === "running") return existing;
+  runningByAppId.delete(appId);
+  return null;
+}
+
 export async function startPullJob(appId: string): Promise<PullJobSnapshot> {
   pruneJobs();
-  const existingJobId = runningByAppId.get(appId);
-  if (existingJobId) {
-    const existing = getPullJob(existingJobId);
-    if (existing && existing.status === "running") return existing;
-    runningByAppId.delete(appId);
-  }
+  const alreadyRunning = findRunningJob(appId);
+  if (alreadyRunning) return alreadyRunning;
 
   const app = await appsService.getApp(appId);
   if (!app) {
     throw new Error("App not found");
   }
 
-  const images = getImagesFromCompose(app.composeYaml);
+  const images = await readComposeImages(app.composeYaml);
+
+  // Another request for this app may have started a job during the waits above.
+  const startedMeanwhile = findRunningJob(appId);
+  if (startedMeanwhile) return startedMeanwhile;
+
   const controller = new AbortController();
   const jobId = crypto.randomUUID();
 

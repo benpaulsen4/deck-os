@@ -48,6 +48,8 @@ DeckOS caps how much a single request can make the server hold in memory, becaus
 - passcode and session requests can be up to 16 KiB
 - compose files can be up to 512 KiB, because parsing YAML uses far more memory than the file's own size
 
+Compose files are parsed away from the main server process, one at a time. A file that takes more than 5 seconds or 512 MiB to parse is refused, so an expensive file cannot make the panel unresponsive.
+
 File uploads are written to disk as they arrive, so they keep their own limits of 128 MiB per file and 512 MiB per upload.
 
 ## Release Verification
