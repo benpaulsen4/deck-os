@@ -435,7 +435,7 @@ describe("diskAnalysisClient", () => {
     expect(
       getEventMountIdentity({
         event: "branch",
-        jobId: "11111111-1111-1111-1111-111111111111",
+        jobId: "11111111-1111-4111-8111-111111111111",
         mount,
         branch: makeDirectory("/data/media/videos"),
       })
@@ -453,7 +453,7 @@ describe("diskAnalysisClient", () => {
     expect(
       getEventMountIdentity({
         event: "keepalive",
-        jobId: "11111111-1111-1111-1111-111111111111",
+        jobId: "11111111-1111-4111-8111-111111111111",
       })
     ).toBeNull();
   });

@@ -63,6 +63,7 @@ const AppMetadataSchema = z.object({
 const ComposeFileSchema = z.object({
   version: z.string().optional(),
   services: z.record(
+    z.string(),
     z
       .object({
         image: z.string(),
@@ -129,6 +130,7 @@ const DiskMetricsSchema = z.object({
 
 const NetworkMetricsSchema = z.object({
   interfaces: z.record(
+    z.string(),
     z.object({
       rx_bytes: z.number(),
       tx_bytes: z.number(),
@@ -185,7 +187,7 @@ const ContainerInfoSchema = z.object({
   state: ContainerStateSchema,
   status: z.string(),
   ports: z.array(ContainerPortSchema).optional(),
-  labels: z.record(z.string()).optional(),
+  labels: z.record(z.string(), z.string()).optional(),
   stats: ContainerStatsSchema,
 });
 

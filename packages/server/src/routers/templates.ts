@@ -37,8 +37,7 @@ export const templatesRouter = router({
           page: z.number().int().min(1).optional().default(1),
           pageSize: z.number().int().min(1).max(100).optional().default(24),
         })
-        .optional()
-        .default({})
+        .prefault({})
     )
     .query(async ({ input }) => {
       const result = await templatesService.listTemplates({
@@ -67,7 +66,7 @@ export const templatesRouter = router({
         description: z.string().optional().default(""),
         icon: OptionalUrlOrPathSchema,
         url: OptionalWebUrlSchema,
-        parameters: z.record(z.string()).optional().default({}),
+        parameters: z.record(z.string(), z.string()).optional().default({}),
         composeOverride: z.string().optional(),
       })
     )

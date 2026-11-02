@@ -24,9 +24,9 @@
     "fs-extra": "^11.4.0",
     "hono": "^4.13.8",
     "protobufjs": "8.7.2",
-    "systeminformation": "^5.33.1",
+    "systeminformation": "^5.33.19",
     "yaml": "^2.9.0",
-    "zod": "^3.25.76"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/busboy": "^1.5.4",
