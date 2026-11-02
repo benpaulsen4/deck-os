@@ -1,7 +1,7 @@
 {
   "id": "medusa",
   "title": "Medusa",
-  "description": "Automatic Video Library Manager for TV Shows. It watches for new episodes of your favorite shows, and when they are posted it does its magic.",
+  "description": "Automatic Video Library Manager for TV Shows. It watches for new episodes of your favorite shows, and when they are posted it does its magic. For hardlinked imports, give this app and your download client the same DATA path. In Medusa, use /data/media/tv as the library folder.",
   "categories": ["Media"],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
@@ -21,17 +21,11 @@
       "required": true
     },
     {
-      "key": "VOLUME_MEDUSA__DOWNLOADS",
-      "label": "MEDUSA /DOWNLOADS",
+      "key": "VOLUME_MEDUSA__DATA",
+      "label": "MEDUSA /DATA",
       "type": "path",
-      "defaultValue": "./Downloads/Television",
-      "required": true
-    },
-    {
-      "key": "VOLUME_MEDUSA__TV",
-      "label": "MEDUSA /TV",
-      "type": "path",
-      "defaultValue": "./Media/Television",
+      "defaultValue": "/srv/data",
+      "description": "Host folder mounted at /data. Use the same path for all your media apps and keep it on one filesystem, with downloads/ and media/ inside it. It must be writable by PUID/PGID.",
       "required": true
     }
   ]

@@ -29,8 +29,8 @@ services:
         source: "{{VOLUME_TRANSMISSION__CONFIG}}"
         target: /config
       - type: bind
-        source: "{{VOLUME_TRANSMISSION__DOWNLOADS}}"
-        target: /downloads
+        source: "{{VOLUME_TRANSMISSION__DATA}}"
+        target: /data
       - type: bind
         source: "{{VOLUME_TRANSMISSION__WATCH}}"
         target: /watch

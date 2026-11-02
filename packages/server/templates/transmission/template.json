@@ -1,7 +1,7 @@
 {
   "id": "transmission",
   "title": "Transmission",
-  "description": "Transmission is an open source, volunteer-based project. Unlike some BitTorrent clients, Transmission doesn't play games with its users to make money:  Transmission doesn't bundle toolbars, pop-up ads, flash ads, twitter tools, or anything else. It doesn't hold some features back for a payware version. Its source code is available for anyone to review. We don't track our users, and our website and forums have no third-party ads or analytics.",
+  "description": "Transmission is an open source, volunteer-based project. Unlike some BitTorrent clients, Transmission doesn't play games with its users to make money:  Transmission doesn't bundle toolbars, pop-up ads, flash ads, twitter tools, or anything else. It doesn't hold some features back for a payware version. Its source code is available for anyone to review. We don't track our users, and our website and forums have no third-party ads or analytics. For hardlinked imports, give this app and Sonarr/Radarr the same DATA path. In Transmission, set the download folder to /data/downloads.",
   "categories": ["Downloader"],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
@@ -35,10 +35,11 @@
       "required": true
     },
     {
-      "key": "VOLUME_TRANSMISSION__DOWNLOADS",
-      "label": "TRANSMISSION /DOWNLOADS",
+      "key": "VOLUME_TRANSMISSION__DATA",
+      "label": "TRANSMISSION /DATA",
       "type": "path",
-      "defaultValue": "./downloads",
+      "defaultValue": "/srv/data",
+      "description": "Host folder mounted at /data. Use the same path for all your media apps and keep it on one filesystem, with downloads/ and media/ inside it. It must be writable by PUID/PGID.",
       "required": true
     },
     {

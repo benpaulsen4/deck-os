@@ -23,5 +23,5 @@ services:
         source: "{{VOLUME_SABNZBD__CONFIG}}"
         target: /config
       - type: bind
-        source: "{{VOLUME_SABNZBD__DOWNLOADS}}"
-        target: /downloads
+        source: "{{VOLUME_SABNZBD__DATA}}"
+        target: /data

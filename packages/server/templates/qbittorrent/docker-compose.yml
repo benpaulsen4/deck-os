@@ -21,5 +21,5 @@ services:
         source: "{{VOLUME_QBITTORRENT__CONFIG}}"
         target: /config
       - type: bind
-        source: "{{VOLUME_QBITTORRENT__DOWNLOADS}}"
-        target: /downloads
+        source: "{{VOLUME_QBITTORRENT__DATA}}"
+        target: /data

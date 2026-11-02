@@ -1,7 +1,7 @@
 {
   "id": "bazarr",
   "title": "Bazarr",
-  "description": "Bazarr is a companion application to Sonarr and Radarr. It can manage and download subtitles based on your requirements. You define your preferences by TV show or movie and Bazarr takes care of everything for you.",
+  "description": "Bazarr is a companion application to Sonarr and Radarr. It can manage and download subtitles based on your requirements. You define your preferences by TV show or movie and Bazarr takes care of everything for you. Give this app the same DATA path as Sonarr and Radarr so their library paths match here without path mappings.",
   "categories": ["Media"],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
@@ -14,17 +14,11 @@
       "required": true
     },
     {
-      "key": "VOLUME_BAZARR__MOVIES",
-      "label": "BAZARR /MOVIES",
+      "key": "VOLUME_BAZARR__DATA",
+      "label": "BAZARR /DATA",
       "type": "path",
-      "defaultValue": "./movies",
-      "required": true
-    },
-    {
-      "key": "VOLUME_BAZARR__TV",
-      "label": "BAZARR /TV",
-      "type": "path",
-      "defaultValue": "./tv",
+      "defaultValue": "/srv/data",
+      "description": "Host folder mounted at /data. Use the same path for all your media apps and keep it on one filesystem, with downloads/ and media/ inside it. It must be writable by PUID/PGID.",
       "required": true
     },
     {

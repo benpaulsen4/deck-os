@@ -344,6 +344,7 @@ function ParameterField({
     key: string;
     label: string;
     type: string;
+    description?: string;
     required?: boolean;
     options?: string[];
   };
@@ -390,6 +391,7 @@ function ParameterField({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       inputMode={param.type === "port" || param.type === "number" ? "numeric" : undefined}
+      hint={param.description}
     />
   );
 }

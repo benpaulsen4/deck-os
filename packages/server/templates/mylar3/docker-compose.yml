@@ -20,8 +20,5 @@ services:
         source: "{{VOLUME_MYLAR3__CONFIG}}"
         target: /config
       - type: bind
-        source: "{{VOLUME_MYLAR3__COMICS}}"
-        target: /comics
-      - type: bind
-        source: "{{VOLUME_MYLAR3__DOWNLOADS}}"
-        target: /downloads
+        source: "{{VOLUME_MYLAR3__DATA}}"
+        target: /data

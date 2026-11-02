@@ -1,7 +1,7 @@
 {
   "id": "qbittorrent",
   "title": "qBittorrent",
-  "description": "The qBittorrent project aims to provide an open-source software alternative to µTorrent.",
+  "description": "The qBittorrent project aims to provide an open-source software alternative to µTorrent. For hardlinked imports, give this app and Sonarr/Radarr the same DATA path. In qBittorrent, set the default save path to /data/downloads.",
   "categories": ["Downloader"],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
@@ -42,10 +42,11 @@
       "required": true
     },
     {
-      "key": "VOLUME_QBITTORRENT__DOWNLOADS",
-      "label": "QBITTORRENT /DOWNLOADS",
+      "key": "VOLUME_QBITTORRENT__DATA",
+      "label": "QBITTORRENT /DATA",
       "type": "path",
-      "defaultValue": "./downloads",
+      "defaultValue": "/srv/data",
+      "description": "Host folder mounted at /data. Use the same path for all your media apps and keep it on one filesystem, with downloads/ and media/ inside it. It must be writable by PUID/PGID.",
       "required": true
     }
   ]

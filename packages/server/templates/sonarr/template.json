@@ -1,7 +1,7 @@
 {
   "id": "sonarr",
   "title": "Sonarr",
-  "description": "Sonarr is a PVR for Usenet and BitTorrent users. It can monitor multiple RSS feeds for new episodes of your favorite shows and will grab, sort and rename them. It can also be configured to automatically upgrade the quality of files already downloaded when a better quality format becomes available.",
+  "description": "Sonarr is a PVR for Usenet and BitTorrent users. It can monitor multiple RSS feeds for new episodes of your favorite shows and will grab, sort and rename them. It can also be configured to automatically upgrade the quality of files already downloaded when a better quality format becomes available. For hardlinked imports, give this app and your download client the same DATA path. In Sonarr, use /data/media/tv as the library folder.",
   "categories": ["Media"],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
@@ -42,17 +42,11 @@
       "required": true
     },
     {
-      "key": "VOLUME_SONARR__TV",
-      "label": "SONARR /TV",
+      "key": "VOLUME_SONARR__DATA",
+      "label": "SONARR /DATA",
       "type": "path",
-      "defaultValue": "./tv",
-      "required": true
-    },
-    {
-      "key": "VOLUME_SONARR__DOWNLOADS",
-      "label": "SONARR /DOWNLOADS",
-      "type": "path",
-      "defaultValue": "./downloads",
+      "defaultValue": "/srv/data",
+      "description": "Host folder mounted at /data. Use the same path for all your media apps and keep it on one filesystem, with downloads/ and media/ inside it. It must be writable by PUID/PGID.",
       "required": true
     }
   ]

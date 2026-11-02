@@ -1,6 +1,14 @@
 import fs from "fs-extra";
 import * as path from "node:path";
 import { parse, stringify } from "yaml";
+import {
+  applySharedDataDescription,
+  applySharedDataVolumes,
+  SHARED_DATA_APPS,
+  SHARED_DATA_DEFAULT_SOURCE,
+  SHARED_DATA_PARAMETER_DESCRIPTION,
+  SHARED_DATA_TARGET,
+} from "./shared-data-layout.js";
 
 type TemplateParameter = {
   key: string;
@@ -165,7 +173,10 @@ function extractCasaOSMetaFromCompose(composeYaml: string): {
   }
 }
 
-function convertCasaOSComposeToTemplate(composeYaml: string): {
+function convertCasaOSComposeToTemplate(
+  templateId: string,
+  composeYaml: string
+): {
   composeTemplate: string;
   parameters: TemplateParameter[];
   webUrlTemplate: string;
@@ -193,6 +204,23 @@ function convertCasaOSComposeToTemplate(composeYaml: string): {
     const label = p.label || key.replace(/_/g, " ");
     parameters.push({ ...p, key, label });
     return key;
+  };
+
+  const addVolumeParam = (serviceName: string, source: string, target: string) => {
+    const baseKey = `VOLUME_${serviceName}_${target}`
+      .toUpperCase()
+      .replace(/[^A-Z0-9_]/g, "_");
+    const isSharedData = templateId in SHARED_DATA_APPS && target === SHARED_DATA_TARGET;
+    return addParam({
+      key: baseKey,
+      label: `${serviceName} ${target}`.toUpperCase(),
+      type: "path",
+      defaultValue: isSharedData
+        ? SHARED_DATA_DEFAULT_SOURCE
+        : normalizeCasaOSVolumeSource(source, target),
+      ...(isSharedData ? { description: SHARED_DATA_PARAMETER_DESCRIPTION } : {}),
+      required: true,
+    });
   };
 
   const ensureStandardEnv = (key: "PUID" | "PGID" | "TZ", defaultValue: string) => {
@@ -295,26 +323,15 @@ function convertCasaOSComposeToTemplate(composeYaml: string): {
       }
     }
 
-    const volumes = svc["volumes"];
-    if (Array.isArray(volumes)) {
+    if (Array.isArray(svc["volumes"])) {
+      const volumes = applySharedDataVolumes(templateId, svc["volumes"]);
+      svc["volumes"] = volumes;
       for (let i = 0; i < volumes.length; i++) {
         const entry = volumes[i];
         if (typeof entry === "string") {
           const parts = entry.split(":");
           if (parts.length >= 2) {
-            const source = parts[0];
-            const target = parts[1];
-            const normalizedDefault = normalizeCasaOSVolumeSource(source, target);
-            const baseKey = `VOLUME_${serviceName}_${target}`
-              .toUpperCase()
-              .replace(/[^A-Z0-9_]/g, "_");
-            const key = addParam({
-              key: baseKey,
-              label: `${serviceName} ${target}`.toUpperCase(),
-              type: "path",
-              defaultValue: normalizedDefault,
-              required: true,
-            });
+            const key = addVolumeParam(serviceName, parts[0], parts[1]);
             parts[0] = `{{${key}}}`;
             volumes[i] = parts.join(":");
           }
@@ -323,18 +340,7 @@ function convertCasaOSComposeToTemplate(composeYaml: string): {
           const source = volObj.source;
           const target = volObj.target;
           if (typeof source === "string" && typeof target === "string") {
-            const normalizedDefault = normalizeCasaOSVolumeSource(source, target);
-            const baseKey = `VOLUME_${serviceName}_${target}`
-              .toUpperCase()
-              .replace(/[^A-Z0-9_]/g, "_");
-            const key = addParam({
-              key: baseKey,
-              label: `${serviceName} ${target}`.toUpperCase(),
-              type: "path",
-              defaultValue: normalizedDefault,
-              required: true,
-            });
-            volObj.source = `{{${key}}}`;
+            volObj.source = `{{${addVolumeParam(serviceName, source, target)}}}`;
           }
         }
       }
@@ -432,7 +438,7 @@ async function main() {
     const composeMeta = extractCasaOSMetaFromCompose(rawCompose);
     const converted = (() => {
       try {
-        return convertCasaOSComposeToTemplate(rawCompose);
+        return convertCasaOSComposeToTemplate(id, rawCompose);
       } catch {
         return null;
       }
@@ -457,6 +463,7 @@ async function main() {
     if (title === folderName && composeMeta.title) {
       title = composeMeta.title;
     }
+    description = applySharedDataDescription(id, description);
 
     const templateDir = path.join(outDir, id);
     const assetsDir = path.join(templateDir, "assets");

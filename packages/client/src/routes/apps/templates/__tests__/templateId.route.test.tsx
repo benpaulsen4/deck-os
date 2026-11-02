@@ -13,6 +13,7 @@ type TemplateFixture = {
     key: string;
     label: string;
     type: string;
+    description?: string;
     required?: boolean;
     options?: string[];
     defaultValue?: string;
@@ -158,6 +159,30 @@ describe("template detail route seeding", () => {
     ).toBe(false);
 
     consoleErrorSpy.mockRestore();
+  });
+
+  it("shows a parameter's description as a hint on its field", async () => {
+    state.template = {
+      id: "sonarr",
+      title: "Sonarr",
+      composeTemplate: "services:\n  app:\n    image: sonarr",
+      parameters: [
+        {
+          key: "VOLUME_SONARR__DATA",
+          label: "SONARR /DATA",
+          type: "path",
+          description: "Use the same path for all your media apps.",
+          defaultValue: "/srv/data",
+          required: true,
+        },
+      ],
+    };
+
+    renderWithAppRouter({ initialEntries: ["/apps/templates/sonarr"] });
+
+    expect(await screen.findByLabelText("SONARR /DATA *")).toHaveAccessibleDescription(
+      "Use the same path for all your media apps."
+    );
   });
 
   it("lets the app name be cleared and retyped", async () => {
