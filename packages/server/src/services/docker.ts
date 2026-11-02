@@ -165,6 +165,11 @@ export async function stopStack(appId: string): Promise<void> {
   await execFileAsync("docker", args, composeExecOptions());
 }
 
+/**
+ * Restarts the existing containers without re-reading the compose file, so edits
+ * such as new volumes do not take effect. Applying those takes `stopStack` then
+ * `startStack`, which recreates the containers.
+ */
 export async function restartStack(appId: string): Promise<void> {
   const projectName = getComposeProjectName(appId);
   const composePath = getComposePath(appId);

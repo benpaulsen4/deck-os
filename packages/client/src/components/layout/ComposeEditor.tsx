@@ -30,7 +30,7 @@ export function ComposeEditor({ app }: ComposeEditorProps) {
         composeYaml: editedComposeYaml,
       }),
     onSuccess: async () => {
-      addToast("Compose file updated", "success");
+      addToast("Compose file saved. Stop and start the app to apply it", "success");
       setComposeModified(false);
       setIsOpen(false);
       await queryClient.invalidateQueries({
@@ -87,7 +87,7 @@ export function ComposeEditor({ app }: ComposeEditorProps) {
           )}
           {composeModified && (
             <div className="app-detail-modifier-note">
-              Stack restart required to apply changes
+              Stop and start the app to apply changes. RESTART keeps the old configuration
             </div>
           )}
         </div>

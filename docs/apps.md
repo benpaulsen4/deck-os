@@ -41,7 +41,27 @@ The launch URL can use `{{DECKOS_HOST}}` in place of a hostname, for example `ht
 
 ## Editing Compose Files
 
-DeckOS lets you edit an app's compose file directly in the UI. Use this carefully, because the edit affects the real stack definition on disk and syntax problems can prevent the stack from starting. After a meaningful change, restart the app so Docker re-reads the compose file and applies the new configuration.
+DeckOS lets you edit an app's compose file directly in the UI. Use this carefully, because the edit affects the real stack definition on disk and syntax problems can prevent the stack from starting.
+
+Saving only writes the file. To apply the change, choose `Stop` and then `Start`, which removes the containers and creates them again from the saved file. `Restart` is not enough: it restarts the existing containers with their old configuration, so changes such as new volumes, ports, or environment variables are silently ignored. Data in bind mounts and named volumes is kept, but anything written only inside a container is lost when it is recreated.
+
+## Media Apps And Hardlinks
+
+Linux cannot hardlink across mount points, even between two folders on the same disk. If downloads and the media library are separate mounts, every import becomes a full copy and uses twice the space. The Sonarr, Radarr, Lidarr, Readarr, Medusa, SickChill, Mylar, LazyLibrarian, and Bazarr templates, and the qBittorrent, Transmission, Deluge, SABnzbd, and NZBGet templates, therefore mount a single host folder at `/data`:
+
+```text
+/srv/data
+├── downloads
+└── media
+    ├── movies
+    └── tv
+```
+
+1. Pick the host folder when you deploy, and use the same path for every media app. It defaults to `/srv/data`. A relative path such as `./data` would be private to each app, so the apps could not see each other's files.
+2. Keep the whole folder on one filesystem, and make it writable by the `PUID` and `PGID` you set. Hardlinks also fail if `downloads` and `media` are separate disks or mounts on the host.
+3. Point each app at its folder after the first start: the download client saves to `/data/downloads`, and the library apps use folders under `/data/media`, such as `/data/media/tv`.
+
+Apps you have already deployed keep the compose file they were created with, so they are not changed by this layout. To move one over, edit its compose file, stop and start it, and then update the paths inside the app itself. Files that were already imported as copies stay as copies.
 
 ## Deleting An App
 
