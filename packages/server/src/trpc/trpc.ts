@@ -1,7 +1,16 @@
 import { initTRPC, TRPCError } from "@trpc/server";
+import { ZodError } from "zod";
+import { formatZodError } from "../lib/errors.js";
 import type { Context } from "./context.js";
 
-const t = initTRPC.context<Context>().create();
+const t = initTRPC.context<Context>().create({
+  // Clients show `message` as it is, and a failed input's is its zod issue list as JSON.
+  errorFormatter({ shape, error }) {
+    return error.cause instanceof ZodError
+      ? { ...shape, message: formatZodError(error.cause) }
+      : shape;
+  },
+});
 
 export const router = t.router;
 export const middleware = t.middleware;

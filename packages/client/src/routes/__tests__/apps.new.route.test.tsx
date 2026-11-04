@@ -10,6 +10,9 @@ const { navigateSpy, startSpy } = vi.hoisted(() => ({
   navigateSpy: vi.fn(),
   startSpy: vi.fn(async () => ({})),
 }));
+const { validateSpy } = vi.hoisted(() => ({
+  validateSpy: vi.fn(),
+}));
 
 vi.mock("@tanstack/react-router", async () => {
   const actual = await vi.importActual("@tanstack/react-router");
@@ -29,7 +32,7 @@ vi.mock("../../trpc", () => ({
     apps: {
       create: { mutate: vi.fn(async () => ({ id: "app-new" })) },
       delete: { mutate: deleteSpy },
-      validateCompose: { mutate: vi.fn(async () => ({ valid: true })) },
+      validateCompose: { mutate: validateSpy },
     },
     docker: {
       start: { mutate: startSpy },
@@ -89,6 +92,7 @@ describe("apps new route", () => {
     addToastSpy.mockReset();
     navigateSpy.mockReset();
     startSpy.mockReset();
+    validateSpy.mockReset();
   });
 
   it("disables create when required fields missing", () => {
@@ -120,5 +124,58 @@ describe("apps new route", () => {
       })
     );
     expect(startSpy).toHaveBeenCalledWith({ appId: "app-new" });
+  });
+
+  describe("validate button", () => {
+    function clickValidate() {
+      const Component = getRouteComponent();
+      render(<Component />);
+      fireEvent.click(screen.getByRole("button", { name: "VALIDATE" }));
+    }
+
+    it("confirms a valid file", async () => {
+      validateSpy.mockResolvedValue({ valid: true, message: "Compose YAML is valid" });
+      clickValidate();
+      await waitFor(() =>
+        expect(addToastSpy).toHaveBeenCalledWith("Compose YAML is valid", "success")
+      );
+      expect(screen.queryByText("Compose YAML is valid")).not.toBeInTheDocument();
+    });
+
+    it("shows why a file was reported invalid", async () => {
+      validateSpy.mockResolvedValue({
+        valid: false,
+        message: "Compose YAML took too long to parse",
+      });
+      clickValidate();
+      expect(
+        await screen.findByText("Compose YAML took too long to parse")
+      ).toBeInTheDocument();
+      expect(addToastSpy).toHaveBeenCalledWith("Validation failed", "error");
+    });
+
+    it("shows why a file was refused outright", async () => {
+      validateSpy.mockRejectedValue(new Error("Compose YAML must be 512 KiB or smaller"));
+      clickValidate();
+      expect(
+        await screen.findByText("Compose YAML must be 512 KiB or smaller")
+      ).toBeInTheDocument();
+      expect(addToastSpy).toHaveBeenCalledWith("Validation failed", "error");
+    });
+
+    it("clears the previous error once the file is valid", async () => {
+      validateSpy.mockResolvedValueOnce({ valid: false, message: "Missing services" });
+      clickValidate();
+      await screen.findByText("Missing services");
+
+      validateSpy.mockResolvedValueOnce({
+        valid: true,
+        message: "Compose YAML is valid",
+      });
+      fireEvent.click(screen.getByRole("button", { name: "VALIDATE" }));
+      await waitFor(() =>
+        expect(screen.queryByText("Missing services")).not.toBeInTheDocument()
+      );
+    });
   });
 });
