@@ -73,10 +73,9 @@ type DiskAnalysisTreemapNodeInput = {
 
 const DiskAnalysisTreemapNodeSchema: z.ZodType<
   DiskAnalysisTreemapNode,
-  z.ZodTypeDef,
   DiskAnalysisTreemapNodeInput
 > = z.lazy(
-  (): z.ZodType<DiskAnalysisTreemapNode, z.ZodTypeDef, DiskAnalysisTreemapNodeInput> =>
+  (): z.ZodType<DiskAnalysisTreemapNode, DiskAnalysisTreemapNodeInput> =>
     z.object({
       path: AbsolutePathSchema,
       name: z.string().min(1).max(1024),

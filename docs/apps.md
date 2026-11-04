@@ -41,7 +41,7 @@ The launch URL can use `{{DECKOS_HOST}}` in place of a hostname, for example `ht
 
 ## Editing Compose Files
 
-DeckOS lets you edit an app's compose file directly in the UI. Use this carefully, because the edit affects the real stack definition on disk and syntax problems can prevent the stack from starting.
+DeckOS lets you edit an app's compose file directly in the UI. Use this carefully, because the edit affects the real stack definition on disk and syntax problems can prevent the stack from starting. Compose files saved through DeckOS can be up to 512 KiB.
 
 Saving only writes the file. To apply the change, choose `Stop` and then `Start`, which removes the containers and creates them again from the saved file. `Restart` is not enough: it restarts the existing containers with their old configuration, so changes such as new volumes, ports, or environment variables are silently ignored. Data in bind mounts and named volumes is kept, but anything written only inside a container is lost when it is recreated.
 
