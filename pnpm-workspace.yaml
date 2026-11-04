@@ -51,14 +51,22 @@ overrides:
   "dockerode>@grpc/grpc-js": "^1.14.5"
   "brace-expansion@>=3.0.0 <5.0.12": "^5.0.12"
   "flatted": "^3.4.2"
-  "follow-redirects": "^1.16.0"
-  "hono": "^4.13.8"
+  "follow-redirects": "^1.16.2"
+  # Crosses the major rimraf 6 asks for (^13); patched only in 14. rimraf
+  # imports just glob and globSync, and only with --glob, which no script here
+  # passes. Drop this once rimraf's own range allows 14.
+  "glob@>=9.0.0 <14.0.2": "^14.0.3"
+  "hono": "^4.13.16"
+  # Crosses the major eslint, typescript-estree and nodemon ask for (^10);
+  # patched only in 11. 11 removes the AST and makeRe exports, which none of
+  # them import. Drop this once their own ranges allow 11.
+  "minimatch@<11.0.1": "^11.0.4"
   "nanoid": ">=3.3.18"
   "postcss": ">=8.5.18"
   "shell-quote": ">=1.11.0"
-  "seroval": ">=1.6.3"
+  "seroval": ">=1.6.11"
   "source-map-js": ">=1.2.2"
-  "undici": "^7.29.1"
+  "undici": "^7.30.1"
   "dockerode>protobufjs": "^7.6.5"
   "@grpc/proto-loader>protobufjs": "^7.6.5"
 
@@ -71,3 +79,7 @@ auditConfig:
     # Only path is nodemon > chokidar@3 > braces, a dev-only watcher whose
     # patterns come from packages/server/nodemon.json, never from user input.
     - GHSA-vfj7-8cjw-p6xm
+
+minimumReleaseAgeExclude:
+  - '@hono/node-server@2.1.6'
+  - minimatch@11.0.4

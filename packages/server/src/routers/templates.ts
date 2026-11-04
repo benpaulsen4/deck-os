@@ -1,7 +1,12 @@
 import { router, protectedProcedure } from "../trpc/trpc.js";
 import { z } from "zod";
 import * as templatesService from "../services/templates.js";
-import { OptionalUrlOrPathSchema, OptionalWebUrlSchema } from "../lib/schema.js";
+import {
+  ComposeYamlSchema,
+  DeployParametersSchema,
+  OptionalUrlOrPathSchema,
+  OptionalWebUrlSchema,
+} from "../lib/schema.js";
 
 const TemplateParameterSchema = z.object({
   key: z.string().min(1),
@@ -37,8 +42,7 @@ export const templatesRouter = router({
           page: z.number().int().min(1).optional().default(1),
           pageSize: z.number().int().min(1).max(100).optional().default(24),
         })
-        .optional()
-        .default({})
+        .prefault({})
     )
     .query(async ({ input }) => {
       const result = await templatesService.listTemplates({
@@ -67,8 +71,8 @@ export const templatesRouter = router({
         description: z.string().optional().default(""),
         icon: OptionalUrlOrPathSchema,
         url: OptionalWebUrlSchema,
-        parameters: z.record(z.string()).optional().default({}),
-        composeOverride: z.string().optional(),
+        parameters: DeployParametersSchema.optional().default({}),
+        composeOverride: ComposeYamlSchema.optional(),
       })
     )
     .mutation(async ({ input }) => {

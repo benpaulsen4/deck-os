@@ -49,10 +49,10 @@ const {
   state,
 } = vi.hoisted(() => ({
   startScanSpy: vi.fn(async () => ({
-    jobId: "11111111-1111-1111-1111-111111111111",
+    jobId: "11111111-1111-4111-8111-111111111111",
     phase: "scanning",
     streamPath:
-      "/api/disk-analysis/jobs/11111111-1111-1111-1111-111111111111/events?mount=C%3A%5C&fs=ntfs",
+      "/api/disk-analysis/jobs/11111111-1111-4111-8111-111111111111/events?mount=C%3A%5C&fs=ntfs",
   })),
   cancelScanSpy: vi.fn(async () => ({ success: true })),
   addToastSpy: vi.fn(),
@@ -338,7 +338,7 @@ describe("disk analysis route", () => {
         staleAt: "2026-04-21T00:00:00.000Z",
       },
       activeJob: {
-        jobId: "11111111-1111-1111-1111-111111111111",
+        jobId: "11111111-1111-4111-8111-111111111111",
         mount: { mount: "C:\\", fs: "ntfs" },
         phase: "scanning",
         startedAt: "2026-04-27T00:00:00.000Z",
@@ -456,7 +456,7 @@ describe("disk analysis route", () => {
     });
     eventSource.dispatchMessage("branch", {
       event: "branch",
-      jobId: "11111111-1111-1111-1111-111111111111",
+      jobId: "11111111-1111-4111-8111-111111111111",
       mount: { mount: "C:\\", fs: "ntfs" },
       branch: makeDirectory("C:\\media\\videos", [makeFile("C:\\media\\videos\\clip.mp4", 512, "mp4")]),
     });
@@ -591,7 +591,7 @@ describe("disk analysis route", () => {
         state: "missing",
       },
       activeJob: {
-        jobId: "11111111-1111-1111-1111-111111111111",
+        jobId: "11111111-1111-4111-8111-111111111111",
         mount: { mount: "C:\\", fs: "ntfs" },
         phase: "scanning",
         startedAt: "2026-04-27T00:00:00.000Z",
@@ -976,10 +976,10 @@ describe("disk analysis route", () => {
     };
     state.snapshotEnvelope = null;
     startScanSpy.mockResolvedValueOnce({
-      jobId: "22222222-2222-2222-2222-222222222222",
+      jobId: "22222222-2222-4222-8222-222222222222",
       phase: "queued",
       streamPath:
-        "/api/disk-analysis/jobs/22222222-2222-2222-2222-222222222222/events?mount=C%3A%5C&fs=ntfs",
+        "/api/disk-analysis/jobs/22222222-2222-4222-8222-222222222222/events?mount=C%3A%5C&fs=ntfs",
     });
 
     renderWithAppRouter({ initialEntries: ["/disk-analysis?mount=C%3A%5C&fs=ntfs"] });
@@ -1029,7 +1029,7 @@ describe("disk analysis route", () => {
       },
     };
     state.snapshotEnvelope = null;
-    const newJobId = "44444444-4444-4444-4444-444444444444";
+    const newJobId = "44444444-4444-4444-8444-444444444444";
     startScanSpy.mockResolvedValueOnce({
       jobId: newJobId,
       phase: "queued",
@@ -1307,10 +1307,10 @@ describe("disk analysis route", () => {
     };
     state.snapshotEnvelope = null;
     startScanSpy.mockResolvedValueOnce({
-      jobId: "33333333-3333-3333-3333-333333333333",
+      jobId: "33333333-3333-4333-8333-333333333333",
       phase: "scanning",
       streamPath:
-        "/api/disk-analysis/jobs/33333333-3333-3333-3333-333333333333/events?mount=%2Fdata%2F%2Fmedia&fs=ext4",
+        "/api/disk-analysis/jobs/33333333-3333-4333-8333-333333333333/events?mount=%2Fdata%2F%2Fmedia&fs=ext4",
     });
 
     renderWithAppRouter({
@@ -1324,7 +1324,7 @@ describe("disk analysis route", () => {
     eventSource.dispatchOpen();
     eventSource.dispatchMessage("branch", {
       event: "branch",
-      jobId: "33333333-3333-3333-3333-333333333333",
+      jobId: "33333333-3333-4333-8333-333333333333",
       mount: serverMount,
       branch: makeDirectory("/data/media/videos", [
         makeFile("/data/media/videos/clip.mp4", 512, "mp4"),
@@ -1501,7 +1501,7 @@ describe("disk analysis route", () => {
     await waitFor(() =>
       expect(cancelScanSpy).toHaveBeenCalledWith({
         mount: { mount: "C:\\", fs: "ntfs" },
-        jobId: "11111111-1111-1111-1111-111111111111",
+        jobId: "11111111-1111-4111-8111-111111111111",
       })
     );
   });

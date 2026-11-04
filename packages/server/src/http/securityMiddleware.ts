@@ -1,4 +1,5 @@
 import type { Hono, MiddlewareHandler } from "hono";
+import { bodyLimit } from "hono/body-limit";
 
 /**
  * Methods that cannot change server state on their own. `Origin` is not checked
@@ -7,6 +8,15 @@ import type { Hono, MiddlewareHandler } from "hono";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 const ALLOWED_ORIGINS_ENV = "DECKOS_ALLOWED_ORIGINS";
+
+/**
+ * The largest legitimate tRPC body is a `files.writeText` save: 4 Mi UTF-16 units,
+ * which is 12 MiB of JSON when every one is a three-byte character, plus room for the
+ * path and for other calls batched alongside it.
+ */
+export const MAX_TRPC_BODY_BYTES = 16 * 1024 * 1024;
+/** Auth bodies hold a passcode and a duration, and these routes need no session. */
+export const MAX_AUTH_BODY_BYTES = 16 * 1024;
 
 function parseHostFromOrigin(origin: string): string | null {
   if (origin === "null") {
@@ -165,6 +175,20 @@ export function requireJsonBodyForTrpcWrites(): MiddlewareHandler {
 }
 
 /**
+ * Only routes that read their whole body into memory need this. `/api/files/upload`
+ * deliberately has no such limit: it streams to disk under its own per-file and total
+ * limits, and this middleware would hold a body of undeclared length in memory while
+ * counting it.
+ */
+export function limitRequestBody(maxBytes: number): MiddlewareHandler {
+  return bodyLimit({
+    maxSize: maxBytes,
+    onError: (c) =>
+      c.json({ error: `Request body too large. Maximum is ${maxBytes} bytes.` }, 413),
+  });
+}
+
+/**
  * Conservative response headers.
  *
  * The SPA is a Vite build that uses CodeMirror and inline styles, so no
@@ -213,4 +237,6 @@ export function registerSecurityMiddleware(app: Hono) {
   app.use("*", securityHeaders());
   app.use("*", crossOriginGuard());
   app.use("/api/trpc/*", requireJsonBodyForTrpcWrites());
+  app.use("/api/trpc/*", limitRequestBody(MAX_TRPC_BODY_BYTES));
+  app.use("/api/auth/*", limitRequestBody(MAX_AUTH_BODY_BYTES));
 }

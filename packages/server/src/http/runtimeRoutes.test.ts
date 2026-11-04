@@ -354,7 +354,7 @@ describe("runtimeRoutes", () => {
     diskAnalysisMock.getJobStreamInitialEvent.mockReturnValue({
       event: "status",
       job: {
-        jobId: "11111111-1111-1111-1111-111111111111",
+        jobId: "11111111-1111-4111-8111-111111111111",
         mount: { mount: "C:\\", fs: "ntfs" },
         phase: "scanning",
         startedAt: "2026-01-01T00:00:00.000Z",
@@ -377,7 +377,7 @@ describe("runtimeRoutes", () => {
     const app = createApp();
 
     const res = await app.request(
-      "http://localhost/api/disk-analysis/jobs/11111111-1111-1111-1111-111111111111/events?mount=C%3A%5C&fs=ntfs",
+      "http://localhost/api/disk-analysis/jobs/11111111-1111-4111-8111-111111111111/events?mount=C%3A%5C&fs=ntfs",
       {
         headers: {
           accept: "text/event-stream",
@@ -394,7 +394,7 @@ describe("runtimeRoutes", () => {
     expect(payload).toContain("event: status");
     expect(payload).toContain('"phase":"scanning"');
     expect(diskAnalysisMock.subscribeToJob).toHaveBeenCalledWith(
-      "11111111-1111-1111-1111-111111111111",
+      "11111111-1111-4111-8111-111111111111",
       expect.any(Function)
     );
     expect(diskAnalysisMock.subscribeToJob.mock.invocationCallOrder[0]).toBeLessThan(
@@ -406,7 +406,7 @@ describe("runtimeRoutes", () => {
     diskAnalysisMock.getJobStreamInitialEvent.mockReturnValue({
       event: "status",
       job: {
-        jobId: "11111111-1111-1111-1111-111111111111",
+        jobId: "11111111-1111-4111-8111-111111111111",
         mount: { mount: "C:\\", fs: "ntfs" },
         phase: "scanning",
         startedAt: "2026-01-01T00:00:00.000Z",
@@ -432,7 +432,7 @@ describe("runtimeRoutes", () => {
         listener({
           event: "status",
           job: {
-            jobId: "11111111-1111-1111-1111-111111111111",
+            jobId: "11111111-1111-4111-8111-111111111111",
             mount: { mount: "C:\\", fs: "ntfs" },
             phase: "completed",
             startedAt: "2026-01-01T00:00:00.000Z",
@@ -458,7 +458,7 @@ describe("runtimeRoutes", () => {
     const app = createApp();
 
     const res = await app.request(
-      "http://localhost/api/disk-analysis/jobs/11111111-1111-1111-1111-111111111111/events?mount=C%3A%5C&fs=ntfs",
+      "http://localhost/api/disk-analysis/jobs/11111111-1111-4111-8111-111111111111/events?mount=C%3A%5C&fs=ntfs",
       {
         headers: {
           accept: "text/event-stream",
@@ -480,7 +480,7 @@ describe("runtimeRoutes", () => {
     diskAnalysisMock.getJobStreamInitialEvent.mockReturnValue({
       event: "status",
       job: {
-        jobId: "11111111-1111-1111-1111-111111111111",
+        jobId: "11111111-1111-4111-8111-111111111111",
         mount: { mount: "C:\\", fs: "ntfs" },
         phase: "scanning",
         startedAt: "2026-01-01T00:00:00.000Z",
@@ -511,7 +511,7 @@ describe("runtimeRoutes", () => {
 
     const app = createApp();
     const res = await app.request(
-      "http://localhost/api/disk-analysis/jobs/11111111-1111-1111-1111-111111111111/events?mount=C%3A%5C&fs=ntfs",
+      "http://localhost/api/disk-analysis/jobs/11111111-1111-4111-8111-111111111111/events?mount=C%3A%5C&fs=ntfs",
       {
         headers: {
           accept: "text/event-stream",
@@ -534,7 +534,7 @@ describe("runtimeRoutes", () => {
     capturedListener?.({
       event: "status",
       job: {
-        jobId: "11111111-1111-1111-1111-111111111111",
+        jobId: "11111111-1111-4111-8111-111111111111",
         mount: { mount: "C:\\", fs: "ntfs" },
         phase: "completed",
         startedAt: "2026-01-01T00:00:00.000Z",
@@ -573,7 +573,7 @@ describe("runtimeRoutes", () => {
     diskAnalysisMock.getJobStreamInitialEvent.mockReturnValue({
       event: "status",
       job: {
-        jobId: "11111111-1111-1111-1111-111111111111",
+        jobId: "11111111-1111-4111-8111-111111111111",
         mount: { mount: "C:\\", fs: "ntfs" },
         phase: "scanning",
         startedAt: "2026-01-01T00:00:00.000Z",
@@ -602,7 +602,7 @@ describe("runtimeRoutes", () => {
         listener({
           event: "status",
           job: {
-            jobId: "11111111-1111-1111-1111-111111111111",
+            jobId: "11111111-1111-4111-8111-111111111111",
             mount: { mount: "C:\\", fs: "ntfs" },
             phase: "completed",
             startedAt: "2026-01-01T00:00:00.000Z",
@@ -627,7 +627,7 @@ describe("runtimeRoutes", () => {
     const app = createApp();
 
     const res = await app.request(
-      "http://localhost/api/disk-analysis/jobs/11111111-1111-1111-1111-111111111111/events?mount=C%3A%5C&fs=ntfs",
+      "http://localhost/api/disk-analysis/jobs/11111111-1111-4111-8111-111111111111/events?mount=C%3A%5C&fs=ntfs",
       {
         headers: {
           accept: "text/event-stream",
@@ -832,7 +832,7 @@ describe("runtimeRoutes session lock (AUTH-6)", () => {
     diskAnalysisMock.getJobStreamInitialEvent.mockReturnValue({
       event: "status",
       job: {
-        jobId: "11111111-1111-1111-1111-111111111111",
+        jobId: "11111111-1111-4111-8111-111111111111",
         mount: { mount: "C:\\", fs: "ntfs" },
         phase: "scanning",
         startedAt: "2026-01-01T00:00:00.000Z",
@@ -855,7 +855,7 @@ describe("runtimeRoutes session lock (AUTH-6)", () => {
 
     vi.useFakeTimers();
     const res = await app.request(
-      "http://localhost/api/disk-analysis/jobs/11111111-1111-1111-1111-111111111111/events?mount=C%3A%5C&fs=ntfs",
+      "http://localhost/api/disk-analysis/jobs/11111111-1111-4111-8111-111111111111/events?mount=C%3A%5C&fs=ntfs",
       {
         headers: { cookie, accept: "text/event-stream" },
       }

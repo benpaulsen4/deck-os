@@ -41,7 +41,7 @@ The launch URL can use `{{DECKOS_HOST}}` in place of a hostname, for example `ht
 
 ## Editing Compose Files
 
-DeckOS lets you edit an app's compose file directly in the UI. Use this carefully, because the edit affects the real stack definition on disk and syntax problems can prevent the stack from starting. After a meaningful change, restart the app so Docker re-reads the compose file and applies the new configuration.
+DeckOS lets you edit an app's compose file directly in the UI. Use this carefully, because the edit affects the real stack definition on disk and syntax problems can prevent the stack from starting. After a meaningful change, restart the app so Docker re-reads the compose file and applies the new configuration. Compose files saved through DeckOS can be up to 512 KiB.
 
 ## Deleting An App
 

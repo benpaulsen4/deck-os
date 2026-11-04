@@ -3,12 +3,15 @@ import { router, protectedProcedure } from "../trpc/trpc.js";
 import { z } from "zod";
 import * as appsService from "../services/apps.js";
 import {
+  AppIdListSchema,
   AppIdSchema,
+  ComposeYamlSchema,
   OptionalUrlOrPathSchema,
   OptionalWebUrlSchema,
   UrlOrEmptySchema,
   WebUrlOrEmptySchema,
 } from "../lib/schema.js";
+import { ComposeParserBusyError, validateComposeYaml } from "../lib/composeParser.js";
 import { AppNotFoundError, getErrorMessage } from "../lib/errors.js";
 
 export const appsRouter = router({
@@ -27,17 +30,17 @@ export const appsRouter = router({
     }),
 
   validateCompose: protectedProcedure
-    .input(z.object({ composeYaml: z.string() }))
+    .input(z.object({ composeYaml: ComposeYamlSchema }))
     .mutation(async ({ input }) => {
       try {
-        const { parse } = await import("yaml");
-        const { ComposeFileSchema } = await import("../lib/schema.js");
-
-        const parsed = parse(input.composeYaml);
-        ComposeFileSchema.parse(parsed);
+        await validateComposeYaml(input.composeYaml);
 
         return { valid: true, message: "Compose YAML is valid" };
       } catch (error: unknown) {
+        // Being turned away says nothing about the file itself.
+        if (error instanceof ComposeParserBusyError) {
+          throw error;
+        }
         return {
           valid: false,
           message: getErrorMessage(error),
@@ -52,7 +55,7 @@ export const appsRouter = router({
         description: z.string().optional().default(""),
         icon: OptionalUrlOrPathSchema,
         url: OptionalWebUrlSchema,
-        composeYaml: z.string().min(1),
+        composeYaml: ComposeYamlSchema.min(1),
       })
     )
     .mutation(async ({ input }) => {
@@ -93,7 +96,7 @@ export const appsRouter = router({
     .input(
       z.object({
         id: AppIdSchema,
-        composeYaml: z.string().min(1),
+        composeYaml: ComposeYamlSchema.min(1),
       })
     )
     .mutation(async ({ input }) => {
@@ -133,7 +136,7 @@ export const appsRouter = router({
     }),
 
   reorder: protectedProcedure
-    .input(z.object({ orderedIds: z.array(AppIdSchema) }))
+    .input(z.object({ orderedIds: AppIdListSchema }))
     .mutation(async ({ input }) => {
       await appsService.reorderApps(input.orderedIds);
       return { success: true };
