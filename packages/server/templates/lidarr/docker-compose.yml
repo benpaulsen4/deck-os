@@ -20,8 +20,5 @@ services:
         source: "{{VOLUME_LIDARR__CONFIG}}"
         target: /config
       - type: bind
-        source: "{{VOLUME_LIDARR__MUSIC}}"
-        target: /music
-      - type: bind
-        source: "{{VOLUME_LIDARR__DOWNLOADS}}"
-        target: /downloads
+        source: "{{VOLUME_LIDARR__DATA}}"
+        target: /data

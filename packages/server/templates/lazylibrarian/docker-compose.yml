@@ -18,11 +18,8 @@ services:
     restart: unless-stopped
     volumes:
       - type: bind
-        source: "{{VOLUME_LAZYLIBRARIAN__DOWNLOADS}}"
-        target: /downloads
-      - type: bind
-        source: "{{VOLUME_LAZYLIBRARIAN__BOOKS}}"
-        target: /books
+        source: "{{VOLUME_LAZYLIBRARIAN__DATA}}"
+        target: /data
       - type: bind
         source: "{{VOLUME_LAZYLIBRARIAN__CONFIG}}"
         target: /config

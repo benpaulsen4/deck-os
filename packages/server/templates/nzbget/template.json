@@ -1,7 +1,7 @@
 {
   "id": "nzbget",
   "title": "Nzbget",
-  "description": "NZBGet can run on almost any device - classic PC, NAS, media player, SAT-receiver, WLAN-router, etc. The download area provides precompiled binaries for Windows, macOS, Linux (compatible with many CPUs and platform variants), FreeBSD and Android. For other platforms the program can be compiled from sources.",
+  "description": "NZBGet can run on almost any device - classic PC, NAS, media player, SAT-receiver, WLAN-router, etc. The download area provides precompiled binaries for Windows, macOS, Linux (compatible with many CPUs and platform variants), FreeBSD and Android. For other platforms the program can be compiled from sources. For hardlinked imports, give this app and Sonarr/Radarr the same DATA path. In NZBGet, set MainDir to /data/downloads.",
   "categories": ["Downloader"],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
@@ -21,10 +21,11 @@
       "required": true
     },
     {
-      "key": "VOLUME_NZBGET__DOWNLOADS",
-      "label": "NZBGET /DOWNLOADS",
+      "key": "VOLUME_NZBGET__DATA",
+      "label": "NZBGET /DATA",
       "type": "path",
-      "defaultValue": "./downloads",
+      "defaultValue": "/srv/data",
+      "description": "Host folder mounted at /data. Use the same path for all your media apps and keep it on one filesystem, with downloads/ and media/ inside it. It must be writable by PUID/PGID.",
       "required": true
     }
   ]

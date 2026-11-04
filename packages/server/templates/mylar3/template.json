@@ -1,7 +1,7 @@
 {
   "id": "mylar3",
   "title": "Mylar3",
-  "description": "Mylar is an automated Comic Book (cbr/cbz) downloader program for use with NZB and torrents. Mylar allows you to create a watchlist of series that it monitors for various things (new issues, updated information, etc). It will grab, sort, and rename downloaded issues. It will also allow you to monitor weekly pull-lists for items belonging to said watchlisted series to download, as well as being able to monitor and maintain story-arcs.",
+  "description": "Mylar is an automated Comic Book (cbr/cbz) downloader program for use with NZB and torrents. Mylar allows you to create a watchlist of series that it monitors for various things (new issues, updated information, etc). It will grab, sort, and rename downloaded issues. It will also allow you to monitor weekly pull-lists for items belonging to said watchlisted series to download, as well as being able to monitor and maintain story-arcs. For hardlinked imports, give this app and your download client the same DATA path. In Mylar, use /data/media/comics as the library folder.",
   "categories": ["Downloader"],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
@@ -42,17 +42,11 @@
       "required": true
     },
     {
-      "key": "VOLUME_MYLAR3__COMICS",
-      "label": "MYLAR3 /COMICS",
+      "key": "VOLUME_MYLAR3__DATA",
+      "label": "MYLAR3 /DATA",
       "type": "path",
-      "defaultValue": "./comics",
-      "required": true
-    },
-    {
-      "key": "VOLUME_MYLAR3__DOWNLOADS",
-      "label": "MYLAR3 /DOWNLOADS",
-      "type": "path",
-      "defaultValue": "./downloads",
+      "defaultValue": "/srv/data",
+      "description": "Host folder mounted at /data. Use the same path for all your media apps and keep it on one filesystem, with downloads/ and media/ inside it. It must be writable by PUID/PGID.",
       "required": true
     }
   ]

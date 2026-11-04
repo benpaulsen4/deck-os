@@ -1,7 +1,7 @@
 {
   "id": "readarr",
   "title": "Readarr",
-  "description": "Readarr is a ebook collection manager for Usenet and BitTorrent users. It can monitor multiple RSS feeds for new books from your favorite authors and will interface with clients and indexers to grab, sort, and rename them.",
+  "description": "Readarr is a ebook collection manager for Usenet and BitTorrent users. It can monitor multiple RSS feeds for new books from your favorite authors and will interface with clients and indexers to grab, sort, and rename them. For hardlinked imports, give this app and your download client the same DATA path. In Readarr, use /data/media/books as the library folder.",
   "categories": ["Media"],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
@@ -42,17 +42,11 @@
       "required": true
     },
     {
-      "key": "VOLUME_READARR__BOOKS",
-      "label": "READARR /BOOKS",
+      "key": "VOLUME_READARR__DATA",
+      "label": "READARR /DATA",
       "type": "path",
-      "defaultValue": "./books",
-      "required": true
-    },
-    {
-      "key": "VOLUME_READARR__DOWNLOADS",
-      "label": "READARR /DOWNLOADS",
-      "type": "path",
-      "defaultValue": "./downloads",
+      "defaultValue": "/srv/data",
+      "description": "Host folder mounted at /data. Use the same path for all your media apps and keep it on one filesystem, with downloads/ and media/ inside it. It must be writable by PUID/PGID.",
       "required": true
     }
   ]

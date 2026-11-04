@@ -1,7 +1,7 @@
 {
   "id": "lidarr",
   "title": "Lidarr",
-  "description": "Lidarr is a music collection manager for Usenet and BitTorrent users. It can monitor multiple RSS feeds for new albums from your favorite artists and will interface with clients and indexers to grab, sort, and rename them. It can also be configured to automatically upgrade the quality of existing files in the library when a better quality format becomes available.",
+  "description": "Lidarr is a music collection manager for Usenet and BitTorrent users. It can monitor multiple RSS feeds for new albums from your favorite artists and will interface with clients and indexers to grab, sort, and rename them. It can also be configured to automatically upgrade the quality of existing files in the library when a better quality format becomes available. For hardlinked imports, give this app and your download client the same DATA path. In Lidarr, use /data/media/music as the library folder.",
   "categories": ["Downloader"],
   "icon": "assets/icon.png",
   "webUrlTemplate": "http://{{DECKOS_HOST}}:{{WEB_PORT}}",
@@ -21,17 +21,11 @@
       "required": true
     },
     {
-      "key": "VOLUME_LIDARR__MUSIC",
-      "label": "LIDARR /MUSIC",
+      "key": "VOLUME_LIDARR__DATA",
+      "label": "LIDARR /DATA",
       "type": "path",
-      "defaultValue": "./music",
-      "required": true
-    },
-    {
-      "key": "VOLUME_LIDARR__DOWNLOADS",
-      "label": "LIDARR /DOWNLOADS",
-      "type": "path",
-      "defaultValue": "./downloads",
+      "defaultValue": "/srv/data",
+      "description": "Host folder mounted at /data. Use the same path for all your media apps and keep it on one filesystem, with downloads/ and media/ inside it. It must be writable by PUID/PGID.",
       "required": true
     }
   ]

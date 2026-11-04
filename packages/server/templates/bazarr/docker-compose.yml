@@ -17,11 +17,8 @@ services:
     restart: unless-stopped
     volumes:
       - type: bind
-        source: "{{VOLUME_BAZARR__MOVIES}}"
-        target: /movies
-      - type: bind
-        source: "{{VOLUME_BAZARR__TV}}"
-        target: /tv
+        source: "{{VOLUME_BAZARR__DATA}}"
+        target: /data
       - type: bind
         source: "{{VOLUME_BAZARR__CONFIG}}"
         target: /config

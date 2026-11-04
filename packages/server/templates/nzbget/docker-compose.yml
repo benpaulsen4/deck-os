@@ -22,5 +22,5 @@ services:
         source: "{{VOLUME_NZBGET__CONFIG}}"
         target: /config
       - type: bind
-        source: "{{VOLUME_NZBGET__DOWNLOADS}}"
-        target: /downloads
+        source: "{{VOLUME_NZBGET__DATA}}"
+        target: /data

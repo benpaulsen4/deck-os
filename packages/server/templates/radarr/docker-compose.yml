@@ -20,8 +20,5 @@ services:
         source: "{{VOLUME_RADARR__CONFIG}}"
         target: /config
       - type: bind
-        source: "{{VOLUME_RADARR__MOVIES}}"
-        target: /movies
-      - type: bind
-        source: "{{VOLUME_RADARR__DOWNLOADS}}"
-        target: /downloads
+        source: "{{VOLUME_RADARR__DATA}}"
+        target: /data

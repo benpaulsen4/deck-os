@@ -28,4 +28,4 @@ services:
         target: /config
       - type: bind
         source: "{{VOLUME_DELUGE__DATA}}"
-        target: /DATA
+        target: /data

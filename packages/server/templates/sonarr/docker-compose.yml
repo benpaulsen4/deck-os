@@ -20,8 +20,5 @@ services:
         source: "{{VOLUME_SONARR__CONFIG}}"
         target: /config
       - type: bind
-        source: "{{VOLUME_SONARR__TV}}"
-        target: /tv
-      - type: bind
-        source: "{{VOLUME_SONARR__DOWNLOADS}}"
-        target: /downloads
+        source: "{{VOLUME_SONARR__DATA}}"
+        target: /data
